@@ -11,6 +11,8 @@ dependencies = [
 
 [project.scripts]
 talos-servo = "talos_servo.cli:main"
+# Needs rclpy, which only the pixi `ros` environment provides
+talos-servo-ros = "talos_servo.ros.servo_bridge_node:main"
 
 [project.optional-dependencies]
 web = [
