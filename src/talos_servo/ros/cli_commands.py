@@ -11,8 +11,8 @@ import time
 from collections.abc import Callable, Sequence
 
 from talos_servo.bus import ServoError
+from talos_servo.controller import SOURCE_CLI, WHEEL
 from talos_servo.ros.web_backend import RosBackend
-from talos_servo.web.controller import SOURCE_CLI, WHEEL
 
 Output = Callable[[str], None]
 # How long stop commands are re-sent before the node goes away. If they are all lost anyway, the

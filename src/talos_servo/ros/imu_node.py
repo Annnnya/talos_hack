@@ -27,7 +27,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Imu, Temperature
 
-from talos_servo.cli import IMU_BUS_ENV_VAR, parse_int_any_base
+from talos_servo.defaults import IMU_BUS_ENV_VAR
 from talos_servo.imu import (
     ACCEL_RANGES,
     DEFAULT_ACCEL_RANGE,
@@ -42,6 +42,7 @@ from talos_servo.imu import (
     Mpu6050,
     Vector,
 )
+from talos_servo.parsing import parse_int_any_base
 from talos_servo.ros.imu_convert import (
     DEFAULT_ANGULAR_VELOCITY_VARIANCE,
     DEFAULT_LINEAR_ACCELERATION_VARIANCE,

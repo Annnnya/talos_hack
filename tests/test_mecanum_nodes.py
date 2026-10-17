@@ -110,7 +110,7 @@ def test_keyboard_teleop_exits_cleanly_and_restores_terminal_on_sigint(tmp_path:
     master, slave = os.openpty()
     try:
         original = termios.tcgetattr(slave)
-        proc = start_node("keyboard_teleop", tmp_path, stdin=slave)
+        proc = start_node("keyboard_teleop_node", tmp_path, stdin=slave)
         code, output = interrupt(proc, TELEOP_READY)
         assert_clean(code, output)
         assert termios.tcgetattr(slave) == original, "teleop left the terminal in cbreak mode"

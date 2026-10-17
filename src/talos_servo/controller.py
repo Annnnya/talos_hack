@@ -1,4 +1,4 @@
-"""Thread-safe robot state on top of one ServoBus, driven by the web server."""
+"""Thread-safe robot state on one ServoBus, shared by the web server and the ROS bridge."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from talos_servo.bus import (
     ServoBus,
     ServoError,
 )
-from talos_servo.web.config import ServoConfig, WebConfig
+from talos_servo.config import RobotConfig, ServoConfig
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class RobotController:
     def __init__(
         self,
         bus: ServoBus,
-        config: WebConfig,
+        config: RobotConfig,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:

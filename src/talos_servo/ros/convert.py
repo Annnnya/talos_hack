@@ -10,8 +10,8 @@ import re
 from collections.abc import Iterable
 
 from talos_servo.bus import MAX_POSITION
-from talos_servo.web.config import ServoConfig
-from talos_servo.web.controller import SOURCE_BRIDGE, SOURCE_ROS, SOURCES
+from talos_servo.config import ServoConfig
+from talos_servo.controller import SOURCE_BRIDGE, SOURCE_ROS, SOURCES
 
 STEPS_PER_TURN = MAX_POSITION + 1
 # Step 2048 (half a turn) is joint angle 0, so the usable range is about -pi..pi.
