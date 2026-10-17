@@ -1,557 +1,257 @@
 # talos_hack
 
-Software and tests for the Talos robot from the physical AI hackathon. The robot uses Feetech
-STS/SMS serial bus servos daisy-chained on one bus.
+Software for the Talos robot from the physical AI hackathon: a mecanum base
+driven by Feetech STS/SMS serial bus servos on one bus, plus an MPU6050 IMU.
 
-Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything goes through PRs.
+Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything
+goes through PRs.
 
 ## Architecture
 
-Three small diagrams, each answering one question. Shapes mean the same thing in all of them:
-cylinder = hardware, rounded box = a program you start, rectangle = library code,
-slanted box = ROS 2 topic.
-
-### What runs where?
-
-```mermaid
-flowchart LR
-  accTitle: What runs where
-  accDescr: The servo bus connects over USB serial to exactly one program at a time. With --ros the web server and the CLI spin and monitor commands go through servo_bridge instead of the port
-  servos[("Servo bus<br/>STS3215 servos")] ==>|USB serial| port{{"Serial port<br/>one owner at a time"}}
-  port --> cli(["talos-servo CLI"])
-  port --> web(["talos-servo web"])
-  port --> bridge(["servo_bridge node"])
-  port --> drive(["drive_node"])
-  imu[("MPU6050 IMU")] -->|I2C| cli
-  imu -->|I2C| imunode(["imu node"])
-  imunode --> ros
-  web <-->|WebSocket| browser["Browser UI"]
-  bridge <--> ros(("ROS 2"))
-  drive <--> ros
-  web <-.->|"--ros mode"| ros
-  cli <-.->|"spin, monitor --ros"| ros
-```
-
-The four servo programs can open the servo port themselves, so run only one of them at a time.
-The exception is `--ros` (on `talos-servo web`, `spin` and `monitor`): it leaves the port to
-`servo_bridge` and sends commands over ROS 2, so the browser UI, the CLI and your ROS nodes can
-drive the robot together (see [Web UI over ROS 2](#web-ui-over-ros-2)). The boot services in
-`deploy/` start it this way. The imu node only uses I2C and can run alongside any of them.
-
-| Program | Start it with | Use it for | Details |
-|---|---|---|---|
-| `talos-servo` CLI | `uv run talos-servo ...` | ping, spin, set IDs, read the IMU | [Usage](#usage) |
-| `talos-servo web` | `uv run talos-servo web`, or `pixi run -e ros web-ros` next to `servo_bridge` | control servos from a browser | [Web UI](#web-ui) |
-| `servo_bridge` node | `pixi run -e ros servo-node` | any servo from ROS 2, one joint per servo | [ROS 2](#ros-2) |
-| `drive_node` | `pixi run drive` | the four mecanum wheels from `/cmd_vel` | [Mecanum base](#ros-2-jazzy-mecanum-base) |
-| `imu` node | `pixi run -e ros imu-node` | IMU accel and gyro on `/imu/data_raw` | [IMU on ROS 2](#imu-on-ros-2) |
-
-### Which code does each program use?
+**One rule: one `Robot` owns the servo bus, one node owns the `Robot`.**
 
 ```mermaid
 flowchart TB
-  accTitle: Code layers
-  accDescr: Programs use logic modules, which talk to the servos through ServoBus. In --ros mode the web server uses RosBackend, which talks to servo_bridge instead
-  subgraph programs["Programs"]
-    cli(["CLI"])
-    web(["web"])
-    bridge(["servo_bridge"])
-    drive(["drive_node"])
-  end
-  subgraph logic["Logic - src/talos_servo/"]
-    ctrl["RobotController"]
-    rosweb["RosBackend"]
-    ros["ROS helpers"]
-    kin["mecanum"]
-  end
-  bus["ServoBus"]
-  sdk["Feetech SDK<br/>or simulator"]
-  web --> ctrl
-  web -.->|"--ros"| rosweb
-  rosweb --> ros
-  bridge --> ctrl
-  bridge --> ros
-  drive --> ros
-  drive --> kin
-  cli --> bus
-  ctrl --> bus
-  drive --> bus
-  bus --> sdk
+    subgraph EDGE["Layer 1: ROS edge (no logic, no hardware)"]
+        CLI["talos-servo CLI<br/>drive · spin · monitor · ping · web"]
+        UI["Web UI"]
+        NODE["robot_node<br/>/cmd_vel · /odom · /robot/*"]
+        IMUN["imu_node<br/>/imu/data_raw -> EKF"]
+    end
+    subgraph CORE["Layer 2: Robot core (pure Python, no ROS)"]
+        ROBOT["Robot<br/>robot.yaml<br/>move · spin · drive · stop"]
+        KIN["mecanum.py<br/>wheel_speeds() · body_velocity()"]
+        BUS["ServoBus<br/>Feetech SDK"]
+        IMUD["imu.py<br/>Mpu6050"]
+    end
+    subgraph HW["Hardware"]
+        WHEELS[("4 mecanum wheels<br/>ids 1-4")]
+        BEND[("bend<br/>id 5, disabled")]
+        MPU[("MPU6050 IMU")]
+    end
+
+    CLI & UI --> NODE
+    NODE --> ROBOT
+    ROBOT --> KIN
+    ROBOT --> BUS
+    IMUN --> IMUD
+    BUS --> WHEELS
+    BUS -. "enabled: false" .-> BEND
+    IMUD --> MPU
+    style BEND stroke-dasharray: 5 5
 ```
 
-| Box | File | Job |
-|---|---|---|
-| RobotController | `controller.py`, `config.py` | shared servo state, polling, command limits from `config/robot.yaml` |
-| RosBackend | `ros/web_backend.py`, `ros/web_client_node.py` | same commands as RobotController, sent to `servo_bridge` over topics and services (`web --ros`) |
-| ROS helpers | `ros/convert.py`, `ros/readouts.py` | steps to radians, wheel odometry, per joint readout topics |
-| mecanum | `mecanum.py` | body velocity to four wheel speeds |
-| ServoBus | `bus.py` | every servo read and write; checks each SDK result and stops spinning servos on close |
-| Feetech SDK or simulator | `scservo_sdk`, `sim.py` | the real serial protocol, or fake servos for `--mock` |
+| Layer | Job | Rule |
+| --- | --- | --- |
+| 1. ROS edge | Messages and keys to method calls | No logic, no hardware |
+| 2. Robot core | All logic and hardware access | No ROS, tested with fakes |
 
-### How does data flow through ROS 2?
+Without ROS, the CLI and the web server build the `Robot` themselves on the
+serial port. Then nothing else can use the servos.
 
-The mecanum base, driven from the keyboard:
+| Path | What it is |
+| --- | --- |
+| `src/talos_servo/robot.py` | `Robot`: limits, direction, watchdog, stop |
+| `src/talos_servo/config.py` | Reads `config/robot.yaml` |
+| `src/talos_servo/mecanum.py` | Mecanum kinematics, pure functions |
+| `src/talos_servo/bus.py` | `ServoBus`: safe wrapper around the SDK |
+| `src/talos_servo/cli.py` | The `talos-servo` command |
+| `src/talos_servo/teleop.py` | Keyboard driving for `talos-servo drive` |
+| `src/talos_servo/ros/` | `robot_node`, `imu_node`, the ROS client |
+| `src/talos_servo/web/` | FastAPI server for the web UI |
+| `web/` | Next.js UI, built into `web/out` |
+| `deploy/` | systemd units for the Pi |
+
+### ROS graph
 
 ```mermaid
 flowchart LR
-  accTitle: drive_node topics
-  accDescr: keyboard_teleop sends velocity and enable commands to drive_node, which publishes wheel readouts
-  teleop(["keyboard_teleop"]) --> cmd[/"/cmd_vel<br/>/base/enable, /base/stop"/]
-  cmd --> drive(["drive_node"])
-  drive --> js[/"/joint_states"/]
-  drive --> diag[/"/diagnostics"/]
-  drive --> num[/"/base/#lt;wheel#gt;/temperature,<br/>voltage, current, load, moving"/]
+    BROWSER["Browser"] <-- "WebSocket /ws" --> WEB["talos-servo web --ros"]
+    CLI["talos-servo ... --ros"]
+    subgraph pi["Raspberry Pi (ROS 2 Jazzy)"]
+        NODE["robot_node<br/>owns the servo port"]
+        IMUN["imu_node"]
+        FILT["imu_filter_madgwick"]
+        EKF["robot_localization<br/>ekf_node"]
+    end
+    SERVOS[("Servos")]
+    MPU[("MPU6050")]
+
+    WEB -- "/robot/position_cmd · velocity_cmd · services" --> NODE
+    CLI -- "/cmd_vel · /robot/velocity_cmd" --> NODE
+    NODE -- "/joint_states · /diagnostics" --> WEB
+    NODE <--> SERVOS
+    NODE -- "/odom" --> EKF
+    IMUN <--> MPU
+    IMUN -- "/imu/data_raw" --> FILT
+    IMUN -- "/imu/data_raw" --> EKF
+    EKF --> OUT["/odometry/filtered<br/>tf odom -> base_link"]
 ```
 
-Any servo, driven by your own node:
+### On the Pi
 
 ```mermaid
-flowchart LR
-  accTitle: servo_bridge topics
-  accDescr: your node or the web server in --ros mode sends position or velocity commands to servo_bridge, which publishes joint readouts
-  you(["your node or<br/>talos-servo web --ros"]) --> cmd[/"position_cmd<br/>velocity_cmd"/]
-  cmd --> bridge(["servo_bridge"])
-  bridge --> js[/"joint_states"/]
-  bridge --> status[/"status"/]
-  bridge --> num[/"#lt;joint#gt;/temperature,<br/>voltage, current, load, moving"/]
+flowchart TB
+    S1["talos-robot.service<br/>pixi run -e ros robot-node"]
+    S2["talos-web.service<br/>pixi run -e ros web-ros"]
+    S2 -- "Requires / PartOf" --> S1
+    S1 -- "opens TALOS_SERVO_PORT" --> PORT[("/dev/serial/by-id/...")]
+    S2 -- "ROS topics + services" --> S1
+    S2 -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
-The IMU, with orientation from the Madgwick filter and a pose estimate from the EKF:
+## Quick start
 
-```mermaid
-flowchart LR
-  accTitle: imu topics
-  accDescr: the imu node publishes raw accel and gyro, imu_filter_madgwick turns them into orientation
-  imunode(["imu node"]) --> raw[/"/imu/data_raw"/]
-  imunode --> temp[/"/imu/temperature"/]
-  raw --> madgwick(["imu_filter_madgwick"])
-  madgwick --> data[/"/imu/data<br/>with orientation"/]
-  raw --> ekf(["ekf"])
-  odom[/"/odom<br/>wheel odometry, not yet"/] -.-> ekf
-  ekf --> filtered[/"/odometry/filtered<br/>odom -> base_link"/]
-```
-
-`servo_bridge` topics live under `/servo_bridge/`. Both nodes stop the wheels when commands stop
-arriving. The full topic and service tables are in [ROS 2](#ros-2) and
-[ROS 2 Jazzy mecanum base](#ros-2-jazzy-mecanum-base).
-
-## Setup
-
-Use either [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh). Both install the
-official Feetech SDK (`ftservo-python-sdk`, imported as `scservo_sdk`) and the `talos-servo`
-command from the same `pyproject.toml`.
+Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
+`pyproject.toml`. ROS 2 Jazzy comes only through pixi (`ros` environment).
 
 ```
-uv sync          # pure Python, creates .venv
-pixi install     # conda based, creates .pixi/
+uv sync                  # or: pixi install
+pixi install -e ros      # ROS 2, for the robot node, IMU node and EKF
 ```
 
-pixi also provides ROS 2 Jazzy (from the RoboStack `robostack-jazzy` channel, Python 3.12) in a
-separate `ros` environment: `pixi install -e ros`. uv cannot install ROS, so ROS work needs pixi.
-See [ROS 2](#ros-2).
-
-The examples below use `uv run`. With pixi, use `pixi run` instead (or open `pixi shell`).
-
-When you change dependencies in `pyproject.toml`, refresh both lockfiles: `uv lock` and
-`pixi install`. Conda-only packages (ROS) go in `pixi.toml` with `pixi add`.
-
-## Usage
-
-Find your adapter's port:
+Find the servo adapter and set it once per shell (or pass `--port`):
 
 ```
 uv run talos-servo ports
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_...  # bash
+$env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 ```
 
-Pass it with `--port` or set it once per shell:
-
-```
-# PowerShell
-$env:TALOS_SERVO_PORT = "COM5"
-# bash
-export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
-```
+## Commands
 
 | Command | What it does |
-|---|---|
-| `talos-servo ping --ids 1-3` | Check which servos answer and print their model number |
-| `talos-servo spin --ids 1,2,3 --speed 100 --seconds 3` | Wheel mode + torque on, spin, then stop |
-| `talos-servo monitor --ids 1` | Print position and speed every second until Ctrl+C |
-| `talos-servo monitor --ids 1 --speed 500` | Same, while spinning (stops on exit) |
-| `talos-servo set-id --id 1 --new-id 3` | Permanently change a servo's ID (refuses if 3 is taken) |
+| --- | --- |
+| `talos-servo ping --ids 1-5` | Which servos answer, with their model number |
+| `talos-servo spin --ids 1 --speed 100` | Spin for 1 s, then stop |
+| `talos-servo monitor --ids 1` | Print position and speed until Ctrl+C |
+| `talos-servo set-id --id 1 --new-id 3` | Change a servo id (EEPROM) |
+| `talos-servo drive` | Drive with the keyboard: W/S, A/D, Q/E, X |
+| `talos-servo web` | Browser UI on port 8000 |
+| `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
+| `pixi run -e ros robot-node` | The robot node, the only program on the port |
+| `pixi run -e ros drive` | `talos-servo drive --ros` |
+| `pixi run -e ros web-ros` | `talos-servo web --ros` |
+| `pixi run -e ros imu-node` | IMU as ROS topics |
+| `pixi run -e ros ekf` | Pose estimate from wheels and gyro |
 
-New servos ship with ID 1. To build a daisy chain, connect them one at a time and give each a
-unique ID with `set-id` before chaining them.
+- `--ros` (on `spin`, `monitor`, `drive`, `web`) goes through the running robot
+  node instead of the port, so these can run next to each other.
+- `ping`, `spin`, `monitor` and `set-id` without `--ros` are bench tools: they
+  take servo ids and work without a config.
+- Every command stops what it started on exit, including Ctrl+C.
+- New servos ship with id 1. Connect them one at a time and give each its own
+  id with `set-id` before chaining them.
 
-Common options: `--baud` (default 1000000), `--acc` (acceleration, default 20), `-v` for debug logs.
-Negative `--speed` spins the other way. Servos are always stopped on exit, including Ctrl+C and
-errors.
+## Config: `config/robot.yaml`
 
-### Next to the web UI or ROS
+Every joint is set here and nowhere else. Changes take effect on restart.
 
-While `servo_bridge` (and the web UI with `--ros`) runs, do not run plain CLI commands: on Linux
-the port is not locked, so two programs would talk on the bus at once and garble each other's
-packets. Add `--ros` to `spin` and `monitor` instead. They then go through the bridge, and the web
-UI shows what they do:
-
-```
-pixi run -e ros servo-node                                         # owns the port
-pixi run -e ros web-ros                                            # browser UI through the bridge
-pixi run -e ros talos-servo spin --ros --ids 2 --speed 300 --seconds 3
-pixi run -e ros talos-servo monitor --ros --ids 1,2
-```
-
-With `--ros` the servos must be listed in `config/robot.yaml` (`--config` picks another file),
-speeds are capped by its `max_speed`, and `--acc` is ignored. Each command stops only the servos it
-started. `ping` and `set-id` have no `--ros` mode: stop the bridge first.
-
-The old scripts map to commands like this:
-
-| Old script | Command |
-|---|---|
-| `tests/test_servo.py` | `talos-servo ping` |
-| `tests/rotate_servo.py` | `talos-servo spin` |
-| `tests/test_daisy_chain.py` | `talos-servo spin --ids 1-3 --speed 300 --seconds 60` |
-| `tests/test_servo2.py` | `talos-servo monitor --ids 3 --speed 500 --acc 10` |
-| `tests/change_ids.py` | `talos-servo set-id --id 1 --new-id 3` |
-
-## IMU (MPU6050)
-
-The MPU6050 accelerometer and gyro connects to the Raspberry Pi over I2C, separately from the
-servo bus.
-
-| MPU6050 | Pi header |
-|---|---|
-| VCC | pin 1 (3.3 V) |
-| GND | pin 6 (GND) |
-| SDA | pin 3 (GPIO2) |
-| SCL | pin 5 (GPIO3) |
-| AD0 | GND for address 0x68 (or 3.3 V for 0x69) |
-
-Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
-`sudo raspi-config` (Interface Options, I2C), reboot, and check that `i2cdetect -y 1` shows `68`.
-
-```
-uv sync --extra imu                                # pixi install already includes it
-uv run talos-servo imu --calibrate                 # zero the gyro, then stream until Ctrl+C
-uv run talos-servo imu --seconds 5 --interval 0.05
+```yaml
+max_speed: 1000          # steps/s cap for every joint, low on purpose
+command_timeout_s: 0.5   # ROS speed commands stop if not repeated
+joints:
+  front_left_wheel:  { id: 1, control: speed,    inverted: false }
+  front_right_wheel: { id: 2, control: speed,    inverted: false }
+  rear_left_wheel:   { id: 3, control: speed,    inverted: false }
+  rear_right_wheel:  { id: 4, control: speed,    inverted: false }
+  bend:              { id: 5, control: position, inverted: false,
+                       enabled: false, min_pos: 0, max_pos: 4095 }
+base:
+  wheels: [front_left_wheel, front_right_wheel, rear_left_wheel,
+           rear_right_wheel]
+  wheelbase_m: 0.3
+  track_width_m: 0.3
+  steps_per_meter: 1000.0
+  max_linear_speed: 0.1    # m/s
+  max_angular_speed: 0.5   # rad/s
 ```
 
-Flat and still, it should read about `0 0 +1.00` g and near-zero gyro. Options: `--i2c-bus`
-(default 1, or `$TALOS_IMU_BUS`), `--address` (default 0x68), `--accel-range` (2/4/8/16 g),
-`--gyro-range` (250/500/1000/2000 deg/s).
+| Key | Values | What it does |
+| --- | --- | --- |
+| `control` | `speed` / `position` | Fixed at startup; spin needs speed |
+| `inverted` | `false` / `true` | Flips direction, so positive is forward |
+| `enabled` | `true` / `false` | `false`: never touched, hidden everywhere |
 
-```python
-from talos_servo import Mpu6050
+- **Find the `inverted` values:** lift the wheels, run `talos-servo drive`,
+  press W, and set `inverted: true` on any wheel that turns backwards.
+- **Enable bend once it is installed:** set `enabled: true` and real
+  `min_pos`/`max_pos`, then restart. Its topics appear under `/robot/bend/`.
 
-with Mpu6050() as imu:
-    imu.calibrate_gyro()
-    sample = imu.read()
-    print(sample.accel, sample.gyro, sample.temperature)
-```
+## ROS topics
 
-### IMU on ROS 2
+| Topic or service | Type | Direction |
+| --- | --- | --- |
+| `/cmd_vel` | `geometry_msgs/Twist` | in: drive the base |
+| `/odom` | `nav_msgs/Odometry` | out: wheel odometry, no TF |
+| `/joint_states` | `sensor_msgs/JointState` | out: rad, rad/s, load |
+| `/diagnostics` | `DiagnosticArray` | out: one entry per joint |
+| `/robot/position_cmd` | `sensor_msgs/JointState` | in: goal angles |
+| `/robot/velocity_cmd` | `sensor_msgs/JointState` | in: speeds, expire |
+| `/robot/<joint>/temperature` ... | `Temperature`, `Float32`, `Bool` | out |
+| `/robot/stop_all` | `std_srvs/Trigger` | stop every speed joint |
+| `/robot/<joint>/set_torque` | `std_srvs/SetBool` | torque on/off |
+| `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
+| `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 
-`talos-imu-ros` (`src/talos_servo/ros/imu_node.py`) publishes the sensor as standard ROS
-messages, and the stock `imu_filter_madgwick` package turns that into an orientation. Run each in
-its own terminal on the Pi:
+`/cmd_vel` and `velocity_cmd` stop the wheels unless repeated within
+`command_timeout_s`. Every client on the robot must use the same
+`ROS_DOMAIN_ID`.
 
-```
-pixi run -e ros imu-node      # zeroes the gyro first: keep the robot still for a second
-pixi run -e ros imu-filter    # settings in config/imu_filter.yaml
-```
+## Web UI
 
-| Topic | Type | What it carries |
-|---|---|---|
-| `/imu/data_raw` | `sensor_msgs/Imu` | accel in m/s^2 (gravity included, about +9.8 on z when flat), gyro in rad/s, no orientation, 100 Hz |
-| `/imu/data` | `sensor_msgs/Imu` | the same plus an orientation quaternion, from the Madgwick filter |
-| `/imu/temperature` | `sensor_msgs/Temperature` | die temperature in deg C, 1 Hz |
-
-The node takes the same `--i2c-bus`, `--address`, `--accel-range` and `--gyro-range` options as
-the CLI, plus `--dlpf`. ROS parameters (`--ros-args -p name:=value`): `rate_hz` (100),
-`frame_id` (`imu_link`), `calibrate` (true), `temperature_hz` (1), `max_read_failures` (25, the
-node exits after that many failed reads in a row), `angular_velocity_variance` and
-`linear_acceleration_variance` (covariances for an EKF downstream).
-
-No Kalman filter is needed for orientation. The MPU6050 has no magnetometer, so roll and pitch
-are corrected by gravity and stay stable, but yaw comes from the gyro alone and drifts slowly. A
-`robot_localization` EKF combines it with wheel odometry, see below.
-
-### Pose estimate (EKF)
-
-`robot_localization`'s EKF fuses the gyro with wheel odometry into one estimate of where the base
-is on the floor. Run each in its own terminal, in this order:
+Each joint gets a card: a position slider for position joints, a speed slider
+for speed joints, plus torque, live state and who sent the last command.
+Several browsers can connect at once.
 
 ```
-pixi run -e ros imu-node    # gyro, keep the robot still while it calibrates
-pixi run -e ros imu-tf      # where the IMU sits on the robot (base_link -> imu_link)
-pixi run -e ros ekf         # settings in config/ekf.yaml
+cd web && npm install && npm run build    # once, Node 20+
+uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
-| Topic | Type | What it carries |
-|---|---|---|
-| `/odometry/filtered` (out) | `nav_msgs/Odometry` | 2D pose and velocity of `base_link` in the `odom` frame, 30 Hz |
-| `/tf` `odom -> base_link` (out) | `tf2_msgs/TFMessage` | the same pose as a transform. Nothing else may publish it |
-| `/imu/data_raw` (in) | `sensor_msgs/Imu` | only the yaw rate is used |
-| `/odom` (in) | `nav_msgs/Odometry` | wheel velocities vx, vy and yaw rate. Not published yet: the drive node gets it in #36 |
+Open `http://<pi>.local:8000`. **STOP ALL** (or Space) stops every speed
+joint, and so does the last browser disconnecting. For UI work with hot reload,
+run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
-What is fused and why:
+## IMU and pose estimate
 
-- **Yaw rate from the gyro.** The IMU has no magnetometer, so its absolute yaw means nothing, roll
-  and pitch are not used on a flat floor, and servo vibration makes the accelerometer mostly
-  noise.
-- **Velocities from the wheels, not positions.** Mecanum wheels slip, and a slip then shows up as
-  a short velocity error instead of a jump in the pose.
+Wire the MPU6050 to the Pi's I2C pins (VCC to 3.3 V on pin 1, GND pin 6, SDA
+pin 3, SCL pin 5, AD0 to GND for 0x68), enable I2C in `raspi-config`, and check
+`i2cdetect -y 1` shows `68`.
 
-Until `/odom` exists the EKF runs on the gyro alone: heading follows rotation, position stays at
-0. The `imu-tf` transform is all zeros for now because the IMU is not mounted yet. Once it is,
-measure where it sits and set `--x --y --z` (m) and `--roll --pitch --yaw` (rad) in the `imu-tf`
-task in `pixi.toml`.
-
-## Using the library
-
-```python
-from talos_servo import ServoBus
-
-with ServoBus("COM5") as bus:
-    bus.enable_wheel_mode([1, 2])
-    bus.set_speed(1, 100)
-    print(bus.read_position_speed(1))
-# every servo started above is stopped here, even if the block raised
 ```
+pixi run -e ros imu-node     # keep the robot still while the gyro zeroes
+pixi run -e ros imu-filter   # orientation, config/imu_filter.yaml
+pixi run -e ros imu-tf       # where the IMU sits (zeros until mounted)
+pixi run -e ros ekf          # fuses /odom and gyro, config/ekf.yaml
+```
+
+The EKF uses wheel velocities and the gyro yaw rate only: mecanum wheels slip,
+and the IMU has no magnetometer.
+
+## Deploy on the Pi
+
+Edit the user, paths and serial port in both units, then:
+
+```
+sudo cp deploy/talos-robot.service deploy/talos-web.service \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now talos-robot talos-web
+journalctl -u talos-robot -u talos-web -f
+```
+
+Moving from an older setup: `sudo systemctl disable --now talos-servo-bridge`
+first, since it holds the same port.
 
 ## Development
 
 ```
-uv run pytest           # tests use a fake SDK, no hardware needed
-uv run ruff check .
-uv run ruff format .
+pixi run check           # lint + format check + tests, like CI
+pixi run -e ros test     # also runs the ROS tests (Linux)
+cd web && npm run lint && npm run build
 ```
 
-The same checks as pixi tasks:
-
-```
-pixi run test
-pixi run lint
-pixi run fmt
-pixi run check   # lint + format check + tests, like CI
-```
-
-## Web UI
-
-Browser control for the robot's servos: each one switches between **Position** and **Speed**
-(wheel) mode, with live position, speed, load, voltage and temperature.
-
-```
- laptop browser(s) --http/ws-->  Pi :8000  --USB serial-->  servo bus
-                                 talos-servo web
-                                 serves web/out (Next.js UI)
-```
-
-- `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of
-  `RobotController` (or `RosBackend` with `--ros`) that streams servo state over a WebSocket and
-  serves the UI
-- `web/` - Next.js UI, built as static files into `web/out`
-- `config/robot.yaml` - servo IDs, names, joint limits and the UI speed cap
-
-Install the web extra (`pixi install` already includes it):
-
-```
-uv sync --extra web
-```
-
-Build the UI once (Node 20+; can be built on a laptop and copied to the Pi):
-
-```
-cd web && npm install && npm run build
-```
-
-Run it:
-
-```
-uv run talos-servo web --port /dev/ttyACM0     # real servos (or set TALOS_SERVO_PORT)
-uv run talos-servo web --mock                  # simulated servos, no hardware
-```
-
-Then from any laptop on the same network open `http://<pi-hostname>.local:8000` (or the Pi's IP).
-Several laptops can connect at once and see the same live state.
-
-- **Position mode**: drag the target slider (moves live) or type a value and press Go. 0-4095 is
-  one full turn; the amber marker is the current position
-- **Speed mode**: slider centre is stop, left is reverse, right is forward
-- **STOP ALL** (or Space) stops every servo in speed mode
-- **Torque** off lets you move a joint by hand
-- **Last command**: the line under each main slider says who sent the servo its last move or
-  spin, and when: You, Another browser, CLI, ROS node, or a safety stop (the bridge's command
-  timeout, or the server stopping wheels after the last browser left). The sliders follow the last
-  command from any source, except while you hold them. If someone else commands a servo while you
-  are dragging, a hollow ring on the track marks their value
-- **Move speed and acceleration** are shared by every browser and kept until the server restarts,
-  when they go back to the low defaults. Over ROS (`--ros`) the bridge has no acceleration input,
-  so that slider is disabled
-
-Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
-again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
-`min_pos`/`max_pos` in `config/robot.yaml`, so set real joint limits there before running on the
-robot.
-
-To start on boot, use the two services in `deploy/`: `talos-servo-bridge.service` owns the servo
-port and `talos-web.service` runs the UI with `--ros` through it, so CLI `--ros` commands and other
-ROS nodes work while the UI is up. Edit the user, paths and port in both files, then:
-
-```
-sudo cp deploy/talos-servo-bridge.service deploy/talos-web.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now talos-servo-bridge talos-web
-journalctl -u talos-servo-bridge -u talos-web -f
-```
-
-Stop any hand-started `talos-servo web` first: in its default mode it holds the port, and the
-bridge then cannot open it. Restarting the bridge (`sudo systemctl restart talos-servo-bridge`)
-restarts the UI too. On a Pi without ROS, `talos-web.service` explains how to switch back to
-driving the port directly.
-
-UI development with hot reload: run `uv run talos-servo web --mock`, then `cd web && npm run dev`
-and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
-Pi's address instead of localhost).
-
-### Web UI over ROS 2
-
-By default `talos-servo web` owns the serial port, so nothing else can drive the servos while it
-runs. With `--ros` it opens no port and drives the robot through a running `servo_bridge` node
-instead, so the browser UI and your own ROS nodes share the robot:
-
-```
-pixi run -e ros servo-node-mock     # or servo-node for real servos (it owns the port)
-pixi run -e ros web-ros             # same UI on :8000, commands go over ROS 2
-```
-
-`--bridge /other_bridge` picks a bridge running under another name. The UI works the same, with
-these differences:
-
-- the server re-sends each wheel speed every telemetry tick to feed the bridge's
-  `command_timeout` watchdog, so if the web server dies the bridge stops the wheels
-- the acceleration setting is ignored (the bridge has no acceleration input)
-- when a ROS node and the browser command the same joint, the last command wins
-- servos show as offline if the bridge stops publishing `status`
-
-`drive_node` opens the port itself, so it still cannot run next to `servo_bridge` or the web UI.
-
-## ROS 2
-
-`talos-servo-ros` is a ROS 2 node (`src/talos_servo/ros/servo_bridge_node.py`) on top of the same
-controller, config (`config/robot.yaml`) and simulator as the web UI. It only uses standard message
-types, so there is no colcon build step.
-
-```
-pixi install -e ros
-pixi run -e ros servo-node-mock                          # simulated servos
-TALOS_SERVO_PORT=/dev/ttyACM0 pixi run -e ros servo-node # real servos
-pixi run -e ros talos-servo-ros --help                   # all options
-```
-
-To start it on boot, see `deploy/talos-servo-bridge.service` and [Web UI](#web-ui).
-Use `pixi shell -e ros` for a shell where `ros2` works. Everything lives under `/servo_bridge/`.
-Joint names come from the config names (`"Servo 1"` becomes `servo_1`). Angles are radians with
-0 at half a turn (step 2048), so a joint covers about -pi..pi.
-
-| Name | Type | What it does |
-|---|---|---|
-| `joint_states` (out) | `sensor_msgs/JointState` | position (rad), velocity (rad/s), effort (raw load) at `telemetry_hz` |
-| `status` (out) | `diagnostic_msgs/DiagnosticArray` | online, mode, torque, voltage, temperature, current (A), moving, errors (2 Hz) |
-| `<joint>/temperature` (out) | `sensor_msgs/Temperature` | deg C, at the status rate, online servos only |
-| `<joint>/voltage`, `<joint>/current`, `<joint>/load` (out) | `std_msgs/Float32` | V, A, raw load (about -1000..1000) |
-| `<joint>/moving` (out) | `std_msgs/Bool` | the servo's moving flag |
-| `position_cmd` (in) | `sensor_msgs/JointState` | move joints by name; optional `velocity` (rad/s) sets the move speed |
-| `velocity_cmd` (in) | `sensor_msgs/JointState` | spin wheel-mode joints by name (rad/s) |
-| `stop_all` | `std_srvs/Trigger` | stop every wheel-mode servo |
-| `<joint>/set_wheel_mode` | `std_srvs/SetBool` | true = speed (wheel) mode, false = position mode |
-| `<joint>/set_torque` | `std_srvs/SetBool` | torque on or off |
-
-```
-ros2 topic pub --once /servo_bridge/position_cmd sensor_msgs/msg/JointState   "{name: [servo_1], position: [0.5]}"
-ros2 service call /servo_bridge/servo_2/set_wheel_mode std_srvs/srv/SetBool "{data: true}"
-ros2 topic pub -r 10 /servo_bridge/velocity_cmd sensor_msgs/msg/JointState   "{name: [servo_2], velocity: [1.0]}"
-```
-
-Safety: velocity commands are a deadman signal. A wheel servo stops when it gets no new
-`velocity_cmd` within `command_timeout` seconds (default 0.5, set with
-`--ros-args -p command_timeout:=1.0`), so publish at 10 Hz or more. All wheel servos are stopped
-at startup and on shutdown (including Ctrl+C), and the same `min_pos`/`max_pos` and `max_speed`
-limits as the web UI apply. The node and the web UI in its default mode both open the serial
-port, so run one at a time, or run the web UI with `--ros` (see
-[Web UI over ROS 2](#web-ui-over-ros-2)).
-
-The `ros` environment is tested on the Raspberry Pi 5 (linux-aarch64). On Windows it currently
-hangs while activating, so run ROS on Linux (or WSL) for now.
-
-## ROS 2 Jazzy mecanum base
-
-The `ros2_ws/src/talos_mecanum` package provides a four-wheel base driver and a terminal
-keyboard interface. Pixi installs ROS 2 Jazzy and colcon for Linux ARM64, including Raspberry Pi
-OS 64-bit. Build once with `pixi run ros-build`, then start the driver with `pixi run drive` and
-the keyboard interface in another terminal with `pixi run teleop`. Set the servo port before
-starting the driver, for example:
-
-```
-export TALOS_SERVO_PORT=/dev/serial/by-id/your-servo-adapter
-```
-
-The driver accepts `geometry_msgs/msg/Twist` on `/cmd_vel`. It provides `/base/enable`
-(`std_srvs/srv/SetBool`) to ping IDs 1-4, select wheel mode, and enable torque, and `/base/stop`
-(`std_srvs/srv/Trigger`) to stop all four wheels. Drive starts disabled; press `m` in the keyboard
-interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to strafe, `q`/`e` to
-turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
-continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
-
-The driver owns the servo port while enabled, so stop the servo bridge first
-(`sudo systemctl stop talos-servo-bridge`). If another process holds the port, enabling fails with
-"already in use by another process".
-
-One control loop (`control_rate_hz`, default 50) owns the bus. Each tick sends all four wheel
-speeds in a single sync-write packet, so the wheels start together, then reads at most one servo.
-`/cmd_vel` only stores the latest command. Each wheel's acceleration is scaled by its speed change
-so all wheels finish ramping at the same time; `acceleration` (1..254) is the rate of the wheel with
-the largest change.
-
-While the drive is enabled, the driver also publishes the wheel servo readouts. Nothing is read
-while it is disabled, because the serial port is closed then.
-
-| Topic | Type | Rate param (default) | Content |
-| --- | --- | --- | --- |
-| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10, at most `control_rate_hz` / 4) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000) |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed, from the latest joint state read. Level ERROR with the error text if a read fails |
-| `/base/<wheel>/temperature` | `sensor_msgs/msg/Temperature` | `diagnostics_rate_hz` (1) | deg C, `header.frame_id` is the wheel joint name |
-| `/base/<wheel>/voltage`, `current`, `load` | `std_msgs/msg/Float32` | `diagnostics_rate_hz` (1) | V, A, raw load. Not published for a wheel whose read failed |
-| `/base/<wheel>/moving` | `std_msgs/msg/Bool` | `diagnostics_rate_hz` (1) | the servo's moving flag |
-
-Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
-and reported on `/diagnostics`; five failed reads in a row on one servo disable the drive, since a
-sync write gets no reply and reads are the only way to notice a servo that stopped answering.
-Check them with:
-
-```
-ros2 topic echo /joint_states
-ros2 topic echo /base/front_left_wheel/temperature
-ros2 topic echo /diagnostics
-```
-
-Before enabling on the floor, edit `ros2_ws/src/talos_mecanum/config/robot.yaml` to match the
-physical wheel-to-servo mapping and each wheel's direction. The defaults assume IDs 1-4 are ordered
-front-left, front-right, rear-left, rear-right and use positive direction signs. Set
-`wheel_ids`, `wheel_directions`, measured `wheelbase_m` and `track_width_m`, and calibrated
-`steps_per_meter` for the actual robot. The geometry and scale defaults are placeholders; the
-driver caps commands to 100 servo steps/s and 0.1 m/s linear speed until configured. Start with the
-wheels lifted and a clear area.
-
-On Raspberry Pi OS 64-bit, install Pixi, then run these commands from the repository:
-
-```
-pixi install
-pixi run ros-build
-export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
-pixi run drive
-```
-
-In a second terminal, from the repository, run `pixi run teleop`. If the adapter uses another
-device, set `TALOS_SERVO_PORT` to its `/dev/serial/by-id/...` path instead. Keep the wheels lifted
-until wheel order, direction, and calibration are verified.
+Tests use a fake SDK and never open a serial port. ROS tests run on a private
+ROS domain, so they cannot reach a robot on the same network. Code is
+formatted by ruff at 80 characters per line.

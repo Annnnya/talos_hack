@@ -1,9 +1,10 @@
 // Message types shared with src/talos_servo/web/server.py
 
-export type Mode = "position" | "wheel";
+/** Fixed per joint in config/robot.yaml. */
+export type Control = "position" | "speed";
 
-/** Who sent a servo its last move, spin or stop (SOURCE_* in controller.py). */
-export type CommandSource = "web" | "cli" | "ros" | "bridge";
+/** Who sent a joint its last move, spin or stop (SOURCE_* in robot.py). */
+export type CommandSource = "web" | "cli" | "ros" | "robot";
 
 export interface LastCommand {
   source: CommandSource;
@@ -19,7 +20,7 @@ export interface ServoState {
   min_pos: number;
   max_pos: number;
   online: boolean;
-  mode: Mode;
+  control: Control;
   torque: boolean;
   position: number;
   speed: number;
@@ -50,7 +51,6 @@ export type ServerMessage =
   | { type: "hello"; client_id: string }
   | {
       type: "state";
-      mock: boolean;
       ros: boolean;
       limits: Limits;
       settings: Record<string, ServoSettings>;
@@ -59,13 +59,12 @@ export type ServerMessage =
   | { type: "error"; message: string };
 
 export type ClientMessage =
-  | { type: "set_mode"; id: number; mode: Mode }
-  | { type: "move"; id: number; position: number; speed: number; acc: number }
-  | { type: "spin"; id: number; speed: number; acc: number }
-  | { type: "torque"; id: number; enabled: boolean }
-  | { type: "stop"; id: number }
+  | { type: "move"; joint: string; position: number; speed: number; acc: number }
+  | { type: "spin"; joint: string; speed: number; acc: number }
+  | { type: "torque"; joint: string; enabled: boolean }
+  | { type: "stop"; joint: string }
   | { type: "stop_all" }
-  | { type: "settings"; id: number; move_speed?: number; acc?: number };
+  | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;
 export const stepsToDeg = (steps: number) => (steps * 360) / STEPS_PER_TURN;

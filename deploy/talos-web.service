@@ -1,31 +1,33 @@
-# Start the web UI on boot, driving the servos through the ROS servo bridge
-# (talos-servo-bridge.service), so the CLI with --ros and other ROS nodes can run next to it.
-# Install both together: see the steps at the top of talos-servo-bridge.service.
+# Start the web UI on boot, driving the robot through the ROS robot node
+# (talos-robot.service), so the CLI with --ros and other ROS nodes can run next
+# to it. Install both together: see the steps at the top of
+# talos-robot.service.
 #
-# Pi without ROS: drop the bridge lines below and drive the port directly instead with
+# Pi without ROS: drop the robot lines below and drive the port directly with
 #   Environment=TALOS_SERVO_PORT=/dev/serial/by-id/...
-#   ExecStart=/home/pi/.local/bin/uv run --extra web talos-servo web --config config/robot.yaml
+#   ExecStart=/home/pi/.local/bin/uv run --extra web talos-servo web
 # Then nothing else can use the servos while the UI runs.
 
 [Unit]
-Description=Talos servo web UI (through the ROS servo bridge)
-After=network-online.target talos-servo-bridge.service
+Description=Talos web UI (through the ROS robot node)
+After=network-online.target talos-robot.service
 Wants=network-online.target
-Requires=talos-servo-bridge.service
-# Stopping or restarting the bridge does the same to the UI.
-PartOf=talos-servo-bridge.service
+Requires=talos-robot.service
+# Stopping or restarting the robot node does the same to the UI.
+PartOf=talos-robot.service
 
 [Service]
 User=pi
 WorkingDirectory=/home/pi/talos_hack
-# Must match the bridge if it sets one.
+# Must match the robot node if it sets one.
 # Environment=ROS_DOMAIN_ID=0
 # No serial port here: with --ros the UI never opens it.
 ExecStart=/home/pi/.pixi/bin/pixi run -e ros web-ros
-# SIGINT runs the server's shutdown path, which asks the bridge to stop every wheel.
+# SIGINT runs the server's shutdown path, which asks the robot to stop every
+# wheel.
 KillSignal=SIGINT
 TimeoutStopSec=10
-# Fails if the bridge is not answering yet; systemd retries until it is.
+# Fails if the robot node is not answering yet; systemd retries until it is.
 Restart=on-failure
 RestartSec=2
 

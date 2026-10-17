@@ -9,10 +9,6 @@ dist/
 .pixi/
 .venv/
 
-# ROS 2 / colcon build output
-install/
-log/
-
 # Tooling caches
 .pytest_cache/
 .ruff_cache/

@@ -72,12 +72,17 @@ def test_compatible_clone_warns_but_works(i2c, caplog):
 
 
 def test_wrong_address_raises(i2c):
-    with pytest.raises(ImuError, match="read WHO_AM_I failed at 0x69"), make(i2c, address=0x69):
+    with (
+        pytest.raises(ImuError, match="read WHO_AM_I failed at 0x69"),
+        make(i2c, address=0x69),
+    ):
         pass
 
 
 def test_bus_open_failure_mentions_raspi_config(i2c):
-    i2c.open_error = FileNotFoundError(2, "No such file or directory: '/dev/i2c-1'")
+    i2c.open_error = FileNotFoundError(
+        2, "No such file or directory: '/dev/i2c-1'"
+    )
     with pytest.raises(ImuError, match="raspi-config"), make(i2c):
         pass
 
@@ -98,7 +103,9 @@ def test_read_before_open_raises(i2c):
 def test_accel_scaling(i2c, accel_range):
     lsb = ACCEL_RANGES[accel_range][1]
     with make(i2c, accel_range=accel_range) as imu:
-        i2c.bus.set_words(ACCEL_XOUT_H, [0, int(-lsb / 2), int(lsb), 0, 0, 0, 0])
+        i2c.bus.set_words(
+            ACCEL_XOUT_H, [0, int(-lsb / 2), int(lsb), 0, 0, 0, 0]
+        )
         sample = imu.read()
     assert sample.accel == pytest.approx((0.0, -0.5, 1.0))
 
@@ -107,7 +114,9 @@ def test_accel_scaling(i2c, accel_range):
 def test_gyro_scaling(i2c, gyro_range):
     lsb = GYRO_RANGES[gyro_range][1]
     with make(i2c, gyro_range=gyro_range) as imu:
-        i2c.bus.set_words(ACCEL_XOUT_H, [0, 0, 0, 0, round(lsb * 10), round(-lsb * 2), 0])
+        i2c.bus.set_words(
+            ACCEL_XOUT_H, [0, 0, 0, 0, round(lsb * 10), round(-lsb * 2), 0]
+        )
         sample = imu.read()
     assert sample.gyro == pytest.approx((10.0, -2.0, 0.0), abs=0.02)
 
@@ -126,7 +135,8 @@ def test_calibrate_gyro_removes_offset(i2c):
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"accel_range": 3}, {"gyro_range": 300}, {"dlpf": 7}, {"dlpf": -1}]
+    "kwargs",
+    [{"accel_range": 3}, {"gyro_range": 300}, {"dlpf": 7}, {"dlpf": -1}],
 )
 def test_bad_settings_raise(i2c, kwargs):
     with pytest.raises(ValueError):
@@ -138,7 +148,8 @@ def test_bad_calibration_samples_raise(i2c):
         imu.calibrate_gyro(samples=0)
 
 
-# --- cli ---------------------------------------------------------------------------
+# --- cli
+# ---------------------------------------------------------------------------
 
 
 class FakeClock:
@@ -173,7 +184,16 @@ def test_cli_imu_streams_without_servo_port(run_imu, i2c, capsys):
 
 
 def test_cli_imu_options(run_imu, i2c, capsys):
-    args = ["imu", "--i2c-bus", "3", "--address", "0x68", "--seconds", "0.1", "--calibrate"]
+    args = [
+        "imu",
+        "--i2c-bus",
+        "3",
+        "--address",
+        "0x68",
+        "--seconds",
+        "0.1",
+        "--calibrate",
+    ]
     assert run_imu(args) == 0
     assert i2c.bus.bus_number == 3
     assert "gyro offset" in capsys.readouterr().out

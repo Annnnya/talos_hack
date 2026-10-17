@@ -1,5 +1,8 @@
-"""Sanity checks for config/ekf.yaml. A *_config list with 14 or 16 entries, or a flag one slot
-off, still loads in robot_localization but fuses the wrong quantity."""
+"""Sanity checks for config/ekf.yaml.
+
+A *_config list with 14 or 16 entries, or a flag one slot off, still loads in
+robot_localization but fuses the wrong quantity.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +46,9 @@ def params() -> dict:
 
 def fused(params: dict, sensor: str) -> set[str]:
     flags = params[f"{sensor}_config"]
-    assert len(flags) == len(STATE), f"{sensor}_config needs {len(STATE)} entries"
+    assert len(flags) == len(STATE), (
+        f"{sensor}_config needs {len(STATE)} entries"
+    )
     assert all(isinstance(flag, bool) for flag in flags)
     return {name for name, on in zip(STATE, flags, strict=True) if on}
 
@@ -54,7 +59,9 @@ def test_sensor_fuses_the_intended_quantities(params, sensor):
 
 
 def test_every_sensor_config_is_checked(params):
-    sensors = {key.removesuffix("_config") for key in params if key.endswith("_config")}
+    sensors = {
+        key.removesuffix("_config") for key in params if key.endswith("_config")
+    }
     assert sensors == set(EXPECTED_FUSED)
 
 

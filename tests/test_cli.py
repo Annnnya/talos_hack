@@ -20,7 +20,13 @@ def run(sdk, monkeypatch):
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("1", [1]), ("3,1,2", [1, 2, 3]), ("1-3", [1, 2, 3]), ("1-2,5", [1, 2, 5]), ("2,2", [2])],
+    [
+        ("1", [1]),
+        ("3,1,2", [1, 2, 3]),
+        ("1-3", [1, 2, 3]),
+        ("1-2,5", [1, 2, 5]),
+        ("2,2", [2]),
+    ],
 )
 def test_parse_ids(value, expected):
     assert parsing.parse_ids(value) == expected
@@ -41,7 +47,8 @@ def test_missing_port_is_an_error(run, capsys):
 
 def test_port_from_env(run, sdk, monkeypatch):
     monkeypatch.setenv(cli.PORT_ENV_VAR, "COM7")
-    # Parser defaults are read at build time, so the env var must be set before main().
+    # Parser defaults are read at build time, so the env var must be set before
+    # main().
     assert run(["ping"]) == 0
     assert sdk.port.name == "COM7"
 
@@ -56,7 +63,22 @@ def test_ping_reports_each_servo(run, sdk, capsys):
 
 
 def test_spin_runs_then_stops_every_servo(run, sdk):
-    assert run(["spin", "--port", "COM5", "--ids", "1,2", "--speed", "150", "--acc", "10"]) == 0
+    assert (
+        run(
+            [
+                "spin",
+                "--port",
+                "COM5",
+                "--ids",
+                "1,2",
+                "--speed",
+                "150",
+                "--acc",
+                "10",
+            ]
+        )
+        == 0
+    )
     assert sdk.handler.speed_calls() == [
         ("speed", 1, 150, 10),
         ("speed", 2, 150, 10),
@@ -79,11 +101,27 @@ def test_spin_interrupted_still_stops(run, sdk, monkeypatch, capsys):
 def test_servo_error_exits_nonzero(run, sdk, capsys):
     sdk.fail[("write1", 1)] = (COMM_RX_TIMEOUT, 0)
     assert run(["spin", "--port", "COM5"]) == 1
-    assert "error: set wheel mode on servo 1 failed: timeout" in capsys.readouterr().err
+    assert (
+        "error: set wheel mode on servo 1 failed: timeout"
+        in capsys.readouterr().err
+    )
 
 
 def test_monitor_reads_without_moving_by_default(run, sdk, capsys):
-    assert run(["monitor", "--port", "COM5", "--seconds", "0.05", "--interval", "0"]) == 0
+    assert (
+        run(
+            [
+                "monitor",
+                "--port",
+                "COM5",
+                "--seconds",
+                "0.05",
+                "--interval",
+                "0",
+            ]
+        )
+        == 0
+    )
     assert sdk.handler.speed_calls() == []
     assert "servo 1: position=2048 speed=0" in capsys.readouterr().out
 
@@ -100,47 +138,63 @@ def test_set_id_rejects_id_lists(run):
         run(["set-id", "--port", "COM5", "--id", "1,2", "--new-id", "3"])
 
 
-# --- --ros: spin and monitor through the servo bridge -----------------------------------
+# --- --ros: spin and monitor through the servo bridge
+# -----------------------------------
 
 
 @pytest.fixture
 def over_ros(monkeypatch, tmp_path):
-    """Stub cli_commands so these run without rclpy; records what each command got."""
+    """Stub cli_commands so these run without rclpy; records what each got."""
     import talos_servo.ros
 
     calls = {}
     stub = types.ModuleType("talos_servo.ros.cli_commands")
-    stub.RosBackend = lambda config, bridge: {
-        "servos": [s.id for s in config.servos],
-        "bridge": bridge,
+    stub.RosBackend = lambda config: {
+        "joints": [j.name for j in config.enabled_joints]
     }
     stub.spin_over_ros = lambda backend, *a: calls.update(spin=(backend, a))
-    stub.monitor_over_ros = lambda backend, *a: calls.update(monitor=(backend, a))
+    stub.monitor_over_ros = lambda backend, *a: calls.update(
+        monitor=(backend, a)
+    )
     monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", stub)
     monkeypatch.setattr(talos_servo.ros, "cli_commands", stub, raising=False)
     monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
     config = tmp_path / "robot.yaml"
-    config.write_text("servos:\n  - id: 1\n  - id: 2\n")
+    config.write_text(
+        "joints:\n"
+        "  bend: {id: 1, control: position}\n"
+        "  wheel: {id: 2, control: speed}\n"
+    )
     return calls, str(config)
 
 
-def test_spin_over_ros_needs_no_port(over_ros):
+def test_spin_over_ros_maps_ids_to_joints(over_ros):
     calls, config = over_ros
-    args = ["spin", "--ros", "--config", config, "--bridge", "/b", "--ids", "2", "--speed", "300"]
-    assert cli.main(args) == 0
-    assert calls["spin"] == ({"servos": [1, 2], "bridge": "/b"}, ([2], 300, 1.0))
+    args = ["spin", "--ros", "--config", config, "--ids", "2"]
+    assert cli.main([*args, "--speed", "300"]) == 0
+    assert calls["spin"] == (
+        {"joints": ["bend", "wheel"]},
+        (["wheel"], 300, 1.0),
+    )
+
+
+def test_over_ros_rejects_ids_not_in_the_config(over_ros, capsys):
+    _calls, config = over_ros
+    assert cli.main(["spin", "--ros", "--config", config, "--ids", "7"]) == 1
+    assert "servo ids [7]" in capsys.readouterr().err
 
 
 def test_monitor_over_ros_passes_interval(over_ros):
     calls, config = over_ros
-    args = ["monitor", "--ros", "--config", config, "--seconds", "2", "--interval", "0.5"]
-    assert cli.main(args) == 0
-    assert calls["monitor"][1] == ([1], 0, 2.0, 0.5)
+    args = ["monitor", "--ros", "--config", config, "--seconds", "2"]
+    assert cli.main([*args, "--interval", "0.5"]) == 0
+    assert calls["monitor"][1] == (["bend"], 0, 2.0, 0.5)
 
 
 def test_over_ros_says_acceleration_is_ignored(over_ros, capsys):
     _calls, config = over_ros
-    assert cli.main(["spin", "--ros", "--config", config, "--acc", "50"]) == 0
+    args = ["spin", "--ros", "--config", config, "--ids", "2", "--acc", "50"]
+    assert cli.main(args) == 0
     assert "--acc is ignored" in capsys.readouterr().out
 
 

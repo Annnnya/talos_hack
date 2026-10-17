@@ -1,15 +1,16 @@
-"""Per joint numeric readout topics, shared by the servo bridge and mecanum drive nodes.
+"""Per joint numeric readout topics published by the robot node.
 
 For every joint, under `<prefix>/<joint>/`:
 
-- `temperature` (sensor_msgs/Temperature): deg C, `header.frame_id` is the joint name
+- `temperature` (sensor_msgs/Temperature): deg C, `header.frame_id` is the joint
+  name
 - `voltage` (std_msgs/Float32): supply voltage seen by the servo, V
 - `current` (std_msgs/Float32): present current, A
 - `load` (std_msgs/Float32): raw present load, about -1000..1000
 - `moving` (std_msgs/Bool): the servo's own moving flag
 
-Plain numbers on their own topics so they can be plotted (rqt_plot, PlotJuggler) and echoed
-without digging through DiagnosticArray key/values.
+Plain numbers on their own topics so they can be plotted (rqt_plot, PlotJuggler)
+and echoed without digging through DiagnosticArray key/values.
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import Temperature
 from std_msgs.msg import Bool, Float32
 
+from talos_servo.defaults import QUEUE_DEPTH
 from talos_servo.ros.convert import readout_topic
 
-QUEUE_DEPTH = 10
 READOUT_TYPES: dict[str, type] = {
     "temperature": Temperature,
     "voltage": Float32,
@@ -35,7 +36,9 @@ READOUT_TYPES: dict[str, type] = {
 
 
 class JointReadoutPublishers:
-    def __init__(self, node: Node, prefix: str, joint_names: Iterable[str]) -> None:
+    def __init__(
+        self, node: Node, prefix: str, joint_names: Iterable[str]
+    ) -> None:
         self._publishers = {
             joint: {
                 field: node.create_publisher(
@@ -48,7 +51,11 @@ class JointReadoutPublishers:
 
     @property
     def topic_names(self) -> list[str]:
-        return sorted(pub.topic_name for pubs in self._publishers.values() for pub in pubs.values())
+        return sorted(
+            pub.topic_name
+            for pubs in self._publishers.values()
+            for pub in pubs.values()
+        )
 
     @staticmethod
     def messages(
@@ -61,7 +68,9 @@ class JointReadoutPublishers:
         load: float,
         moving: bool,
     ) -> dict[str, Any]:
-        temperature_msg = Temperature(temperature=float(temperature), variance=0.0)
+        temperature_msg = Temperature(
+            temperature=float(temperature), variance=0.0
+        )
         temperature_msg.header.stamp = stamp
         temperature_msg.header.frame_id = joint
         return {

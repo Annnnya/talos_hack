@@ -15,7 +15,11 @@ from talos_servo.ros.imu_convert import (
 
 
 def test_g_to_mps2():
-    assert g_to_mps2((0.0, -0.5, 1.0)) == (0.0, -0.5 * STANDARD_GRAVITY, STANDARD_GRAVITY)
+    assert g_to_mps2((0.0, -0.5, 1.0)) == (
+        0.0,
+        -0.5 * STANDARD_GRAVITY,
+        STANDARD_GRAVITY,
+    )
 
 
 def test_dps_to_radps():

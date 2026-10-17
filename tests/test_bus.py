@@ -28,7 +28,10 @@ from talos_servo.bus import (
 
 def test_open_failure_raises(sdk):
     sdk.port_kwargs = {"open_ok": False}
-    with pytest.raises(ServoError, match="could not open serial port FAKE"), sdk.bus():
+    with (
+        pytest.raises(ServoError, match="could not open serial port FAKE"),
+        sdk.bus(),
+    ):
         pass
 
 
@@ -55,7 +58,10 @@ def test_ping_returns_model(sdk):
 
 def test_comm_failure_raises_with_sdk_message(sdk):
     sdk.fail[("ping", 2)] = (COMM_RX_TIMEOUT, 0)
-    with sdk.bus() as bus, pytest.raises(ServoError, match="ping servo 2 failed: timeout"):
+    with (
+        sdk.bus() as bus,
+        pytest.raises(ServoError, match="ping servo 2 failed: timeout"),
+    ):
         bus.ping(2)
 
 
@@ -80,7 +86,10 @@ def test_exit_stops_moving_servos_and_closes_port(sdk):
     with sdk.bus() as bus:
         bus.set_speed(1, 100)
         bus.set_speed(3, -50)
-    assert sdk.handler.speed_calls()[-2:] == [("speed", 1, 0, 20), ("speed", 3, 0, 20)]
+    assert sdk.handler.speed_calls()[-2:] == [
+        ("speed", 1, 0, 20),
+        ("speed", 3, 0, 20),
+    ]
     assert sdk.port.closed_count == 1
 
 
@@ -101,7 +110,10 @@ def test_stopped_servo_is_not_stopped_again(sdk):
 
 def test_stop_failure_on_exit_does_not_mask_original_error(sdk, caplog):
     sdk.fail[("speed", 2)] = (COMM_RX_TIMEOUT, 0)
-    with pytest.raises(ServoError, match="set speed 100 on servo 2"), sdk.bus() as bus:
+    with (
+        pytest.raises(ServoError, match="set speed 100 on servo 2"),
+        sdk.bus() as bus,
+    ):
         bus.set_speed(1, 100)
         bus.set_speed(2, 100)
     stops = [c for c in sdk.handler.speed_calls() if c[2] == 0]
@@ -110,7 +122,9 @@ def test_stop_failure_on_exit_does_not_mask_original_error(sdk, caplog):
     assert sdk.port.closed_count == 1
 
 
-@pytest.mark.parametrize(("speed", "acc"), [(40_000, 20), (-40_000, 20), (100, 255), (100, -1)])
+@pytest.mark.parametrize(
+    ("speed", "acc"), [(40_000, 20), (-40_000, 20), (100, 255), (100, -1)]
+)
 def test_set_speed_rejects_out_of_range(sdk, speed, acc):
     with sdk.bus() as bus, pytest.raises(ValueError):
         bus.set_speed(1, speed, acc)
@@ -134,7 +148,10 @@ def test_set_id_unlocks_writes_and_relocks_at_new_id(sdk):
 
 def test_set_id_refuses_when_new_id_is_taken(sdk):
     sdk.present = {1, 3}
-    with sdk.bus() as bus, pytest.raises(ServoError, match="id 3 is already used"):
+    with (
+        sdk.bus() as bus,
+        pytest.raises(ServoError, match="id 3 is already used"),
+    ):
         bus.set_id(1, 3)
     assert not [c for c in sdk.handler.calls if c[0] in ("unlock", "write1")]
 
@@ -201,7 +218,8 @@ def test_read_status_decodes_registers(sdk):
             SMS_STS_PRESENT_LOAD_L: (1 << 10) | 50,  # sign bit set means -50
             SMS_STS_PRESENT_VOLTAGE: 121,
             SMS_STS_PRESENT_TEMPERATURE: 34,
-            SMS_STS_PRESENT_CURRENT_L: (1 << 15) | 100,  # sign bit set means -100 counts
+            SMS_STS_PRESENT_CURRENT_L: (1 << 15)
+            | 100,  # sign bit set means -100 counts
             SMS_STS_MOVING: 1,
         }
     )
@@ -213,7 +231,10 @@ def test_read_status_decodes_registers(sdk):
 
 def test_read_status_failure_raises(sdk):
     sdk.fail[("read2", 1)] = (COMM_RX_TIMEOUT, 0)
-    with sdk.bus() as bus, pytest.raises(ServoError, match="read load of servo 1"):
+    with (
+        sdk.bus() as bus,
+        pytest.raises(ServoError, match="read load of servo 1"),
+    ):
         bus.read_status(1)
 
 
@@ -266,7 +287,8 @@ def test_set_speeds_comm_failure_raises_and_still_stops_on_exit(sdk):
 
 
 @pytest.mark.parametrize(
-    ("speeds", "acc"), [({}, 20), ({1: 40_000}, 20), ({1: 100}, 255), ({1: 100}, -1)]
+    ("speeds", "acc"),
+    [({}, 20), ({1: 40_000}, 20), ({1: 100}, 255), ({1: 100}, -1)],
 )
 def test_set_speeds_rejects_bad_input_without_writing(sdk, speeds, acc):
     with sdk.bus() as bus, pytest.raises(ValueError):
@@ -290,7 +312,13 @@ def test_read_telemetry_decodes_one_block_read(sdk):
         assert bus.read_telemetry(2) == ServoTelemetry(
             position=3000,
             speed=-250,
-            status=ServoStatus(load=-50, voltage=12.1, temperature=34, current=-0.65, moving=True),
+            status=ServoStatus(
+                load=-50,
+                voltage=12.1,
+                temperature=34,
+                current=-0.65,
+                moving=True,
+            ),
         )
         reads = [c for c in sdk.handler.calls if c[0].startswith("read")]
         assert reads == [("read_block", 2, 56, 15)]
@@ -298,13 +326,18 @@ def test_read_telemetry_decodes_one_block_read(sdk):
 
 def test_read_telemetry_failure_raises(sdk):
     sdk.fail[("read_block", 3)] = (COMM_RX_TIMEOUT, 0)
-    with sdk.bus() as bus, pytest.raises(ServoError, match="read telemetry of servo 3"):
+    with (
+        sdk.bus() as bus,
+        pytest.raises(ServoError, match="read telemetry of servo 3"),
+    ):
         bus.read_telemetry(3)
 
 
 def test_read_telemetry_short_reply_raises(sdk, monkeypatch):
     with sdk.bus() as bus:
-        monkeypatch.setattr(sdk.handler, "readTxRx", lambda *_a: ([0] * 4, COMM_SUCCESS, 0))
+        monkeypatch.setattr(
+            sdk.handler, "readTxRx", lambda *_a: ([0] * 4, COMM_SUCCESS, 0)
+        )
         with pytest.raises(ServoError, match="got 4 bytes"):
             bus.read_telemetry(1)
 
@@ -343,7 +376,10 @@ def test_open_refuses_a_port_another_process_holds(sdk, monkeypatch):
 
     monkeypatch.setattr(bus_module, "fcntl", FakeFcntl(busy=True))
     monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
-    with pytest.raises(ServoError, match="already in use by another process"), sdk.bus():
+    with (
+        pytest.raises(ServoError, match="already in use by another process"),
+        sdk.bus(),
+    ):
         pass
     assert sdk.port.closed_count == 1
 

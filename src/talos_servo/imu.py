@@ -1,4 +1,5 @@
-"""Driver for the MPU6050 6-axis IMU (accelerometer + gyroscope) on an I2C bus."""
+"""Driver for the MPU6050 6-axis IMU (accelerometer + gyroscope) on an I2C
+bus."""
 
 from __future__ import annotations
 
@@ -29,11 +30,12 @@ WHO_AM_I = 0x75
 SAMPLE_BLOCK_LEN = 14
 
 WHO_AM_I_MPU6050 = 0x68
-# Values reported by compatible chips and common clones sold on MPU6050 breakout boards.
+# Values reported by compatible chips and common clones sold on MPU6050 breakout
+# boards.
 WHO_AM_I_COMPATIBLE = frozenset({0x70, 0x71, 0x72, 0x73, 0x98})
 
-# PWR_MGMT_1: clear the sleep bit and clock from the X gyro PLL, which drifts less than
-# the internal oscillator.
+# PWR_MGMT_1: clear the sleep bit and clock from the X gyro PLL, which drifts
+# less than the internal oscillator.
 PWR_CLOCK_PLL_GYRO_X = 0x01
 PWR_SLEEP = 0x40
 
@@ -86,7 +88,9 @@ def _default_bus_factory(bus_number: int) -> Any:
     try:
         from smbus2 import SMBus
     except ImportError as exc:
-        raise ImuError("the imu needs the imu extra (smbus2 missing): uv sync --extra imu") from exc
+        raise ImuError(
+            "the imu needs the imu extra (smbus2 missing): uv sync --extra imu"
+        ) from exc
     return SMBus(bus_number)
 
 
@@ -98,8 +102,8 @@ def to_signed16(high: int, low: int) -> int:
 class Mpu6050:
     """One MPU6050 on an I2C bus.
 
-    Use as a context manager. On exit the sensor is put back to sleep and the bus is closed,
-    even if the body raised.
+    Use as a context manager. On exit the sensor is put back to sleep and the
+    bus is closed, even if the body raised.
     """
 
     def __init__(
@@ -114,10 +118,14 @@ class Mpu6050:
     ) -> None:
         if accel_range not in ACCEL_RANGES:
             raise ValueError(
-                f"accel range must be one of {sorted(ACCEL_RANGES)}, got {accel_range}"
+                f"accel range must be one of {sorted(ACCEL_RANGES)}, got "
+                f"{accel_range}"
             )
         if gyro_range not in GYRO_RANGES:
-            raise ValueError(f"gyro range must be one of {sorted(GYRO_RANGES)}, got {gyro_range}")
+            raise ValueError(
+                f"gyro range must be one of {sorted(GYRO_RANGES)}, got "
+                f"{gyro_range}"
+            )
         if not 0 <= dlpf <= MAX_DLPF:
             raise ValueError(f"dlpf must be within 0..{MAX_DLPF}, got {dlpf}")
         self.bus_number = bus_number
@@ -134,15 +142,22 @@ class Mpu6050:
             self._bus = self._bus_factory(self.bus_number)
         except OSError as exc:
             raise ImuError(
-                f"could not open i2c bus {self.bus_number}: {exc} (is I2C enabled in raspi-config?)"
+                f"could not open i2c bus {self.bus_number}: {exc} (is I2C "
+                "enabled in raspi-config?)"
             ) from exc
         try:
             self._check_identity()
             self._write(PWR_MGMT_1, PWR_CLOCK_PLL_GYRO_X, "wake sensor")
             self._write(CONFIG, self.dlpf, "set low-pass filter")
             self._write(SMPLRT_DIV, DEFAULT_SAMPLE_RATE_DIV, "set sample rate")
-            self._write(GYRO_CONFIG, GYRO_RANGES[self.gyro_range][0], "set gyro range")
-            self._write(ACCEL_CONFIG, ACCEL_RANGES[self.accel_range][0], "set accel range")
+            self._write(
+                GYRO_CONFIG, GYRO_RANGES[self.gyro_range][0], "set gyro range"
+            )
+            self._write(
+                ACCEL_CONFIG,
+                ACCEL_RANGES[self.accel_range][0],
+                "set accel range",
+            )
         except BaseException:
             self._close_bus()
             raise
@@ -171,14 +186,17 @@ class Mpu6050:
         self.close()
 
     def read_raw(self) -> tuple[int, int, int, int, int, int, int]:
-        """Return raw signed (ax, ay, az, temp, gx, gy, gz) from one burst read."""
+        """Return raw signed (ax, ay, az, temp, gx, gy, gz) from one burst
+        read."""
         data = self._read_block(ACCEL_XOUT_H, SAMPLE_BLOCK_LEN, "read sample")
         if len(data) != SAMPLE_BLOCK_LEN:
             raise ImuError(
-                f"read sample failed: got {len(data)} bytes, expected {SAMPLE_BLOCK_LEN}"
+                f"read sample failed: got {len(data)} bytes, expected "
+                f"{SAMPLE_BLOCK_LEN}"
             )
         ax, ay, az, temp, gx, gy, gz = (
-            to_signed16(data[i], data[i + 1]) for i in range(0, SAMPLE_BLOCK_LEN, 2)
+            to_signed16(data[i], data[i + 1])
+            for i in range(0, SAMPLE_BLOCK_LEN, 2)
         )
         return ax, ay, az, temp, gx, gy, gz
 
@@ -189,7 +207,11 @@ class Mpu6050:
         ox, oy, oz = self.gyro_offset
         return ImuSample(
             accel=(ax / accel_scale, ay / accel_scale, az / accel_scale),
-            gyro=(gx / gyro_scale - ox, gy / gyro_scale - oy, gz / gyro_scale - oz),
+            gyro=(
+                gx / gyro_scale - ox,
+                gy / gyro_scale - oy,
+                gz / gyro_scale - oz,
+            ),
             temperature=temp / TEMP_LSB_PER_C + TEMP_OFFSET_C,
         )
 
@@ -198,7 +220,8 @@ class Mpu6050:
         samples: int = DEFAULT_CALIBRATION_SAMPLES,
         interval: float = DEFAULT_CALIBRATION_INTERVAL,
     ) -> Vector:
-        """Average the gyro while the sensor is still and use it as the zero offset."""
+        """Average the gyro while the sensor is still and use it as the zero
+        offset."""
         if samples < 1:
             raise ValueError(f"samples must be >= 1, got {samples}")
         gyro_scale = GYRO_RANGES[self.gyro_range][1]
@@ -221,9 +244,16 @@ class Mpu6050:
         if who == WHO_AM_I_MPU6050:
             return
         if who in WHO_AM_I_COMPATIBLE:
-            log.warning("WHO_AM_I is 0x%02x, not 0x68: treating it as an MPU6050 compatible", who)
+            log.warning(
+                "WHO_AM_I is 0x%02x, not 0x68: treating it as an MPU6050 "
+                "compatible",
+                who,
+            )
             return
-        raise ImuError(f"device at 0x{self.address:02x} is not an MPU6050 (WHO_AM_I = 0x{who:02x})")
+        raise ImuError(
+            f"device at 0x{self.address:02x} is not an MPU6050 (WHO_AM_I = "
+            f"0x{who:02x})"
+        )
 
     def _require_open(self) -> Any:
         if self._bus is None:
@@ -235,21 +265,29 @@ class Mpu6050:
         try:
             return bus.read_byte_data(self.address, register)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
-    def _read_block(self, register: int, length: int, operation: str) -> list[int]:
+    def _read_block(
+        self, register: int, length: int, operation: str
+    ) -> list[int]:
         bus = self._require_open()
         try:
             return bus.read_i2c_block_data(self.address, register, length)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
     def _write(self, register: int, value: int, operation: str) -> None:
         bus = self._require_open()
         try:
             bus.write_byte_data(self.address, register, value)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
     def _close_bus(self) -> None:
         bus, self._bus = self._bus, None

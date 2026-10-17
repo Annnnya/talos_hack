@@ -31,10 +31,17 @@ Feetech STS/SMS serial bus servos daisy-chained on one half-duplex UART bus.
 ## Layout
 
 ```
-src/talos_servo/   # importable package: bus wrapper, register constants, CLI
+config/robot.yaml  # the robot: joints (id, control, inverted, enabled), base
+src/talos_servo/   # importable package: Robot core, bus, CLI, ROS and web
 tests/             # pytest suite only - must run without hardware
 ```
 
+- Two layers (see the README diagram): the Robot core (`robot.py`,
+  `config.py`, `mecanum.py`, `bus.py`, `imu.py`) holds all logic and
+  hardware access and never imports ROS. The edge (`cli.py`, `ros/`,
+  `web/`) only turns messages into `Robot` calls
+- One `Robot` owns the servo bus and only the robot node owns the `Robot`.
+  Do not open the servo port from anything else while it runs
 - Reusable logic goes in `src/talos_servo/`, not in one-off scripts
 - `tests/` contains automated tests only. Scripts that move real servos are CLI commands, not tests
 - Tests must never touch a serial port. Use the fake SDK objects in the test suite
@@ -57,6 +64,8 @@ someone's hand.
 ## Code style
 
 - Type hints on all public functions; small focused modules
+- 80 characters per line, enforced by ruff (`pixi run fmt`, `pixi run
+  lint`). Docs and comments wrap at 80 too
 - Name register addresses and magic numbers as constants (or reuse the `SMS_STS_*` constants from
   the SDK). No bare numbers like `40` in logic
 - Comments only when the WHY is non-obvious
