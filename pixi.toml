@@ -1,0 +1,24 @@
+[workspace]
+name = "talos_hack"
+description = "Software and tests for the Talos robot (physical AI hackathon)"
+# robostack-jazzy provides ROS 2 Jazzy packages (ros-jazzy-*) for when we add ROS
+channels = ["robostack-jazzy", "conda-forge"]
+platforms = ["win-64", "linux-64", "linux-aarch64", "osx-arm64"]
+
+[dependencies]
+# Must match the Python that RoboStack Jazzy is built against
+python = "3.12.*"
+pyserial = ">=3.5"
+pytest = ">=8"
+ruff = ">=0.6"
+
+[pypi-dependencies]
+# Editable install of our package; also pulls ftservo-python-sdk from PyPI
+talos-servo = { path = ".", editable = true }
+
+[tasks]
+test = "pytest"
+lint = "ruff check ."
+fmt = "ruff format ."
+fmt-check = "ruff format --check ."
+check = { depends-on = ["lint", "fmt-check", "test"] }
