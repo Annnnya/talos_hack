@@ -1,7 +1,10 @@
-"""Fake SDK objects so tests never touch a serial port."""
+"""Fake SDK objects so tests never touch a serial port, plus shared helpers."""
 
 from __future__ import annotations
 
+import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -15,7 +18,77 @@ from scservo_sdk import (
 )
 
 from talos_servo.bus import ServoBus
+from talos_servo.config import RobotConfig, parse_config
 from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
+
+# ROS tests publish on the real topic names (/cmd_vel, /robot/...). A private
+# domain that only reaches this machine keeps them away from a robot node
+# running on the same network, e.g. the Pi's talos-robot service.
+TEST_DOMAIN_BASE = 150
+TEST_DOMAIN_COUNT = 50
+os.environ["ROS_DOMAIN_ID"] = str(
+    TEST_DOMAIN_BASE + os.getpid() % TEST_DOMAIN_COUNT
+)
+os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = "LOCALHOST"
+
+# A position joint and a speed joint, enough for most robot tests.
+SMALL = {
+    "max_speed": 500,
+    "telemetry_hz": 50,
+    "control_hz": 50,
+    "command_timeout_s": 0.5,
+    "joints": {
+        "bend": {
+            "id": 1,
+            "control": "position",
+            "min_pos": 1000,
+            "max_pos": 3000,
+        },
+        "wheel": {"id": 2, "control": "speed"},
+    },
+}
+
+# Four mecanum wheels, rear right mounted the other way round.
+BASE = {
+    "max_speed": 500,
+    "joints": {
+        "fl": {"id": 1, "control": "speed"},
+        "fr": {"id": 2, "control": "speed"},
+        "rl": {"id": 3, "control": "speed"},
+        "rr": {"id": 4, "control": "speed", "inverted": True},
+        "bend": {"id": 5, "control": "position", "enabled": False},
+    },
+    "base": {
+        "wheels": ["fl", "fr", "rl", "rr"],
+        "wheelbase_m": 0.3,
+        "track_width_m": 0.3,
+        "steps_per_meter": 1000.0,
+        "max_linear_speed": 0.2,
+        "max_angular_speed": 1.0,
+    },
+}
+
+
+def config(data: dict) -> RobotConfig:
+    return parse_config(data)
+
+
+class FakeClock:
+    """Monotonic clock the test moves by hand: `clock.now += 1.0`."""
+
+    def __init__(self, now: float = 100.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def wait_for(predicate: Callable[[], object], timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not met in time")
+        time.sleep(0.01)
 
 
 @dataclass
@@ -89,7 +162,9 @@ class FakeHandler:
         return self.fail.get((method, servo_id), (COMM_SUCCESS, 0))
 
     def _register(self, servo_id: int, address: int) -> int:
-        return self.written.get((servo_id, address), self.registers.get(address, 0))
+        return self.written.get(
+            (servo_id, address), self.registers.get(address, 0)
+        )
 
     def ping(self, servo_id: int) -> tuple[int, int, int]:
         self.calls.append(("ping", servo_id))
@@ -98,12 +173,18 @@ class FakeHandler:
             comm = COMM_RX_TIMEOUT
         return (self.model if comm == COMM_SUCCESS else 0), comm, error
 
-    def write1ByteTxRx(self, servo_id: int, address: int, value: int) -> tuple[int, int]:
+    def write1ByteTxRx(
+        self, servo_id: int, address: int, value: int
+    ) -> tuple[int, int]:
         self.calls.append(("write1", servo_id, address, value))
         result = self._result("write1", servo_id)
         if result == (COMM_SUCCESS, 0):
             self.written[(servo_id, address)] = value
-        if address == SMS_STS_ID and result == (COMM_SUCCESS, 0) and self.present is not None:
+        if (
+            address == SMS_STS_ID
+            and result == (COMM_SUCCESS, 0)
+            and self.present is not None
+        ):
             self.present.discard(servo_id)
             self.present.add(value)
         return result
@@ -120,16 +201,22 @@ class FakeHandler:
         self.calls.append(("speed", servo_id, speed, acc))
         return self._result("speed", servo_id)
 
-    def WritePosEx(self, servo_id: int, position: int, speed: int, acc: int) -> tuple[int, int]:
+    def WritePosEx(
+        self, servo_id: int, position: int, speed: int, acc: int
+    ) -> tuple[int, int]:
         self.calls.append(("move", servo_id, position, speed, acc))
         return self._result("move", servo_id)
 
-    def read1ByteTxRx(self, servo_id: int, address: int) -> tuple[int, int, int]:
+    def read1ByteTxRx(
+        self, servo_id: int, address: int
+    ) -> tuple[int, int, int]:
         self.calls.append(("read1", servo_id, address))
         comm, error = self._result("read1", servo_id)
         return self._register(servo_id, address), comm, error
 
-    def read2ByteTxRx(self, servo_id: int, address: int) -> tuple[int, int, int]:
+    def read2ByteTxRx(
+        self, servo_id: int, address: int
+    ) -> tuple[int, int, int]:
         self.calls.append(("read2", servo_id, address))
         comm, error = self._result("read2", servo_id)
         return self._register(servo_id, address), comm, error
@@ -138,7 +225,9 @@ class FakeHandler:
     def scs_tohost(value: int, sign_bit: int) -> int:
         return -(value & ~(1 << sign_bit)) if value & (1 << sign_bit) else value
 
-    def readTxRx(self, servo_id: int, address: int, length: int) -> tuple[list[int], int, int]:
+    def readTxRx(
+        self, servo_id: int, address: int, length: int
+    ) -> tuple[list[int], int, int]:
         """Block read over a little-endian memory image built from position, speed, registers."""
         self.calls.append(("read_block", servo_id, address, length))
         comm, error = self._result("read_block", servo_id)
@@ -196,11 +285,18 @@ class FakeSdk:
 
     def bus(self, port: str = "FAKE", baudrate: int = 1_000_000) -> ServoBus:
         return ServoBus(
-            port, baudrate, port_factory=self.make_port, handler_factory=self.make_handler
+            port,
+            baudrate,
+            port_factory=self.make_port,
+            handler_factory=self.make_handler,
         )
 
     def bus_factory(self) -> partial[ServoBus]:
-        return partial(ServoBus, port_factory=self.make_port, handler_factory=self.make_handler)
+        return partial(
+            ServoBus,
+            port_factory=self.make_port,
+            handler_factory=self.make_handler,
+        )
 
 
 @pytest.fixture
@@ -214,7 +310,9 @@ class FakeI2c:
 
     bus_number: int
     address: int = 0x68
-    registers: dict[int, int] = field(default_factory=lambda: {WHO_AM_I: WHO_AM_I_MPU6050})
+    registers: dict[int, int] = field(
+        default_factory=lambda: {WHO_AM_I: WHO_AM_I_MPU6050}
+    )
     writes: list[tuple[int, int]] = field(default_factory=list)
     fail: dict[str, OSError] = field(default_factory=dict)
     closed: bool = False
@@ -234,7 +332,9 @@ class FakeI2c:
         self.writes.append((register, value))
         self.registers[register] = value
 
-    def read_i2c_block_data(self, address: int, register: int, length: int) -> list[int]:
+    def read_i2c_block_data(
+        self, address: int, register: int, length: int
+    ) -> list[int]:
         self._maybe_fail("read_block", address)
         return [self.registers.get(register + i, 0) for i in range(length)]
 
