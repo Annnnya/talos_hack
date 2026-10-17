@@ -1,4 +1,5 @@
-"""Robot layout from `config/robot.yaml`: joints, their limits and the mecanum base geometry."""
+"""Robot layout from `config/robot.yaml`: joints, their limits and the mecanum
+base geometry."""
 
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ DEFAULT_MAX_LINEAR_SPEED = 0.1
 DEFAULT_MAX_ANGULAR_SPEED = 0.5
 WHEEL_COUNT = 4
 
-# Joint names are ROS names too (topics, services, JointState), so keep them plain.
+# Joint names are ROS names too (topics, services, JointState), so keep them
+# plain.
 _JOINT_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -45,7 +47,10 @@ class JointConfig:
 
 @dataclass(frozen=True)
 class BaseConfig:
-    """Mecanum base. `wheels` names the speed joints in FL, FR, RL, RR order."""
+    """Mecanum base.
+
+    `wheels` names the speed joints in FL, FR, RL, RR order.
+    """
 
     wheels: tuple[str, str, str, str]
     wheelbase_m: float
@@ -111,7 +116,8 @@ def load_config(path: str | Path) -> RobotConfig:
 def _parse_joint(name: str, raw: dict) -> JointConfig:
     if not _JOINT_NAME.fullmatch(str(name)):
         raise ConfigError(
-            f"joint name {name!r} must be lowercase letters, digits and _, starting with a letter"
+            f"joint name {name!r} must be lowercase letters, digits and _, "
+            "starting with a letter"
         )
     if not isinstance(raw, dict) or "id" not in raw or "control" not in raw:
         raise ConfigError(f"joint {name}: needs at least 'id' and 'control'")
@@ -126,7 +132,8 @@ def _parse_joint(name: str, raw: dict) -> JointConfig:
     )
     if joint.control not in CONTROLS:
         raise ConfigError(
-            f"joint {name}: control must be one of {CONTROLS}, got {joint.control!r}"
+            f"joint {name}: control must be one of {CONTROLS}, got "
+            f"{joint.control!r}"
         )
     if not 0 <= joint.id <= MAX_SERVO_ID:
         raise ConfigError(
@@ -144,7 +151,8 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
     wheels = tuple(str(w) for w in raw.get("wheels") or ())
     if len(wheels) != WHEEL_COUNT or len(set(wheels)) != WHEEL_COUNT:
         raise ConfigError(
-            f"base.wheels must name {WHEEL_COUNT} different joints (FL, FR, RL, RR)"
+            f"base.wheels must name {WHEEL_COUNT} different joints (FL, FR, "
+            "RL, RR)"
         )
     for wheel in wheels:
         joint = joints.get(wheel)

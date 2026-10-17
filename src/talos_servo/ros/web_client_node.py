@@ -1,4 +1,5 @@
-"""ROS 2 node that clients (web server, CLI) use to talk to the running robot node.
+"""ROS 2 node that clients (web server, CLI) use to talk to the running robot
+node.
 
 It only wires up topics and services. State tracking lives in
 `talos_servo.ros.web_backend.RosBackend`.

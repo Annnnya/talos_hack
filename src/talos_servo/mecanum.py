@@ -1,7 +1,9 @@
-"""Mecanum drive kinematics for four independently driven wheels, in FL, FR, RL, RR order.
+"""Mecanum drive kinematics for four independently driven wheels, in FL, FR, RL,
+RR order.
 
-Wheel speeds here always mean "positive drives the robot forward". Motors mounted the other way
-round are handled by `inverted` in the robot config, not here.
+Wheel speeds here always mean "positive drives the robot forward". Motors
+mounted the other way round are handled by `inverted` in the robot config, not
+here.
 """
 
 from __future__ import annotations
@@ -22,10 +24,11 @@ def wheel_speeds(
     steps_per_meter: float,
     max_speed: int,
 ) -> tuple[int, int, int, int]:
-    """Map body velocity (m/s, m/s, rad/s) to FL, FR, RL, RR wheel speeds in steps/s.
+    """Map body velocity (m/s, m/s, rad/s) to FL, FR, RL, RR wheel speeds in
+    steps/s.
 
-    If any wheel would exceed `max_speed`, all four are scaled down together so the robot
-    still moves in the commanded direction.
+    If any wheel would exceed `max_speed`, all four are scaled down together so
+    the robot still moves in the commanded direction.
     """
     values = (
         linear_x,
@@ -63,10 +66,12 @@ def wheel_speeds(
 def wheel_accelerations(
     previous: Sequence[int], target: Sequence[int], base_acceleration: int
 ) -> tuple[int, ...]:
-    """Scale each wheel's acceleration so all wheels finish their speed change together.
+    """Scale each wheel's acceleration so all wheels finish their speed change
+    together.
 
-    The wheel with the largest speed change uses `base_acceleration`; the others ramp
-    proportionally slower. Never returns 0, which the servo treats as "no ramp".
+    The wheel with the largest speed change uses `base_acceleration`; the others
+    ramp proportionally slower. Never returns 0, which the servo treats as "no
+    ramp".
     """
     if len(previous) != len(target):
         raise ValueError(

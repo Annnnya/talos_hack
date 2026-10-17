@@ -1,11 +1,13 @@
-"""The robot: every enabled joint of `config/robot.yaml` on one servo bus. No ROS here.
+"""The robot: every enabled joint of `config/robot.yaml` on one servo bus.
 
-`Robot` is the only code that talks to the servos. The ROS node, the web server and the CLI
-all drive the robot through it, so limits, motor direction, the command watchdog and stopping
-live in exactly one place.
+No ROS here.
 
-Speed joints are written from `tick()`: one sync-write packet with every wheel speed, then one
-servo read, round robin. Call it at `config.control_hz`.
+`Robot` is the only code that talks to the servos. The ROS node, the web server
+and the CLI all drive the robot through it, so limits, motor direction, the
+command watchdog and stopping live in exactly one place.
+
+Speed joints are written from `tick()`: one sync-write packet with every wheel
+speed, then one servo read, round robin. Call it at `config.control_hz`.
 """
 
 from __future__ import annotations
@@ -36,7 +38,8 @@ from talos_servo.mecanum import (
 
 log = logging.getLogger(__name__)
 
-# Who sent a joint its last move, spin or stop. Shown in the web UI next to the sliders.
+# Who sent a joint its last move, spin or stop. Shown in the web UI next to the
+# sliders.
 SOURCE_WEB = "web"  # a browser; the client id tells browsers apart
 SOURCE_CLI = "cli"  # talos-servo commands
 SOURCE_ROS = "ros"  # any other ROS node
@@ -57,7 +60,8 @@ class CommandError(ValueError):
 
 @dataclass
 class Joint:
-    """Live state of one joint, in joint units: positive is forward whatever `inverted` says."""
+    """Live state of one joint, in joint units: positive is forward whatever
+    `inverted` says."""
 
     name: str
     id: int
@@ -78,7 +82,8 @@ class Joint:
     error: str | None = None
     command_source: str | None = None
     command_client: str | None = None
-    # Monotonic time of the last command, local to this process; never sent as is.
+    # Monotonic time of the last command, local to this process; never sent as
+    # is.
     command_at: float | None = None
 
     @classmethod
@@ -115,7 +120,7 @@ def check_spin(j: Joint, speed: int, max_speed: int) -> int:
 
 
 def public_state(j: Joint, now: float) -> dict[str, Any]:
-    """Joint state as sent to clients: `command_*` becomes `last_command` with an age."""
+    """Joint state for clients; `command_*` becomes `last_command`."""
     data = asdict(j)
     source = data.pop("command_source")
     client = data.pop("command_client")
@@ -139,10 +144,11 @@ def record_command(
 
 
 class Robot:
-    """Owns the bus. Every bus access holds one lock because the SDK is not thread-safe.
+    """Owns the bus. Every bus access holds one lock because the SDK is not
+    thread-safe.
 
-    Bus failures on a joint mark it offline with the error text instead of raising from
-    `tick()`, so one unplugged servo never stops the others.
+    Bus failures on a joint mark it offline with the error text instead of
+    raising from `tick()`, so one unplugged servo never stops the others.
     """
 
     def __init__(
@@ -160,7 +166,8 @@ class Robot:
             c.name: Joint.from_config(c) for c in config.enabled_joints
         }
         self._lock = threading.Lock()
-        # Speed joints whose last command expires (ROS, drive): name -> time it was sent.
+        # Speed joints whose last command expires (ROS, drive): name -> time it
+        # was sent.
         self._expires: dict[str, float] = {}
         self._acceleration = {
             name: DEFAULT_ACCELERATION for name in self._speed_joints()
@@ -170,7 +177,8 @@ class Robot:
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
-        """Open the bus, put each joint in its configured mode and start from a stopped robot."""
+        """Open the bus, put each joint in its configured mode and start from a
+        stopped robot."""
         with self._lock:
             self.bus.open()
             for j in self.joints.values():
@@ -179,7 +187,10 @@ class Robot:
             self._stop_speed_joints()
 
     def close(self) -> None:
-        """Stop every speed joint and close the bus. Safe to call more than once."""
+        """Stop every speed joint and close the bus.
+
+        Safe to call more than once.
+        """
         with self._lock:
             try:
                 self._stop_speed_joints()
@@ -193,7 +204,7 @@ class Robot:
 
     # --- control loop ----------------------------------------------------
     def tick(self) -> None:
-        """One control step: watchdog, one packet with all wheel speeds, one servo read."""
+        """One control step: watchdog, all wheel speeds, one servo read."""
         with self._lock:
             self._ticks += 1
             self._expire(self.clock())
@@ -241,7 +252,8 @@ class Robot:
         """Set a speed joint's speed; the next `tick()` sends it.
 
         With `expires`, the joint stops unless the command is repeated within
-        `config.command_timeout_s` (streamed commands such as ROS velocity commands).
+        `config.command_timeout_s` (streamed commands such as ROS velocity
+        commands).
         """
         with self._lock:
             j = self._get(joint)
@@ -258,7 +270,10 @@ class Robot:
         source: str = SOURCE_ROS,
         client: str | None = None,
     ) -> None:
-        """Drive the mecanum base (m/s, m/s, rad/s). Stops unless repeated, like /cmd_vel."""
+        """Drive the mecanum base (m/s, m/s, rad/s).
+
+        Stops unless repeated, like /cmd_vel.
+        """
         base = self.config.base
         if base is None:
             raise CommandError(
@@ -301,7 +316,10 @@ class Robot:
     def stop(
         self, joint: str, *, source: str = SOURCE_WEB, client: str | None = None
     ) -> None:
-        """Stop a speed joint now. Position joints hold their target, so this does nothing."""
+        """Stop a speed joint now.
+
+        Position joints hold their target, so this does nothing.
+        """
         with self._lock:
             j = self._get(joint)
             if j.control != SPEED:
@@ -365,7 +383,8 @@ class Robot:
                 self._set_speed(self.joints[name], 0, False, SOURCE_ROBOT, None)
 
     def _write_speeds(self) -> None:
-        # Resent every tick: a sync write gets no reply, so a lost packet is fixed by the next.
+        # Resent every tick: a sync write gets no reply, so a lost packet is
+        # fixed by the next.
         names = self._speed_joints()
         if not names:
             return
@@ -380,7 +399,8 @@ class Robot:
                 self.joints[n].error = str(exc)
 
     def _read_next(self) -> None:
-        """Read one joint, round robin, skipping offline joints except on retry ticks."""
+        """Read one joint, round robin, skipping offline joints except on retry
+        ticks."""
         names = list(self.joints)
         retry = self._ticks % RETRY_OFFLINE_EVERY == 0
         for _ in names:
@@ -394,7 +414,7 @@ class Robot:
                 return
 
     def _setup(self, j: Joint) -> None:
-        """Bring a joint online: check it answers, set its mode once, read its state."""
+        """Bring a joint online: ping it, set its mode, read its state."""
         self.bus.ping(j.id)
         mode = MODE_WHEEL if j.control == SPEED else MODE_POSITION
         if self.bus.read_mode(j.id) != mode:
@@ -458,7 +478,8 @@ class Robot:
             return self.joints[joint]
         except KeyError:
             raise CommandError(
-                f"unknown joint {joint!r}, expected one of {sorted(self.joints)}"
+                f"unknown joint {joint!r}, expected one of "
+                f"{sorted(self.joints)}"
             ) from None
 
     @staticmethod
@@ -472,7 +493,8 @@ class Robot:
 
     @staticmethod
     def _command(j: Joint, action: Callable[[], None]) -> None:
-        """Run a user command; on failure record it on the joint and re-raise for the caller."""
+        """Run a user command; on failure record it on the joint and re-raise
+        for the caller."""
         try:
             action()
         except ServoError as exc:

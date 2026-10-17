@@ -1,7 +1,8 @@
 """What the web server needs from whatever drives the robot.
 
 Two implementations: `talos_servo.robot.Robot` owns the serial bus directly, and
-`talos_servo.ros.web_backend.RosBackend` goes through the running ROS robot node.
+`talos_servo.ros.web_backend.RosBackend` goes through the running ROS robot
+node.
 """
 
 from __future__ import annotations
@@ -25,10 +26,10 @@ class RobotBackend(Protocol):
 
     def snapshot(self) -> list[dict[str, Any]]: ...
 
-    # `source` and `client` say who sent a command (see SOURCE_* in robot.py); the UI shows it
-    # next to the sliders.
+    # `source` and `client` say who sent a command (see SOURCE_* in robot.py);
+    # the UI shows it next to the sliders.
     def stop_all(self, *, source: str = ..., client: str | None = None) -> None:
-        """Best effort: never raises, because it runs when the last browser disconnects."""
+        """Best effort, never raises: it runs when the last browser leaves."""
 
     def stop(
         self, joint: str, *, source: str = ..., client: str | None = None

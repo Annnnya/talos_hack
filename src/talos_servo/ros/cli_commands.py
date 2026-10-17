@@ -1,8 +1,10 @@
-"""`talos-servo spin/monitor/drive --ros`: the same commands, through the robot node.
+"""`talos-servo spin/monitor/drive --ros`: the same commands, through the robot
+node.
 
-The robot node stays the only program on the serial port, so these can run next to the web UI
-(`talos-servo web --ros`) and other ROS nodes, and the UI shows what they do. Each command stops
-only the joints it started, not wheels someone else is driving.
+The robot node stays the only program on the serial port, so these can run next
+to the web UI (`talos-servo web --ros`) and other ROS nodes, and the UI shows
+what they do. Each command stops only the joints it started, not wheels someone
+else is driving.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from talos_servo.robot import SOURCE_CLI
 from talos_servo.ros.web_backend import RosBackend
 
 Output = Callable[[str], None]
-# How long stop commands are re-sent before the node goes away. If they are all lost anyway, the
-# robot's command timeout stops the wheel.
+# How long stop commands are re-sent before the node goes away. If they are all
+# lost anyway, the robot's command timeout stops the wheel.
 STOP_FLUSH_TIME = 0.2
 
 
@@ -33,7 +35,8 @@ def spin_over_ros(
     try:
         _start_spinning(backend, joints, speed, out)
         out(
-            f"spinning {list(joints)} at speed {speed} for {seconds}s through the robot node"
+            f"spinning {list(joints)} at speed {speed} for {seconds}s through "
+            "the robot node"
         )
         _hold(backend, seconds)
     finally:
@@ -74,7 +77,8 @@ def drive_over_ros(
     linear: float,
     angular: float,
 ) -> None:
-    """Keyboard driving that publishes /cmd_vel; the robot node does the rest."""
+    """Keyboard driving that publishes /cmd_vel; the robot node does the
+    rest."""
     backend.open()
     try:
         teleop.run(backend.drive, read_key, linear=linear, angular=angular)
@@ -86,7 +90,8 @@ def _check_joints(backend: RosBackend, joints: Sequence[str]) -> None:
     missing = [j for j in joints if j not in backend.joints]
     if missing:
         raise ServoError(
-            f"joints {missing} are not enabled in the config, and the robot node only drives "
+            f"joints {missing} are not enabled in the config, and the robot "
+            "node only drives "
             f"enabled joints (enabled: {sorted(backend.joints)})"
         )
 
@@ -108,10 +113,12 @@ def _hold(
     every: float = 0.0,
     on_tick: Callable[[], None] | None = None,
 ) -> None:
-    """Wait `seconds` (None: until Ctrl+C) while re-sending speeds to the robot node.
+    """Wait `seconds` (None: until Ctrl+C) while re-sending speeds to the robot
+    node.
 
-    Runs at the telemetry rate whatever `every` is, because a print interval longer than the
-    robot's command timeout would otherwise let the watchdog stop the wheels.
+    Runs at the telemetry rate whatever `every` is, because a print interval
+    longer than the robot's command timeout would otherwise let the watchdog
+    stop the wheels.
     """
     period = 1.0 / backend.config.telemetry_hz
     start = time.monotonic()
@@ -140,8 +147,8 @@ def _print_states(
 
 
 def _stop_and_release(backend: RosBackend, joints: Sequence[str]) -> None:
-    # A single stop is a fire-and-forget publish a busy robot node can miss, so repeat it until
-    # the node goes away.
+    # A single stop is a fire-and-forget publish a busy robot node can miss, so
+    # repeat it until the node goes away.
     period = 1.0 / backend.config.telemetry_hz
     deadline = time.monotonic() + STOP_FLUSH_TIME
     try:

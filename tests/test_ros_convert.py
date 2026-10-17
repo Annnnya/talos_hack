@@ -6,8 +6,6 @@ import pytest
 
 from talos_servo.ros.convert import (
     CENTER_STEP,
-    RAD_PER_STEP,
-    STEPS_PER_TURN,
     command_frame,
     parse_command_frame,
     rad_speed_to_steps,

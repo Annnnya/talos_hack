@@ -50,12 +50,14 @@ MAX_ACCELERATION = 254
 # 12-bit encoder: 0..4095 is one full turn.
 MAX_POSITION = 4095
 
-# Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1 V.
+# Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1
+# V.
 LOAD_SIGN_BIT = 10
 VOLTAGE_SCALE = 0.1
 
-# Present current is a 15-bit magnitude plus a sign bit. STS3215 reports 6.5 mA per count
-# (Feetech memory table); verify against a meter before trusting absolute values.
+# Present current is a 15-bit magnitude plus a sign bit. STS3215 reports 6.5 mA
+# per count (Feetech memory table); verify against a meter before trusting
+# absolute values.
 CURRENT_SIGN_BIT = 15
 CURRENT_SCALE_A = 0.0065
 
@@ -90,8 +92,8 @@ class ServoError(RuntimeError):
 class ServoBus:
     """One serial bus of daisy-chained STS/SMS servos.
 
-    Use as a context manager. On exit every servo this bus set spinning is stopped,
-    even if the body raised, and the port is closed.
+    Use as a context manager. On exit every servo this bus set spinning is
+    stopped, even if the body raised, and the port is closed.
     """
 
     def __init__(
@@ -110,7 +112,8 @@ class ServoBus:
         self._is_open = False
 
     def open(self) -> None:
-        # The SDK returns False for some failures but lets pyserial exceptions escape for others.
+        # The SDK returns False for some failures but lets pyserial exceptions
+        # escape for others.
         try:
             opened = self._port.openPort()
         except SerialException as exc:
@@ -135,10 +138,12 @@ class ServoBus:
             )
 
     def _lock_port(self) -> None:
-        """Refuse to share the bus with another process: interleaved packets corrupt both.
+        """Refuse to share the bus with another process.
 
-        pyserial opens ports non-exclusively on Linux, so take an advisory lock that every
-        ServoBus (CLI, web UI, robot node) respects.
+        Interleaved packets corrupt both.
+
+        pyserial opens ports non-exclusively on Linux, so take an advisory lock
+        that every ServoBus (CLI, web UI, robot node) respects.
         """
         serial_port = getattr(self._port, "ser", None)
         if fcntl is None or serial_port is None:
@@ -148,7 +153,8 @@ class ServoBus:
         except OSError as exc:
             self._port.closePort()
             raise ServoError(
-                f"serial port {self.port_name} is already in use by another process "
+                f"serial port {self.port_name} is already in use by another "
+                "process "
                 "(is talos-robot running?)"
             ) from exc
 
@@ -174,7 +180,8 @@ class ServoBus:
         self.close()
 
     def ping(self, servo_id: int) -> int:
-        """Return the model number of the servo, or raise if it does not answer."""
+        """Return the model number of the servo, or raise if it does not
+        answer."""
         model, comm, error = self._handler.ping(servo_id)
         self._check(comm, error, f"ping servo {servo_id}")
         return model
@@ -213,19 +220,24 @@ class ServoBus:
         speed: int,
         acceleration: int = DEFAULT_ACCELERATION,
     ) -> None:
-        """Move to an absolute position (position mode). Speed is in steps/s and must be > 0."""
+        """Move to an absolute position (position mode).
+
+        Speed is in steps/s and must be > 0.
+        """
         if not 0 <= position <= MAX_POSITION:
             raise ValueError(
                 f"position must be within 0..{MAX_POSITION}, got {position}"
             )
-        # Speed 0 means "as fast as possible" on the servo, so it is never sent by accident.
+        # Speed 0 means "as fast as possible" on the servo, so it is never sent
+        # by accident.
         if not 1 <= speed <= MAX_SPEED:
             raise ValueError(
                 f"speed must be within 1..{MAX_SPEED}, got {speed}"
             )
         if not 0 <= acceleration <= MAX_ACCELERATION:
             raise ValueError(
-                f"acceleration must be within 0..{MAX_ACCELERATION}, got {acceleration}"
+                f"acceleration must be within 0..{MAX_ACCELERATION}, got "
+                f"{acceleration}"
             )
         comm, error = self._handler.WritePosEx(
             servo_id, position, speed, acceleration
@@ -233,7 +245,8 @@ class ServoBus:
         self._check(comm, error, f"move servo {servo_id} to {position}")
 
     def read_status(self, servo_id: int) -> ServoStatus:
-        """Read load, voltage (V), temperature (C), current (A) and the moving flag."""
+        """Read load, voltage (V), temperature (C), current (A) and the moving
+        flag."""
         raw_load, comm, error = self._handler.read2ByteTxRx(
             servo_id, SMS_STS_PRESENT_LOAD_L
         )
@@ -279,16 +292,21 @@ class ServoBus:
         speed: int,
         acceleration: int = DEFAULT_ACCELERATION,
     ) -> None:
-        """Set wheel-mode speed in steps/s. Negative values spin the other way."""
+        """Set wheel-mode speed in steps/s.
+
+        Negative values spin the other way.
+        """
         if not -MAX_SPEED <= speed <= MAX_SPEED:
             raise ValueError(
                 f"speed must be within +/-{MAX_SPEED}, got {speed}"
             )
         if not 0 <= acceleration <= MAX_ACCELERATION:
             raise ValueError(
-                f"acceleration must be within 0..{MAX_ACCELERATION}, got {acceleration}"
+                f"acceleration must be within 0..{MAX_ACCELERATION}, got "
+                f"{acceleration}"
             )
-        # Track before writing: if the write half-succeeds we still try to stop it later.
+        # Track before writing: if the write half-succeeds we still try to stop
+        # it later.
         if speed:
             self._moving.add(servo_id)
         comm, error = self._handler.WriteSpec(servo_id, speed, acceleration)
@@ -308,9 +326,10 @@ class ServoBus:
     ) -> None:
         """Set wheel-mode speeds of several servos in one sync-write packet.
 
-        All servos apply the new speed from the same broadcast packet, so they start together.
-        A sync write gets no reply, so per-servo errors only show up on later reads.
-        `acceleration` is one value for all servos or a per-servo mapping.
+        All servos apply the new speed from the same broadcast packet, so they
+        start together. A sync write gets no reply, so per-servo errors only
+        show up on later reads. `acceleration` is one value for all servos or a
+        per-servo mapping.
         """
         if not speeds:
             raise ValueError("speeds must name at least one servo")
@@ -327,11 +346,13 @@ class ServoBus:
                 )
             if not 0 <= acc <= MAX_ACCELERATION:
                 raise ValueError(
-                    f"acceleration must be within 0..{MAX_ACCELERATION}, got {acc}"
+                    f"acceleration must be within 0..{MAX_ACCELERATION}, got "
+                    f"{acc}"
                 )
             packets[servo_id] = _speed_packet(speed, acc)
 
-        # Track before writing: if the write half-succeeds we still try to stop it later.
+        # Track before writing: if the write half-succeeds we still try to stop
+        # it later.
         self._moving.update(
             servo_id for servo_id, speed in speeds.items() if speed
         )
@@ -358,7 +379,10 @@ class ServoBus:
         self.set_speeds(dict.fromkeys(servo_ids, 0), acceleration)
 
     def stop_all(self) -> None:
-        """Best-effort stop of every servo this bus started. Logs failures instead of raising."""
+        """Best-effort stop of every servo this bus started.
+
+        Logs failures instead of raising.
+        """
         for servo_id in sorted(self._moving):
             try:
                 self.stop(servo_id)
@@ -378,7 +402,8 @@ class ServoBus:
         self._check(comm, error, f"read telemetry of servo {servo_id}")
         if len(data) != TELEMETRY_LENGTH:
             raise ServoError(
-                f"read telemetry of servo {servo_id} failed: got {len(data)} bytes, "
+                f"read telemetry of servo {servo_id} failed: got {len(data)} "
+                "bytes, "
                 f"expected {TELEMETRY_LENGTH}"
             )
 
@@ -414,8 +439,9 @@ class ServoBus:
     def set_id(self, current_id: int, new_id: int) -> None:
         """Permanently change a servo's ID (EEPROM write).
 
-        Refuses if the new ID is already answering, since two servos sharing an ID on one bus
-        cannot be told apart and both would need to be unplugged to fix it.
+        Refuses if the new ID is already answering, since two servos sharing an
+        ID on one bus cannot be told apart and both would need to be unplugged
+        to fix it.
         """
         if not 0 <= new_id <= MAX_SERVO_ID:
             raise ValueError(
@@ -462,7 +488,7 @@ class ServoBus:
 
 
 def _speed_packet(speed: int, acceleration: int) -> list[int]:
-    """Bytes from SMS_STS_ACC: acceleration, goal position, goal time, goal speed.
+    """Bytes from SMS_STS_ACC: acceleration, goal position, time, speed.
 
     Same layout as the SDK's WriteSpec; position and time stay 0 in wheel mode.
     """

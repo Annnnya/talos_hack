@@ -11,7 +11,8 @@ from talos_servo.bus import MAX_POSITION
 from talos_servo.robot import SOURCE_ROBOT, SOURCE_ROS, SOURCES
 
 STEPS_PER_TURN = MAX_POSITION + 1
-# Step 2048 (half a turn) is joint angle 0, so the usable range is about -pi..pi.
+# Step 2048 (half a turn) is joint angle 0, so the usable range is about
+# -pi..pi.
 CENTER_STEP = STEPS_PER_TURN // 2
 RAD_PER_STEP = 2 * math.pi / STEPS_PER_TURN
 
@@ -23,7 +24,10 @@ def steps_to_rad(steps: int) -> float:
 
 
 def rad_to_steps(rad: float) -> int:
-    """Joint angle to a goal position in steps. Range clamping is left to the robot."""
+    """Joint angle to a goal position in steps.
+
+    Range clamping is left to the robot.
+    """
     _require_finite(rad, "position")
     return round(rad / RAD_PER_STEP) + CENTER_STEP
 
@@ -38,18 +42,23 @@ def rad_speed_to_steps(rad_per_s: float) -> int:
 
 
 def readout_topic(prefix: str, joint: str, field: str) -> str:
-    """Topic for one numeric readout: ('/robot', 'front_left_wheel', 'voltage') ->
-    '/robot/front_left_wheel/voltage'. A prefix of '~' keeps it under the node name."""
+    """Topic for one numeric readout.
+
+    ('/robot', 'wheel', 'voltage') -> '/robot/wheel/voltage'. A prefix of '~'
+    keeps it under the node name.
+    """
     return f"{prefix.rstrip('/')}/{joint}/{field}"
 
 
 def command_frame(source: str, client: str | None = None) -> str:
-    """Who sent a command, for `header.frame_id` of position_cmd / velocity_cmd: 'web:3fa2c1'."""
+    """Who sent a command, for `header.frame_id` of position_cmd / velocity_cmd:
+    'web:3fa2c1'."""
     return f"{source}{_FRAME_SEPARATOR}{client}" if client else source
 
 
 def parse_command_frame(frame_id: str) -> tuple[str, str | None]:
-    """Inverse of command_frame. Anything unknown (most ROS nodes send '') counts as 'ros'.
+    """Inverse of command_frame. Anything unknown (most ROS nodes send '')
+    counts as 'ros'.
 
     'robot' is reserved for the robot's own stops, so a sender cannot claim it.
     """

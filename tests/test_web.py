@@ -39,7 +39,8 @@ def joint(msg: dict, name: str) -> dict:
     return next(s for s in msg["servos"] if s["name"] == name)
 
 
-# --- websocket server ----------------------------------------------------------
+# --- websocket server
+# ----------------------------------------------------------
 
 
 def test_initial_state_lists_enabled_joints(client):
@@ -136,7 +137,8 @@ def test_spin_keeps_going_until_stopped(client, robot):
         receive_until(
             ws,
             lambda m: (
-                m["type"] == "state" and joint(m, "wheel")["target_speed"] == 200
+                m["type"] == "state"
+                and joint(m, "wheel")["target_speed"] == 200
             ),
         )
         ws.send_json({"type": "stop_all"})
@@ -149,7 +151,8 @@ def test_last_client_leaving_stops_spinning_joints(client, robot):
         receive_until(
             ws,
             lambda m: (
-                m["type"] == "state" and joint(m, "wheel")["target_speed"] == 200
+                m["type"] == "state"
+                and joint(m, "wheel")["target_speed"] == 200
             ),
         )
     wait_for(lambda: robot.joints["wheel"].target_speed == 0)
@@ -173,7 +176,8 @@ def test_last_client_stop_survives_connection_task_cancel(
         receive_until(
             ws,
             lambda m: (
-                m["type"] == "state" and joint(m, "wheel")["target_speed"] == 200
+                m["type"] == "state"
+                and joint(m, "wheel")["target_speed"] == 200
             ),
         )
     wait_for(lambda: robot.joints["wheel"].target_speed == 0)
@@ -185,7 +189,8 @@ def test_server_shutdown_closes_the_port(sdk, robot):
     assert sdk.port.closed_count == 1
 
 
-# --- cli -------------------------------------------------------------------------
+# --- cli
+# -------------------------------------------------------------------------
 
 
 def test_web_command_needs_a_port(monkeypatch, capsys):

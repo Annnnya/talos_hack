@@ -1,19 +1,22 @@
 """ROS 2 node that owns the robot: the only program on the servo serial port.
 
-- `/cmd_vel` (geometry_msgs/Twist, in): drive the mecanum base. Stops unless repeated within
-  `command_timeout_s` from the config
+- `/cmd_vel` (geometry_msgs/Twist, in): drive the mecanum base. Stops unless
+  repeated within `command_timeout_s` from the config
 - `/odom` (nav_msgs/Odometry): wheel odometry in frame `odom`, child
   `base_link`, no TF (the EKF publishes odom -> base_link)
-- `/joint_states` (sensor_msgs/JointState): position rad, velocity rad/s, effort = raw load
-- `/diagnostics` (diagnostic_msgs/DiagnosticArray): one entry per joint named `robot: <joint>`
-  with online, control, torque, voltage, temperature, current, moving, error, last command
-- `/robot/position_cmd` (sensor_msgs/JointState, in): goal angles by joint name, optional
-  velocity (rad/s) as move speed
-- `/robot/velocity_cmd` (sensor_msgs/JointState, in): speed joint velocities by name. Stops
-  unless repeated within `command_timeout_s`
-- `/robot/<joint>/temperature`, `voltage`, `current`, `load`, `moving`: plain numeric readouts,
-  see `talos_servo.ros.readouts`
-- `/robot/stop_all` (std_srvs/Trigger), `/robot/<joint>/set_torque` (std_srvs/SetBool)
+- `/joint_states` (sensor_msgs/JointState): position rad, velocity rad/s, effort
+  = raw load
+- `/diagnostics` (diagnostic_msgs/DiagnosticArray): one entry per joint named
+  `robot: <joint>` with online, control, torque, voltage, temperature, current,
+  moving, error, last command
+- `/robot/position_cmd` (sensor_msgs/JointState, in): goal angles by joint name,
+  optional velocity (rad/s) as move speed
+- `/robot/velocity_cmd` (sensor_msgs/JointState, in): speed joint velocities by
+  name. Stops unless repeated within `command_timeout_s`
+- `/robot/<joint>/temperature`, `voltage`, `current`, `load`, `moving`: plain
+  numeric readouts, see `talos_servo.ros.readouts`
+- `/robot/stop_all` (std_srvs/Trigger), `/robot/<joint>/set_torque`
+  (std_srvs/SetBool)
 
 Run with `pixi run -e ros robot-node`.
 """
@@ -80,7 +83,8 @@ STATUS_KEYS = (
     "temp",
     "current",
     "moving",
-    # Last command, so clients such as the web UI can show who moved a joint and when.
+    # Last command, so clients such as the web UI can show who moved a joint and
+    # when.
     "target",
     "target_speed",
     "command_source",
@@ -133,7 +137,8 @@ class RobotNode(Node):
         self.create_timer(1.0 / config.telemetry_hz, self.publish_joint_states)
         self.create_timer(1.0 / status_hz, self.publish_status)
         self.get_logger().info(
-            f"serving joints {sorted(robot.joints)}, command timeout {config.command_timeout_s} s"
+            f"serving joints {sorted(robot.joints)}, command timeout "
+            f"{config.command_timeout_s} s"
         )
 
     # --- telemetry -------------------------------------------------------
@@ -187,7 +192,8 @@ class RobotNode(Node):
         self.publish_readouts()
 
     def publish_readouts(self) -> None:
-        """Numeric readouts for every online joint; offline ones show up in /diagnostics."""
+        """Numeric readouts for every online joint; offline ones show up in
+        /diagnostics."""
         stamp = self.get_clock().now().to_msg()
         for j in self.robot.snapshot():
             if not j["online"]:

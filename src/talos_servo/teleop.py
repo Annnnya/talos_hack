@@ -1,7 +1,8 @@
 """Keyboard driving for `talos-servo drive`: keys in, body velocity out.
 
-The loop only knows a `drive(vx, vy, wz)` callable, so the same code drives the robot directly
-(`Robot.drive`) or through ROS (`RosBackend.drive`, which publishes /cmd_vel).
+The loop only knows a `drive(vx, vy, wz)` callable, so the same code drives the
+robot directly (`Robot.drive`) or through ROS (`RosBackend.drive`, which
+publishes /cmd_vel).
 """
 
 from __future__ import annotations
@@ -11,12 +12,16 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-# A held key repeats faster than this, so letting go stops the robot within this time.
+# A held key repeats faster than this, so letting go stops the robot within this
+# time.
 KEY_TIMEOUT_S = 0.3
 LOOP_PERIOD_S = 0.05
 QUIT_KEY = "x"
 STOP_KEY = " "
-HELP = "W/S forward/back, A/D left/right, Q/E turn, space stops, X quits. Hold a key to keep going."
+HELP = (
+    "W/S forward/back, A/D left/right, Q/E turn, space stops, X quits. Hold a "
+    "key to keep going."
+)
 
 # key -> (vx, vy, wz) as fractions of the linear and angular speed
 KEYS: dict[str, tuple[float, float, float]] = {
@@ -54,7 +59,10 @@ def run(
     tick: Callable[[], None] = lambda: None,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Drive from keys until X. Sends a stop on the way out, also on Ctrl+C."""
+    """Drive from keys until X.
+
+    Sends a stop on the way out, also on Ctrl+C.
+    """
     command = STOPPED
     last_key_at = clock()
     try:
@@ -76,7 +84,8 @@ def run(
 
 @contextmanager
 def terminal_keys() -> Iterator[ReadKey]:
-    """Read single key presses from the terminal without Enter (Linux and macOS)."""
+    """Read single key presses from the terminal without Enter (Linux and
+    macOS)."""
     try:
         import select
         import termios

@@ -47,7 +47,8 @@ def test_missing_port_is_an_error(run, capsys):
 
 def test_port_from_env(run, sdk, monkeypatch):
     monkeypatch.setenv(cli.PORT_ENV_VAR, "COM7")
-    # Parser defaults are read at build time, so the env var must be set before main().
+    # Parser defaults are read at build time, so the env var must be set before
+    # main().
     assert run(["ping"]) == 0
     assert sdk.port.name == "COM7"
 
@@ -137,7 +138,8 @@ def test_set_id_rejects_id_lists(run):
         run(["set-id", "--port", "COM5", "--id", "1,2", "--new-id", "3"])
 
 
-# --- --ros: spin and monitor through the servo bridge -----------------------------------
+# --- --ros: spin and monitor through the servo bridge
+# -----------------------------------
 
 
 @pytest.fixture

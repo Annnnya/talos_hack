@@ -1,7 +1,7 @@
 """RosBackend and CLI --ros commands against a real robot node.
 
-The robot node runs on a Robot over the fake SDK. conftest.py puts every test
-on a private ROS domain, so nothing here can reach a real robot.
+The robot node runs on a Robot over the fake SDK. conftest.py puts every test on
+a private ROS domain, so nothing here can reach a real robot.
 """
 
 from __future__ import annotations
@@ -207,7 +207,8 @@ def test_silent_robot_node_marks_joints_offline():
     assert "no status from the robot node" in s["error"]
 
 
-# --- talos-servo spin --ros / monitor --ros --------------------------------------
+# --- talos-servo spin --ros / monitor --ros
+# --------------------------------------
 
 
 def run_in_thread(fn, *args, **kwargs) -> threading.Thread:
@@ -304,7 +305,8 @@ def test_drive_over_ros_publishes_cmd_vel_and_stops(robot_node, robot):
     assert sent[-1] == (0.0, 0.0, 0.0)
 
 
-# --- last command: who moved a joint ---------------------------------------------
+# --- last command: who moved a joint
+# ---------------------------------------------
 
 
 def test_cli_spin_shows_up_in_the_web_backend(backend, robot):
@@ -355,8 +357,7 @@ def test_web_backend_stops_feeding_a_wheel_someone_else_took_over(
     assert robot.joints["wheel"].target_speed == 0
     wait_for(
         lambda: (
-            backend_state(backend, "wheel")["last_command"]["source"]
-            == "robot"
+            backend_state(backend, "wheel")["last_command"]["source"] == "robot"
         ),
         WAIT,
     )

@@ -116,7 +116,8 @@ BROADCAST_ID = 254
 
 @dataclass
 class FakeGroupSyncWrite:
-    """Mimics the SDK GroupSyncWrite; each sent packet is recorded on the handler."""
+    """Mimics the SDK GroupSyncWrite; each sent packet is recorded on the
+    handler."""
 
     handler: FakeHandler
     data: dict[int, list[int]] = field(default_factory=dict)
@@ -137,9 +138,11 @@ class FakeGroupSyncWrite:
 
 @dataclass
 class FakeHandler:
-    """Records every call; `fail` maps (method, servo_id) to (comm, error) to inject failures.
+    """Records every call; `fail` maps (method, servo_id) to (comm, error) to
+    inject failures.
 
-    If `present` is set, only those IDs answer pings, and an ID write moves a servo to its new ID.
+    If `present` is set, only those IDs answer pings, and an ID write moves a
+    servo to its new ID.
     """
 
     port: FakePort
@@ -151,7 +154,8 @@ class FakeHandler:
     present: set[int] | None = None
     # register address -> value returned by read1ByteTxRx / read2ByteTxRx
     registers: dict[int, int] = field(default_factory=dict)
-    # (servo id, address) -> value from a successful write1ByteTxRx, read back like a real servo
+    # (servo id, address) -> value from a successful write1ByteTxRx, read back
+    # like a real servo
     written: dict[tuple[int, int], int] = field(default_factory=dict)
     groupSyncWrite: FakeGroupSyncWrite = field(init=False)
 
@@ -228,7 +232,8 @@ class FakeHandler:
     def readTxRx(
         self, servo_id: int, address: int, length: int
     ) -> tuple[list[int], int, int]:
-        """Block read over a little-endian memory image built from position, speed, registers."""
+        """Block read over a little-endian memory image built from position,
+        speed, registers."""
         self.calls.append(("read_block", servo_id, address, length))
         comm, error = self._result("read_block", servo_id)
         if comm != COMM_SUCCESS:
@@ -306,7 +311,10 @@ def sdk() -> FakeSdk:
 
 @dataclass
 class FakeI2c:
-    """In-memory i2c bus with one device. `fail` maps an operation name to an OSError to raise."""
+    """In-memory i2c bus with one device.
+
+    `fail` maps an operation name to an OSError to raise.
+    """
 
     bus_number: int
     address: int = 0x68
@@ -342,7 +350,8 @@ class FakeI2c:
         self.closed = True
 
     def set_words(self, start: int, words: list[int]) -> None:
-        """Store signed 16-bit words big-endian from `start`, like the sensor's data registers."""
+        """Store signed 16-bit words big-endian from `start`, like the sensor's
+        data registers."""
         for i, word in enumerate(words):
             raw = word & 0xFFFF
             self.registers[start + 2 * i] = raw >> 8

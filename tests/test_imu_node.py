@@ -1,4 +1,7 @@
-"""IMU node against the fake i2c bus. Skipped where ROS messages are missing."""
+"""IMU node against the fake i2c bus.
+
+Skipped where ROS messages are missing.
+"""
 
 from __future__ import annotations
 

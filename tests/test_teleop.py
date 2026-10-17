@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from conftest import FakeClock
 
@@ -25,7 +27,7 @@ class Keys:
 def drive_with(keys: list[str | None]) -> list[tuple[float, float, float]]:
     clock = FakeClock()
     sent: list[tuple[float, float, float]] = []
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         teleop.run(
             lambda *v: sent.append(v),
             Keys(keys, clock),
@@ -33,8 +35,6 @@ def drive_with(keys: list[str | None]) -> list[tuple[float, float, float]]:
             angular=0.5,
             clock=clock,
         )
-    except KeyboardInterrupt:
-        pass
     return sent
 
 

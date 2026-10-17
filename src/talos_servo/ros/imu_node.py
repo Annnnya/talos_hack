@@ -1,15 +1,17 @@
 """ROS 2 node that publishes the MPU6050 as raw IMU data.
 
-Topics (relative, so `/imu/...` by default and namespaced with `--ros-args -r __ns:=/x`):
+Topics (relative, so `/imu/...` by default and namespaced with `--ros-args -r
+__ns:=/x`):
 
-- `imu/data_raw` (sensor_msgs/Imu): linear acceleration in m/s^2 (gravity included, about
-  +9.8 on z when flat) and angular velocity in rad/s. No orientation:
-  `orientation_covariance[0]` is -1. Feed it to imu_filter_madgwick for `imu/data` with a
-  quaternion (`pixi run -e ros imu-filter`)
-- `imu/temperature` (sensor_msgs/Temperature): die temperature in deg C, at `temperature_hz`
+- `imu/data_raw` (sensor_msgs/Imu): linear acceleration in m/s^2 (gravity
+  included, about +9.8 on z when flat) and angular velocity in rad/s. No
+  orientation: `orientation_covariance[0]` is -1. Feed it to imu_filter_madgwick
+  for `imu/data` with a quaternion (`pixi run -e ros imu-filter`)
+- `imu/temperature` (sensor_msgs/Temperature): die temperature in deg C, at
+  `temperature_hz`
 
-Run with `pixi run -e ros imu-node`. The gyro is zeroed at startup (`calibrate`, default true),
-so keep the robot still for about a second.
+Run with `pixi run -e ros imu-node`. The gyro is zeroed at startup (`calibrate`,
+default true), so keep the robot still for about a second.
 """
 
 from __future__ import annotations
@@ -53,12 +55,13 @@ from talos_servo.ros.imu_convert import (
 )
 
 NODE_NAME = "imu"
-# The sensor is configured for 100 Hz output, so polling faster only repeats samples.
+# The sensor is configured for 100 Hz output, so polling faster only repeats
+# samples.
 DEFAULT_RATE_HZ = 100.0
 DEFAULT_TEMPERATURE_HZ = 1.0
 DEFAULT_FRAME_ID = "imu_link"
-# About a quarter second of failed reads at 100 Hz: long enough to ride out one I2C glitch,
-# short enough that consumers never see stale data for long.
+# About a quarter second of failed reads at 100 Hz: long enough to ride out one
+# I2C glitch, short enough that consumers never see stale data for long.
 DEFAULT_MAX_READ_FAILURES = 25
 
 
@@ -132,14 +135,18 @@ class ImuNode(Node):
         )
 
     def tick(self) -> None:
-        """Read one sample and publish it. Raises ImuError after too many failed reads in a row."""
+        """Read one sample and publish it.
+
+        Raises ImuError after too many failed reads in a row.
+        """
         try:
             sample = self.imu.read()
         except ImuError as exc:
             self.consecutive_failures += 1
             if self.consecutive_failures >= self.max_read_failures:
                 raise ImuError(
-                    f"{self.consecutive_failures} imu reads failed in a row, last: {exc}"
+                    f"{self.consecutive_failures} imu reads failed in a row, "
+                    f"last: {exc}"
                 ) from exc
             self.get_logger().warning(
                 f"imu read failed: {exc}", throttle_duration_sec=1.0
@@ -178,13 +185,19 @@ def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
         "--i2c-bus",
         type=int,
         default=os.environ.get(IMU_BUS_ENV_VAR, str(DEFAULT_I2C_BUS)),
-        help=f"i2c bus number, /dev/i2c-N (default: ${IMU_BUS_ENV_VAR} or {DEFAULT_I2C_BUS})",
+        help=(
+            f"i2c bus number, /dev/i2c-N (default: ${IMU_BUS_ENV_VAR} or "
+            f"{DEFAULT_I2C_BUS})"
+        ),
     )
     parser.add_argument(
         "--address",
         type=parse_int_any_base,
         default=DEFAULT_ADDRESS,
-        help=f"i2c address, 0x69 if AD0 is high (default: 0x{DEFAULT_ADDRESS:02x})",
+        help=(
+            "i2c address, 0x69 if AD0 is high (default: "
+            f"0x{DEFAULT_ADDRESS:02x})"
+        ),
     )
     parser.add_argument(
         "--accel-range",
@@ -205,7 +218,10 @@ def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
         type=int,
         choices=range(MAX_DLPF + 1),
         default=DEFAULT_DLPF,
-        help="low-pass filter setting, higher is smoother and slower (default: %(default)s)",
+        help=(
+            "low-pass filter setting, higher is smoother and slower (default: "
+            "%(default)s)"
+        ),
     )
     # Everything else (e.g. --ros-args -p frame_id:=base_imu) goes to rclpy.
     return parser.parse_known_args(argv)
@@ -225,7 +241,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     rclpy.init(args=[sys.argv[0], *ros_args])
     node = None
     try:
-        # Leaving the with block puts the sensor to sleep and closes the bus, even on Ctrl+C.
+        # Leaving the with block puts the sensor to sleep and closes the bus,
+        # even on Ctrl+C.
         with imu:
             node = ImuNode(imu)
             rclpy.spin(node)

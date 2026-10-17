@@ -1,5 +1,8 @@
-"""Sanity checks for config/ekf.yaml. A *_config list with 14 or 16 entries, or a flag one slot
-off, still loads in robot_localization but fuses the wrong quantity."""
+"""Sanity checks for config/ekf.yaml.
+
+A *_config list with 14 or 16 entries, or a flag one slot off, still loads in
+robot_localization but fuses the wrong quantity.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""argparse type converters shared by the CLI and the ROS node entry points."""
+"""Argparse type converters shared by the CLI and the ROS node entry points."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from talos_servo.bus import MAX_SERVO_ID
 
 
 def parse_ids(value: str) -> list[int]:
-    """Parse "1,2,3" or "1-3" (or a mix) into a sorted list of unique servo IDs."""
+    """Parse "1,2,3" or "1-3" (or a mix) into a sorted list of unique servo
+    IDs."""
     ids: set[int] = set()
     try:
         for part in value.split(","):

@@ -1,4 +1,4 @@
-"""FastAPI app: WebSocket control channel, live telemetry broadcast and the static UI."""
+"""FastAPI app: WebSocket commands, live telemetry and the static UI."""
 
 from __future__ import annotations
 
@@ -28,12 +28,16 @@ log = logging.getLogger(__name__)
 
 # A laptop on bad Wi-Fi must not hold up telemetry for everyone else.
 CLIENT_SEND_TIMEOUT = 0.5
-# Bytes of randomness in a browser connection id: enough to tell a handful of laptops apart.
+# Bytes of randomness in a browser connection id: enough to tell a handful of
+# laptops apart.
 CLIENT_ID_BYTES = 3
 
 
 class Hub:
-    """Connected browsers. Broadcasts go to all of them concurrently."""
+    """Connected browsers.
+
+    Broadcasts go to all of them concurrently.
+    """
 
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
@@ -55,7 +59,8 @@ class Hub:
 class JointSettings:
     """Move speed and acceleration per joint, shared by every browser.
 
-    Kept in memory only, on purpose: after a server restart they are back to the low defaults.
+    Kept in memory only, on purpose: after a server restart they are back to the
+    low defaults.
     """
 
     def __init__(self, joints: list[str], max_speed: int) -> None:
@@ -125,7 +130,8 @@ def create_app(
         [j.name for j in config.enabled_joints], config.max_speed
     )
     period = 1.0 / config.control_hz
-    # Browsers get state at telemetry_hz; the robot ticks faster to keep wheels in sync.
+    # Browsers get state at telemetry_hz; the robot ticks faster to keep wheels
+    # in sync.
     ticks_per_broadcast = max(1, round(config.control_hz / config.telemetry_hz))
     limits = {
         "pos_max": MAX_POSITION,
@@ -205,8 +211,8 @@ def create_app(
                     "last client disconnected, stopping every speed joint"
                 )
                 # Shielded: the connection task can be cancelled right after a
-                # disconnect, and the motors must still stop.
-                # No client id: the UI shows this as the web server's own safety stop.
+                # disconnect, and the motors must still stop. No client id: the
+                # UI shows this as the web server's own safety stop.
                 await asyncio.shield(
                     _run(lambda: controller.stop_all(source=SOURCE_WEB))
                 )
@@ -218,7 +224,10 @@ def create_app(
         @app.get("/")
         async def no_ui() -> dict[str, str]:
             return {
-                "error": f"UI not built: run `npm run build` in web/ (looked in {ui_dir})"
+                "error": (
+                    "UI not built: run `npm run build` in web/ (looked in "
+                    f"{ui_dir})"
+                )
             }
 
     return app
@@ -234,7 +243,8 @@ def serve(
     ui_dir: str | Path,
     ros: bool = False,
 ) -> None:
-    """Build the backend (serial bus or ROS robot node) and serve until Ctrl+C."""
+    """Build the backend (serial bus or ROS robot node) and serve until
+    Ctrl+C."""
     import uvicorn
 
     from talos_servo.config import load_config

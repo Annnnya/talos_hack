@@ -139,7 +139,8 @@ def test_torque_off_stops_a_speed_joint_first(sdk, robot):
     ]
 
 
-# --- direction -----------------------------------------------------------------
+# --- direction
+# -----------------------------------------------------------------
 
 
 def test_inverted_speed_joint_gets_the_opposite_sign(sdk, base):
@@ -160,9 +161,7 @@ def test_inverted_joint_reads_back_in_joint_units(sdk, base):
 
 def test_inverted_position_joint_is_mirrored(sdk, clock):
     data = {
-        "joints": {
-            "bend": {"id": 1, "control": "position", "inverted": True}
-        }
+        "joints": {"bend": {"id": 1, "control": "position", "inverted": True}}
     }
     robot = Robot(sdk.bus(), config(data), clock=clock)
     robot.open()
@@ -170,7 +169,8 @@ def test_inverted_position_joint_is_mirrored(sdk, clock):
     assert sdk.handler.calls[-1][:3] == ("move", 1, MAX_POSITION - 1000)
 
 
-# --- watchdog and drive --------------------------------------------------------
+# --- watchdog and drive
+# --------------------------------------------------------
 
 
 def test_expiring_spin_stops_without_new_commands(sdk, robot, clock):
@@ -242,7 +242,8 @@ def test_base_velocity_from_wheel_speeds(sdk, base):
     assert wz == pytest.approx(0.0)
 
 
-# --- last command ----------------------------------------------------------------
+# --- last command
+# ----------------------------------------------------------------
 
 
 def test_last_command_age_grows(robot, clock):

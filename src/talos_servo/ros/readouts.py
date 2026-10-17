@@ -2,14 +2,15 @@
 
 For every joint, under `<prefix>/<joint>/`:
 
-- `temperature` (sensor_msgs/Temperature): deg C, `header.frame_id` is the joint name
+- `temperature` (sensor_msgs/Temperature): deg C, `header.frame_id` is the joint
+  name
 - `voltage` (std_msgs/Float32): supply voltage seen by the servo, V
 - `current` (std_msgs/Float32): present current, A
 - `load` (std_msgs/Float32): raw present load, about -1000..1000
 - `moving` (std_msgs/Bool): the servo's own moving flag
 
-Plain numbers on their own topics so they can be plotted (rqt_plot, PlotJuggler) and echoed
-without digging through DiagnosticArray key/values.
+Plain numbers on their own topics so they can be plotted (rqt_plot, PlotJuggler)
+and echoed without digging through DiagnosticArray key/values.
 """
 
 from __future__ import annotations

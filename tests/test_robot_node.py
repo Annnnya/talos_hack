@@ -1,4 +1,7 @@
-"""Robot node on a Robot over the fake SDK. Skipped where ROS is missing."""
+"""Robot node on a Robot over the fake SDK.
+
+Skipped where ROS is missing.
+"""
 
 from __future__ import annotations
 

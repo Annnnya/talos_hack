@@ -1,4 +1,5 @@
-"""`talos-servo`: the one command line tool for the robot, from bench tests to driving it."""
+"""`talos-servo`: the one command line tool for the robot, from bench tests to
+driving it."""
 
 from __future__ import annotations
 
@@ -41,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     port_opts.add_argument(
         "--port",
         default=os.environ.get(PORT_ENV_VAR),
-        help=f"serial port, e.g. COM5 or /dev/ttyACM0 (default: ${PORT_ENV_VAR})",
+        help=(
+            f"serial port, e.g. COM5 or /dev/ttyACM0 (default: ${PORT_ENV_VAR})"
+        ),
     )
     port_opts.add_argument(
         "--baud",
@@ -70,8 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     ros_opts.add_argument(
         "--ros",
         action="store_true",
-        help="go through the running ROS robot node instead of the serial port, so this can run "
-        "next to it and the web UI (needs the pixi ros environment; --port is ignored)",
+        help="go through the running ROS robot node instead of the serial "
+        "port, so this can run next to it and the web UI (needs the pixi ros "
+        "environment; --port is ignored)",
     )
     ros_opts.add_argument(
         "--config",
@@ -134,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     drive = sub.add_parser(
         "drive",
         parents=[port_opts, ros_opts],
-        help="drive the mecanum base with the keyboard (W/A/S/D, Q/E, space, X)",
+        help="drive the mecanum base with the keyboard (W/A/S/D, Q/E, X)",
     )
     drive.add_argument(
         "--linear",
@@ -152,7 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
     set_id = sub.add_parser(
         "set-id",
         parents=[port_opts],
-        help="permanently change a servo's id (refuses if the new id is already in use)",
+        help=(
+            "permanently change a servo's id (refuses if the new id is "
+            "already in use)"
+        ),
     )
     set_id.add_argument(
         "--id", type=parse_id, required=True, help="current servo id"
@@ -190,13 +197,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--i2c-bus",
         type=int,
         default=os.environ.get(IMU_BUS_ENV_VAR, str(DEFAULT_I2C_BUS)),
-        help=f"i2c bus number, /dev/i2c-N (default: ${IMU_BUS_ENV_VAR} or {DEFAULT_I2C_BUS})",
+        help=(
+            f"i2c bus number, /dev/i2c-N (default: ${IMU_BUS_ENV_VAR} or "
+            f"{DEFAULT_I2C_BUS})"
+        ),
     )
     imu.add_argument(
         "--address",
         type=parse_int_any_base,
         default=DEFAULT_ADDRESS,
-        help=f"i2c address, 0x69 if AD0 is high (default: 0x{DEFAULT_ADDRESS:02x})",
+        help=(
+            "i2c address, 0x69 if AD0 is high (default: "
+            f"0x{DEFAULT_ADDRESS:02x})"
+        ),
     )
     imu.add_argument(
         "--accel-range",
@@ -256,7 +269,8 @@ def cmd_ping(args: argparse.Namespace) -> int:
 
 def _ros_missing(exc: ImportError, example: str) -> int:
     print(
-        f"error: --ros needs ROS 2 ({exc.name} missing): run it in the pixi ros environment, "
+        f"error: --ros needs ROS 2 ({exc.name} missing): run it in the pixi "
+        "ros environment, "
         f"e.g. `{example}`",
         file=sys.stderr,
     )
@@ -282,7 +296,8 @@ def _over_ros(
         return 1
     if getattr(args, "acc", DEFAULT_ACCELERATION) != DEFAULT_ACCELERATION:
         print(
-            "note: --acc is ignored with --ros, the robot node has no acceleration input"
+            "note: --acc is ignored with --ros, the robot node has no "
+            "acceleration input"
         )
     try:
         run(cli_commands, cli_commands.RosBackend(config), config)
@@ -293,7 +308,8 @@ def _over_ros(
 
 
 def _joints_for(ids: Sequence[int], config: Any) -> list[str]:
-    """Joint names for servo ids, so `--ids` means the same with and without --ros."""
+    """Joint names for servo ids, so `--ids` means the same with and without
+    --ros."""
     names = {j.id: j.name for j in config.enabled_joints}
     missing = [i for i in ids if i not in names]
     if missing:
@@ -317,7 +333,8 @@ def cmd_spin(args: argparse.Namespace) -> int:
         for servo_id in args.ids:
             bus.set_speed(servo_id, args.speed, args.acc)
         time.sleep(args.seconds)
-        # Stop explicitly so a stop failure is reported, not just logged on exit.
+        # Stop explicitly so a stop failure is reported, not just logged on
+        # exit.
         for servo_id in args.ids:
             bus.stop(servo_id, args.acc)
     print("stopped")
@@ -408,7 +425,8 @@ def cmd_web(args: argparse.Namespace) -> int:
         from talos_servo.web.server import serve
     except ImportError as exc:
         print(
-            f"error: the web command needs the web extra ({exc.name} missing): uv sync --extra web",
+            f"error: the web command needs the web extra ({exc.name} "
+            "missing): uv sync --extra web",
             file=sys.stderr,
         )
         return 1
@@ -453,7 +471,8 @@ def cmd_imu(args: argparse.Namespace) -> int:
             gx, gy, gz = sample.gyro
             print(
                 f"acc[g] {ax:+.2f} {ay:+.2f} {az:+.2f} | "
-                f"gyro[dps] {gx:+6.1f} {gy:+6.1f} {gz:+6.1f} | {sample.temperature:.1f}C"
+                f"gyro[dps] {gx:+6.1f} {gy:+6.1f} {gz:+6.1f} | "
+                f"{sample.temperature:.1f}C"
             )
             time.sleep(args.interval)
     return 0
@@ -483,7 +502,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if needs_port and not args.port:
         parser.error(
-            f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)"
+            f"no serial port: pass --port or set {PORT_ENV_VAR} (see "
+            "`talos-servo ports`)"
         )
     try:
         return COMMANDS[args.command](args)

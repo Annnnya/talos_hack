@@ -126,7 +126,5 @@ def test_integrate_pose_straight_and_turning():
         pytest.approx(0.0),
         pytest.approx(0.0),
     )
-    x, y, yaw = integrate_pose(
-        (0.0, 0.0, math.pi / 2), (0.1, 0.0, 0.0), 1.0
-    )
+    x, y, yaw = integrate_pose((0.0, 0.0, math.pi / 2), (0.1, 0.0, 0.0), 1.0)
     assert (x, y, yaw) == pytest.approx((0.0, 0.1, math.pi / 2))

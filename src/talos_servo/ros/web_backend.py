@@ -1,16 +1,19 @@
-"""Robot backend for the web server and the CLI that goes through the running ROS robot node.
+"""Robot backend for the web server and the CLI that goes through the running
+ROS robot node.
 
-With it the robot node is the only process on the serial port, so the browser UI, the CLI and
-other ROS nodes can drive the robot at the same time. Command checks come from
-`talos_servo.robot`, so the UI behaves the same in both modes.
+With it the robot node is the only process on the serial port, so the browser
+UI, the CLI and other ROS nodes can drive the robot at the same time. Command
+checks come from `talos_servo.robot`, so the UI behaves the same in both modes.
 
 Differences from driving the bus directly:
 
-- Speeds this backend commanded are re-sent every tick to keep the robot's command watchdog fed.
-  If this process dies, the robot stops the wheels by itself.
-- The robot node has no acceleration input, so the `acceleration` argument is ignored.
-- If another ROS node commands the same joint, the last command wins. The robot's diagnostics
-  report who sent it, and the UI shows it.
+- Speeds this backend commanded are re-sent every tick to keep the robot's
+  command watchdog fed. If this process dies, the robot stops the wheels by
+  itself.
+- The robot node has no acceleration input, so the `acceleration` argument is
+  ignored.
+- If another ROS node commands the same joint, the last command wins. The
+  robot's diagnostics report who sent it, and the UI shows it.
 """
 
 from __future__ import annotations
@@ -57,14 +60,16 @@ log = logging.getLogger(__name__)
 DEFAULT_WAIT_TIMEOUT = 5.0
 SERVICE_TIMEOUT = 2.0
 SERVICE_POLL_INTERVAL = 0.01
-# The robot node publishes status at 2 Hz by default; several missed messages mean it is gone.
+# The robot node publishes status at 2 Hz by default; several missed messages
+# mean it is gone.
 STATUS_STALE_AFTER = 2.0
 # Diagnostics entries from the robot node are named "<node name>: <joint>".
 STATUS_PREFIX = f"{ROBOT_NODE_NAME}: "
 HINT = "start it with `pixi run -e ros robot-node`"
-# Status lags our own commands. A command the robot reports with a frame this backend sends,
-# and no newer than this after our last send, is our own echo (maybe of an older command), so it
-# must not move a slider back. Commands from other senders are always applied.
+# Status lags our own commands. A command the robot reports with a frame this
+# backend sends, and no newer than this after our last send, is our own echo
+# (maybe of an older command), so it must not move a slider back. Commands from
+# other senders are always applied.
 COMMAND_SETTLE_TIME = 1.0
 EXECUTOR_JOIN_TIMEOUT = 2.0
 
@@ -72,8 +77,8 @@ EXECUTOR_JOIN_TIMEOUT = 2.0
 class RosBackend:
     """`RobotBackend` on top of the robot node's topics and services.
 
-    Pass `context` to share an already initialised rclpy context (tests); otherwise the backend
-    initialises and shuts down its own.
+    Pass `context` to share an already initialised rclpy context (tests);
+    otherwise the backend initialises and shuts down its own.
     """
 
     def __init__(
@@ -98,9 +103,9 @@ class RosBackend:
         self._thread: threading.Thread | None = None
         self._first_status = threading.Event()
         self._last_status: float | None = None
-        # Speeds this backend commanded and keeps re-sending for the robot's watchdog, with the
-        # frame_id they went out with. Never filled from status: a wheel started by a CLI that
-        # has died must still time out.
+        # Speeds this backend commanded and keeps re-sending for the robot's
+        # watchdog, with the frame_id they went out with. Never filled from
+        # status: a wheel started by a CLI that has died must still time out.
         self._feeding: dict[str, tuple[int, str]] = {}
         self._sent_at: dict[str, float] = {}
         self._own_frames: set[str] = set()
@@ -146,7 +151,8 @@ class RosBackend:
             self.release()
 
     def release(self) -> None:
-        """Disconnect without `stop_all`, for callers that stop only the joints they started.
+        """Disconnect without `stop_all`, for callers that stop only the joints
+        they started.
 
         A wheel left spinning still stops within the robot's command timeout.
         """
@@ -167,7 +173,8 @@ class RosBackend:
 
     # --- telemetry -------------------------------------------------------
     def tick(self) -> None:
-        """Feed the robot's watchdog for the joints we spin, and notice a silent robot node."""
+        """Feed the robot's watchdog for the joints we spin, and notice a silent
+        robot node."""
         with self._lock:
             feeding = dict(self._feeding)
             if self._last_status is not None:
@@ -232,7 +239,8 @@ class RosBackend:
     def _apply_last_command(
         self, j: Joint, values: dict[str, str], now: float
     ) -> None:
-        """Adopt the robot's last command for this joint unless it is our own stale echo."""
+        """Adopt the robot's last command for this joint unless it is our own
+        stale echo."""
         source = values.get("command_source") or None
         if source is None:  # no command for this joint yet
             return
@@ -250,7 +258,8 @@ class RosBackend:
         j.target = int(target) if target else None
         j.target_speed = int(values["target_speed"])
         record_command(j, source, client, reported_at)
-        # Someone else has the joint now. Their own commands keep it alive, not ours.
+        # Someone else has the joint now. Their own commands keep it alive, not
+        # ours.
         self._feeding.pop(j.name, None)
 
     # --- commands --------------------------------------------------------
@@ -318,7 +327,10 @@ class RosBackend:
         self._publish_velocity({joint: speed}, frame)
 
     def drive(self, linear_x: float, linear_y: float, angular_z: float) -> None:
-        """Publish one /cmd_vel. The robot stops unless this is repeated, so call it in a loop."""
+        """Publish one /cmd_vel.
+
+        The robot stops unless this is repeated, so call it in a loop.
+        """
         msg = Twist()
         msg.linear.x, msg.linear.y, msg.angular.z = (
             linear_x,
@@ -358,12 +370,16 @@ class RosBackend:
                 "stop all",
             )
         except (CommandError, ServoError) as exc:
-            # No more velocity commands go out, so the robot's watchdog still stops the wheels.
+            # No more velocity commands go out, so the robot's watchdog still
+            # stops the wheels.
             log.warning("stop all through the robot node failed: %s", exc)
 
     # --- helpers ---------------------------------------------------------
     def _record(self, j: Joint, source: str, client: str | None) -> None:
-        """Note a command we are about to send. Call with `_lock` held."""
+        """Note a command we are about to send.
+
+        Call with `_lock` held.
+        """
         now = self._clock()
         record_command(j, source, client, now)
         self._sent_at[j.name] = now
@@ -378,9 +394,11 @@ class RosBackend:
         self._require_node().velocity_pub.publish(msg)
 
     def _call(self, client: Client, request: Any, what: str) -> None:
-        """Call a robot service from a worker thread; the executor thread delivers the answer.
+        """Call a robot service from a worker thread; the executor thread
+        delivers the answer.
 
-        Never hold `_lock` here: the subscription callbacks need it while we wait.
+        Never hold `_lock` here: the subscription callbacks need it while we
+        wait.
         """
         future = client.call_async(request)
         deadline = self._clock() + SERVICE_TIMEOUT
@@ -390,7 +408,8 @@ class RosBackend:
             if self._clock() > deadline:
                 client.remove_pending_request(future)
                 raise ServoError(
-                    f"{what}: robot node did not answer within {SERVICE_TIMEOUT} s"
+                    f"{what}: robot node did not answer within "
+                    f"{SERVICE_TIMEOUT} s"
                 )
             done.wait(SERVICE_POLL_INTERVAL)
         response = future.result()
@@ -412,5 +431,6 @@ class RosBackend:
             return self.joints[joint]
         except KeyError:
             raise CommandError(
-                f"unknown joint {joint!r}, expected one of {sorted(self.joints)}"
+                f"unknown joint {joint!r}, expected one of "
+                f"{sorted(self.joints)}"
             ) from None
