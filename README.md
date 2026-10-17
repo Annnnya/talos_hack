@@ -81,12 +81,12 @@ flowchart TB
 
 | Box | File | Job |
 |---|---|---|
-| RobotController | `web/controller.py` | shared servo state, polling, command limits from `config/robot.yaml` |
+| RobotController | `controller.py`, `config.py` | shared servo state, polling, command limits from `config/robot.yaml` |
 | RosBackend | `ros/web_backend.py`, `ros/web_client_node.py` | same commands as RobotController, sent to `servo_bridge` over topics and services (`web --ros`) |
 | ROS helpers | `ros/convert.py`, `ros/readouts.py` | steps to radians, wheel odometry, per joint readout topics |
 | mecanum | `mecanum.py` | body velocity to four wheel speeds |
 | ServoBus | `bus.py` | every servo read and write; checks each SDK result and stops spinning servos on close |
-| Feetech SDK or simulator | `scservo_sdk`, `web/sim.py` | the real serial protocol, or fake servos for `--mock` |
+| Feetech SDK or simulator | `scservo_sdk`, `sim.py` | the real serial protocol, or fake servos for `--mock` |
 
 ### How does data flow through ROS 2?
 
@@ -314,8 +314,9 @@ Browser control for the robot's servos: each one switches between **Position** a
                                  serves web/out (Next.js UI)
 ```
 
-- `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of `ServoBus`
-  that streams servo state over a WebSocket and serves the UI
+- `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of
+  `RobotController` (or `RosBackend` with `--ros`) that streams servo state over a WebSocket and
+  serves the UI
 - `web/` - Next.js UI, built as static files into `web/out`
 - `config/robot.yaml` - servo IDs, names, joint limits and the UI speed cap
 
