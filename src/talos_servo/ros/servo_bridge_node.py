@@ -61,7 +61,7 @@ class ServoBridgeNode(Node):
     ) -> None:
         super().__init__(node_name)
         self.controller = controller
-        self._clock = clock
+        self._monotonic = clock
         self.joints = joint_ids(controller.config.servos)
         self.names = {servo_id: name for name, servo_id in self.joints.items()}
         self.command_timeout = float(
@@ -147,7 +147,7 @@ class ServoBridgeNode(Node):
         if len(msg.velocity) != len(msg.name):
             self._reject("velocity_cmd needs one velocity per name")
             return
-        now = self._clock()
+        now = self._monotonic()
         for i, name in enumerate(msg.name):
 
             def spin(servo_id: int, i: int = i) -> None:
@@ -158,7 +158,7 @@ class ServoBridgeNode(Node):
 
     def enforce_command_timeout(self) -> None:
         """Stop wheel servos whose last velocity command is older than command_timeout."""
-        now = self._clock()
+        now = self._monotonic()
         for s in self.controller.snapshot():
             if s["mode"] != WHEEL or not s["target_speed"]:
                 continue
