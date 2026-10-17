@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.venv/
+bridge/scservo_sdk/

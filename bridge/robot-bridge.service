@@ -1,0 +1,18 @@
+# Autostart the bridge on boot.
+# Edit User and paths, then:
+#   sudo cp bridge/robot-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now robot-bridge
+[Unit]
+Description=Robot servo bridge + web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/feetech_servo_test/bridge
+ExecStart=/home/pi/feetech_servo_test/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

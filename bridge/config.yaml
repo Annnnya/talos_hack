@@ -1,0 +1,14 @@
+# Serial bus (same values as tests/*.py)
+port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+baudrate: 1000000
+
+# How often servo state is read and pushed to the UI
+telemetry_hz: 20
+
+# The robot's servos. min_pos/max_pos clamp position-mode targets (0-4095 = one full turn).
+servos:
+  - { id: 1, name: "Servo 1", min_pos: 0, max_pos: 4095 }
+  - { id: 2, name: "Servo 2", min_pos: 0, max_pos: 4095 }
+  - { id: 3, name: "Servo 3", min_pos: 0, max_pos: 4095 }
+  - { id: 4, name: "Servo 4", min_pos: 0, max_pos: 4095 }
+  - { id: 5, name: "Servo 5", min_pos: 0, max_pos: 4095 }
