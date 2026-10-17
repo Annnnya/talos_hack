@@ -238,9 +238,9 @@ def _ros_missing(exc: ImportError, example: str) -> int:
 def _over_ros(args: argparse.Namespace, run: Callable[[Any, Any], None]) -> int:
     """Run `run(cli_commands, backend)` for a spin or monitor command with --ros."""
     try:
+        from talos_servo.config import ConfigError, load_config
+        from talos_servo.controller import CommandError
         from talos_servo.ros import cli_commands
-        from talos_servo.web.config import ConfigError, load_config
-        from talos_servo.web.controller import CommandError
     except ImportError as exc:
         return _ros_missing(exc, f"pixi run -e ros talos-servo {args.command} --ros ...")
     try:
@@ -307,7 +307,7 @@ def cmd_set_id(args: argparse.Namespace) -> int:
 
 def cmd_web(args: argparse.Namespace) -> int:
     try:
-        from talos_servo.web.config import ConfigError
+        from talos_servo.config import ConfigError
         from talos_servo.web.server import serve
     except ImportError as exc:
         print(

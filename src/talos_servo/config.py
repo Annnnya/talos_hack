@@ -1,4 +1,4 @@
-"""Robot layout for the web UI: which servos exist, their names and safe limits."""
+"""Robot layout: which servos exist, their names and safe limits. Used by the web UI and ROS."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ DEFAULT_TELEMETRY_HZ = 20.0
 
 
 class ConfigError(ValueError):
-    """The web config file is invalid."""
+    """The robot config file is invalid."""
 
 
 @dataclass(frozen=True)

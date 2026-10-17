@@ -14,8 +14,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from talos_servo.bus import DEFAULT_ACCELERATION, MAX_ACCELERATION, MAX_POSITION, ServoError
+from talos_servo.controller import CommandError, RobotController
 from talos_servo.web.backend import DEFAULT_BRIDGE, RobotBackend
-from talos_servo.web.controller import CommandError, RobotController
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ def serve(
     """Build the backend (serial bus, simulator or ROS bridge) and serve until Ctrl+C."""
     import uvicorn
 
-    from talos_servo.web.config import load_config
+    from talos_servo.config import load_config
 
     config = load_config(config_path)
     backend: RobotBackend
@@ -166,7 +166,7 @@ def serve(
 
         backend, source = RosBackend(config, bridge=bridge), f"ros bridge {bridge}"
     else:
-        from talos_servo.web.sim import make_bus
+        from talos_servo.sim import make_bus
 
         bus = make_bus(port, baudrate, mock=mock, ids=(s.id for s in config.servos))
         backend, source = RobotController(bus, config), "simulated" if mock else str(port)

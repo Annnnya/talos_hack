@@ -18,13 +18,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.config import parse_config  # noqa: E402
+from talos_servo.controller import WHEEL, CommandError, RobotController  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
 from talos_servo.ros.servo_bridge_node import ServoBridgeNode  # noqa: E402
 from talos_servo.ros.web_backend import STATUS_STALE_AFTER, RosBackend  # noqa: E402
-from talos_servo.web.config import parse_config  # noqa: E402
-from talos_servo.web.controller import WHEEL, CommandError, RobotController  # noqa: E402
+from talos_servo.sim import make_bus  # noqa: E402
 from talos_servo.web.server import create_app  # noqa: E402
-from talos_servo.web.sim import make_bus  # noqa: E402
 
 CONFIG = parse_config(
     {

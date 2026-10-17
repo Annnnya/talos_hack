@@ -11,8 +11,8 @@ import time
 from collections.abc import Callable, Sequence
 
 from talos_servo.bus import ServoError
+from talos_servo.controller import WHEEL
 from talos_servo.ros.web_backend import RosBackend
-from talos_servo.web.controller import WHEEL
 
 Output = Callable[[str], None]
 # Lets the last stop command leave before the node goes away. If it is lost anyway, the bridge's

@@ -35,6 +35,8 @@ from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_BAUDRATE, ServoError
 from talos_servo.cli import DEFAULT_WEB_CONFIG, PORT_ENV_VAR
+from talos_servo.config import load_config
+from talos_servo.controller import POSITION, WHEEL, CommandError, RobotController
 from talos_servo.ros.convert import (
     joint_ids,
     rad_speed_to_steps,
@@ -43,9 +45,7 @@ from talos_servo.ros.convert import (
     steps_to_rad,
 )
 from talos_servo.ros.readouts import JointReadoutPublishers
-from talos_servo.web.config import load_config
-from talos_servo.web.controller import POSITION, WHEEL, CommandError, RobotController
-from talos_servo.web.sim import make_bus
+from talos_servo.sim import make_bus
 
 NODE_NAME = "servo_bridge"
 DEFAULT_COMMAND_TIMEOUT = 0.5
