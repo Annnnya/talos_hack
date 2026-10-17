@@ -34,9 +34,9 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_BAUDRATE, ServoError
-from talos_servo.cli import DEFAULT_WEB_CONFIG, PORT_ENV_VAR
 from talos_servo.config import load_config
 from talos_servo.controller import POSITION, WHEEL, CommandError, RobotController
+from talos_servo.defaults import DEFAULT_CONFIG, PORT_ENV_VAR
 from talos_servo.ros.convert import (
     joint_ids,
     rad_speed_to_steps,
@@ -256,7 +256,7 @@ class ServoBridgeNode(Node):
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(prog="talos-servo-ros", description=__doc__.splitlines()[0])
-    parser.add_argument("--config", default=DEFAULT_WEB_CONFIG, help="servo layout (%(default)s)")
+    parser.add_argument("--config", default=DEFAULT_CONFIG, help="servo layout (%(default)s)")
     parser.add_argument(
         "--port",
         default=os.environ.get(PORT_ENV_VAR),

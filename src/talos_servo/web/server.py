@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from talos_servo.bus import DEFAULT_ACCELERATION, MAX_ACCELERATION, MAX_POSITION, ServoError
 from talos_servo.controller import CommandError, RobotController
-from talos_servo.web.backend import DEFAULT_BRIDGE, RobotBackend
+from talos_servo.defaults import DEFAULT_BRIDGE
+from talos_servo.web.backend import RobotBackend
 
 log = logging.getLogger(__name__)
 

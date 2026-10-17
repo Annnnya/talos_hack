@@ -39,6 +39,7 @@ from talos_servo.controller import (
     ServoState,
     _clamp,
 )
+from talos_servo.defaults import DEFAULT_BRIDGE
 from talos_servo.ros.convert import (
     joint_ids,
     rad_speed_to_steps,
@@ -47,7 +48,6 @@ from talos_servo.ros.convert import (
     steps_to_rad,
 )
 from talos_servo.ros.web_client_node import WebClientNode
-from talos_servo.web.backend import DEFAULT_BRIDGE
 
 log = logging.getLogger(__name__)
 

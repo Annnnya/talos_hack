@@ -7,7 +7,7 @@ import types
 import pytest
 from scservo_sdk import COMM_RX_TIMEOUT
 
-from talos_servo import cli
+from talos_servo import cli, parsing
 
 
 @pytest.fixture
@@ -23,13 +23,13 @@ def run(sdk, monkeypatch):
     [("1", [1]), ("3,1,2", [1, 2, 3]), ("1-3", [1, 2, 3]), ("1-2,5", [1, 2, 5]), ("2,2", [2])],
 )
 def test_parse_ids(value, expected):
-    assert cli.parse_ids(value) == expected
+    assert parsing.parse_ids(value) == expected
 
 
 @pytest.mark.parametrize("value", ["", "a", "1,x", "254", "-1"])
 def test_parse_ids_rejects_bad_input(value):
     with pytest.raises(argparse.ArgumentTypeError):
-        cli.parse_ids(value)
+        parsing.parse_ids(value)
 
 
 def test_missing_port_is_an_error(run, capsys):

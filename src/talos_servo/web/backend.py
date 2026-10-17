@@ -8,11 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-if TYPE_CHECKING:  # config needs pyyaml; the CLI imports DEFAULT_BRIDGE without the web extra
+if TYPE_CHECKING:  # config needs pyyaml
     from talos_servo.config import WebConfig
-
-# Namespace of the servo bridge node that `talos-servo web --ros` talks to.
-DEFAULT_BRIDGE = "/servo_bridge"
 
 
 class RobotBackend(Protocol):
