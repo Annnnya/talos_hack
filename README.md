@@ -7,14 +7,23 @@ Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything goe
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/).
+Use either [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh). Both install the
+official Feetech SDK (`ftservo-python-sdk`, imported as `scservo_sdk`) and the `talos-servo`
+command from the same `pyproject.toml`.
 
 ```
-uv sync
+uv sync          # pure Python, creates .venv
+pixi install     # conda based, creates .pixi/
 ```
 
-This creates `.venv` with the official Feetech SDK (`ftservo-python-sdk`, imported as
-`scservo_sdk`) and installs the `talos-servo` command.
+pixi is the path toward ROS 2: the workspace (`pixi.toml`) already pulls from the RoboStack
+`robostack-jazzy` channel and pins Python 3.12 to match ROS 2 Jazzy. ROS packages are not added
+yet. uv cannot install ROS, so ROS work will need pixi.
+
+The examples below use `uv run`. With pixi, use `pixi run` instead (or open `pixi shell`).
+
+When you change dependencies in `pyproject.toml`, refresh both lockfiles: `uv lock` and
+`pixi install`. Conda-only packages (ROS) go in `pixi.toml` with `pixi add`.
 
 ## Usage
 
@@ -76,4 +85,13 @@ with ServoBus("COM5") as bus:
 uv run pytest           # tests use a fake SDK, no hardware needed
 uv run ruff check .
 uv run ruff format .
+```
+
+The same checks as pixi tasks:
+
+```
+pixi run test
+pixi run lint
+pixi run fmt
+pixi run check   # lint + format check + tests, like CI
 ```
