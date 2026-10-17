@@ -307,3 +307,51 @@ def test_read_telemetry_short_reply_raises(sdk, monkeypatch):
         monkeypatch.setattr(sdk.handler, "readTxRx", lambda *_a: ([0] * 4, COMM_SUCCESS, 0))
         with pytest.raises(ServoError, match="got 4 bytes"):
             bus.read_telemetry(1)
+
+
+class FakeSerial:
+    def fileno(self) -> int:
+        return 7
+
+
+class FakeFcntl:
+    LOCK_EX = 2
+    LOCK_NB = 4
+
+    def __init__(self, busy: bool) -> None:
+        self.busy = busy
+        self.calls: list[tuple[int, int]] = []
+
+    def flock(self, fd: int, operation: int) -> None:
+        self.calls.append((fd, operation))
+        if self.busy:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+
+
+def test_open_locks_the_port(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    lock = FakeFcntl(busy=False)
+    monkeypatch.setattr(bus_module, "fcntl", lock)
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with sdk.bus():
+        assert lock.calls == [(7, FakeFcntl.LOCK_EX | FakeFcntl.LOCK_NB)]
+
+
+def test_open_refuses_a_port_another_process_holds(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    monkeypatch.setattr(bus_module, "fcntl", FakeFcntl(busy=True))
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with pytest.raises(ServoError, match="already in use by another process"), sdk.bus():
+        pass
+    assert sdk.port.closed_count == 1
+
+
+def test_open_without_flock_skips_locking(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    monkeypatch.setattr(bus_module, "fcntl", None)
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with sdk.bus() as bus:
+        assert bus.ping(1) == 777

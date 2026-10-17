@@ -26,6 +26,11 @@ from scservo_sdk import (
 )
 from serial import SerialException
 
+try:
+    import fcntl
+except ImportError:  # Windows has no flock; ports there are exclusive already.
+    fcntl = None
+
 log = logging.getLogger(__name__)
 
 DEFAULT_BAUDRATE = 1_000_000
@@ -112,6 +117,7 @@ class ServoBus:
             raise ServoError(f"could not open serial port {self.port_name}: {exc}") from exc
         if not opened:
             raise ServoError(f"could not open serial port {self.port_name}")
+        self._lock_port()
         self._is_open = True
         try:
             baud_ok = self._port.setBaudRate(self.baudrate)
@@ -121,6 +127,24 @@ class ServoBus:
         if not baud_ok:
             self.close()
             raise ServoError(f"could not set baud rate {self.baudrate} on {self.port_name}")
+
+    def _lock_port(self) -> None:
+        """Refuse to share the bus with another process: interleaved packets corrupt both.
+
+        pyserial opens ports non-exclusively on Linux, so take an advisory lock that every
+        ServoBus (CLI, web UI, servo bridge, mecanum drive) respects.
+        """
+        serial_port = getattr(self._port, "ser", None)
+        if fcntl is None or serial_port is None:
+            return
+        try:
+            fcntl.flock(serial_port.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            self._port.closePort()
+            raise ServoError(
+                f"serial port {self.port_name} is already in use by another process "
+                "(is talos-servo-bridge running?)"
+            ) from exc
 
     def close(self) -> None:
         if not self._is_open:
