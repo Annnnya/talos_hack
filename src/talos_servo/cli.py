@@ -7,7 +7,8 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from serial.tools import list_ports
 
@@ -92,6 +93,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--acc", type=int, default=DEFAULT_ACCELERATION, help="acceleration (default: %(default)s)"
     )
 
+    ros_opts = argparse.ArgumentParser(add_help=False)
+    ros_opts.add_argument(
+        "--ros",
+        action="store_true",
+        help="go through the running ROS servo bridge instead of the serial port, so this can run "
+        "next to it and the web UI (needs the pixi ros environment; --port is ignored)",
+    )
+    ros_opts.add_argument(
+        "--bridge",
+        default=DEFAULT_BRIDGE,
+        help="servo bridge namespace for --ros (default: %(default)s)",
+    )
+    ros_opts.add_argument(
+        "--config", default=DEFAULT_WEB_CONFIG, help="servo layout file (default: %(default)s)"
+    )
+
     parser = argparse.ArgumentParser(prog="talos-servo", description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -101,7 +118,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ping", parents=[bus_opts], help="check which servos answer")
 
     spin = sub.add_parser(
-        "spin", parents=[bus_opts, motion_opts], help="spin servos in wheel mode, then stop"
+        "spin",
+        parents=[bus_opts, motion_opts, ros_opts],
+        help="spin servos in wheel mode, then stop",
     )
     spin.add_argument(
         "--speed",
@@ -113,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     monitor = sub.add_parser(
         "monitor",
-        parents=[bus_opts, motion_opts],
+        parents=[bus_opts, motion_opts, ros_opts],
         help="print position and speed, optionally while spinning",
     )
     monitor.add_argument(
@@ -136,11 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     web = sub.add_parser(
         "web",
-        parents=[port_opts],
+        parents=[port_opts, ros_opts],
         help="serve the browser control UI (needs the web extra)",
-    )
-    web.add_argument(
-        "--config", default=DEFAULT_WEB_CONFIG, help="servo layout file (default: %(default)s)"
     )
     web.add_argument("--mock", action="store_true", help="simulate the servos, no serial port")
     web.add_argument(
@@ -148,17 +164,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web.add_argument("--http-port", type=int, default=8000, help="http port (default: %(default)s)")
     web.add_argument("--ui-dir", default=DEFAULT_UI_DIR, help="built web UI (default: %(default)s)")
-    web.add_argument(
-        "--ros",
-        action="store_true",
-        help="drive the servos through the running ROS servo bridge instead of the serial port "
-        "(needs the pixi ros environment; --port is ignored)",
-    )
-    web.add_argument(
-        "--bridge",
-        default=DEFAULT_BRIDGE,
-        help="servo bridge namespace for --ros (default: %(default)s)",
-    )
 
     imu = sub.add_parser("imu", help="stream MPU6050 accel, gyro and temperature over i2c")
     imu.add_argument(
@@ -221,7 +226,43 @@ def cmd_ping(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _ros_missing(exc: ImportError, example: str) -> int:
+    print(
+        f"error: --ros needs ROS 2 ({exc.name} missing): run it in the pixi ros environment, "
+        f"e.g. `{example}`",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _over_ros(args: argparse.Namespace, run: Callable[[Any, Any], None]) -> int:
+    """Run `run(cli_commands, backend)` for a spin or monitor command with --ros."""
+    try:
+        from talos_servo.ros import cli_commands
+        from talos_servo.web.config import ConfigError, load_config
+        from talos_servo.web.controller import CommandError
+    except ImportError as exc:
+        return _ros_missing(exc, f"pixi run -e ros talos-servo {args.command} --ros ...")
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.acc != DEFAULT_ACCELERATION:
+        print("note: --acc is ignored with --ros, the servo bridge has no acceleration input")
+    try:
+        run(cli_commands, cli_commands.RosBackend(config, bridge=args.bridge))
+    except CommandError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_spin(args: argparse.Namespace) -> int:
+    if args.ros:
+        return _over_ros(
+            args, lambda m, backend: m.spin_over_ros(backend, args.ids, args.speed, args.seconds)
+        )
     with ServoBus(args.port, args.baud) as bus:
         bus.enable_wheel_mode(args.ids)
         print(f"spinning {args.ids} at speed {args.speed} for {args.seconds}s")
@@ -236,6 +277,13 @@ def cmd_spin(args: argparse.Namespace) -> int:
 
 
 def cmd_monitor(args: argparse.Namespace) -> int:
+    if args.ros:
+        return _over_ros(
+            args,
+            lambda m, backend: m.monitor_over_ros(
+                backend, args.ids, args.speed, args.seconds, args.interval
+            ),
+        )
     with ServoBus(args.port, args.baud) as bus:
         if args.speed:
             bus.enable_wheel_mode(args.ids)
@@ -271,12 +319,7 @@ def cmd_web(args: argparse.Namespace) -> int:
         try:
             import talos_servo.ros.web_backend  # noqa: F401
         except ImportError as exc:
-            print(
-                f"error: --ros needs ROS 2 ({exc.name} missing): run it with `pixi run -e ros "
-                "web-ros`",
-                file=sys.stderr,
-            )
-            return 1
+            return _ros_missing(exc, "pixi run -e ros web-ros")
     try:
         serve(
             config_path=args.config,
@@ -337,13 +380,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    web_without_port = args.command == "web" and (args.mock or args.ros)
+    without_port = getattr(args, "ros", False) or (args.command == "web" and args.mock)
     if args.command == "web" and args.mock and args.ros:
         parser.error(
             "--mock and --ros do not mix: for simulated servos over ROS, run the bridge "
             "with `pixi run -e ros servo-node-mock`"
         )
-    needs_port = args.command not in ("ports", "imu") and not web_without_port
+    needs_port = args.command not in ("ports", "imu") and not without_port
     if needs_port and not args.port:
         parser.error(f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)")
     try:
