@@ -5,6 +5,94 @@ STS/SMS serial bus servos daisy-chained on one bus.
 
 Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything goes through PRs.
 
+## Architecture
+
+How the hardware, the `talos_servo` library, the programs you run and the ROS 2 topics connect.
+
+```mermaid
+flowchart TB
+  subgraph HW["Hardware"]
+    servos[("Feetech STS3215 servos<br/>daisy-chained, one ID each")]
+    imu[("MPU6050 IMU<br/>I2C")]
+  end
+
+  subgraph LIB["talos_servo library - src/talos_servo/"]
+    bus["bus.py - ServoBus<br/>checked reads and writes,<br/>stops spinning servos on exit"]
+    sim["web/sim.py<br/>simulated servos for --mock"]
+    imumod["imu.py - Mpu6050"]
+    cfg["web/config.py<br/>reads config/web.yaml"]
+    ctrl["web/controller.py - RobotController<br/>thread-safe servo state, polling"]
+    kin["mecanum.py<br/>body velocity to wheel speeds"]
+    conv["ros/convert.py<br/>steps to rad, WheelOdometer"]
+    readouts["ros/readouts.py<br/>per joint numeric topics"]
+  end
+
+  subgraph PROC["Programs - only one of them may open the servo port at a time"]
+    cli(["talos-servo CLI<br/>ping, spin, set-id, imu ..."])
+    web(["talos-servo web<br/>FastAPI on :8000"])
+    bridge(["talos-servo-ros<br/>servo_bridge node"])
+    drive(["talos_mecanum drive_node"])
+    teleop(["talos_mecanum keyboard_teleop"])
+  end
+
+  browser(["Browser UI - web/ (Next.js)"])
+
+  subgraph ROS["ROS 2 topics and services"]
+    bridge_in[/"/servo_bridge/position_cmd, velocity_cmd<br/>stop_all, #lt;joint#gt;/set_torque, set_wheel_mode"/]
+    bridge_out[/"/servo_bridge/joint_states, status<br/>/servo_bridge/#lt;joint#gt;/temperature, voltage,<br/>current, load, moving"/]
+    drive_in[/"/cmd_vel<br/>/base/enable, /base/stop"/]
+    drive_out[/"/joint_states, /diagnostics<br/>/base/#lt;wheel#gt;/temperature, voltage,<br/>current, load, moving"/]
+  end
+
+  servos <==>|"USB serial adapter<br/>half-duplex UART, 1 Mbaud"| bus
+  imu ==>|"I2C bus 1"| imumod
+  sim -.->|"stands in for the serial SDK"| bus
+
+  bus -.-> cli
+  imumod -.-> cli
+  bus -.-> ctrl
+  cfg -.-> ctrl
+  ctrl -.-> web
+  ctrl -.-> bridge
+  bus -.-> drive
+  kin -.-> drive
+  conv -.-> drive
+  conv -.-> bridge
+  readouts -.-> drive
+  readouts -.-> bridge
+
+  web <-->|"WebSocket /ws<br/>state out, commands in"| browser
+  teleop --> drive_in
+  drive_in --> drive
+  drive --> drive_out
+  bridge_in --> bridge
+  bridge --> bridge_out
+```
+
+How to read it:
+
+| Shape or line | Meaning |
+|---|---|
+| Cylinder | Physical hardware |
+| Rectangle | Library module in `src/talos_servo/` (pure Python, unit tested without hardware) |
+| Rounded box | A program you start: a CLI command or a ROS 2 node |
+| Slanted box | ROS 2 topics and services a node offers |
+| Thick line | Physical bus |
+| Dotted line | "is used by": the program imports that module |
+| Solid line | Messages at runtime |
+
+Things the diagram implies:
+
+- **One owner per serial port.** The CLI, the web UI, the servo bridge and the drive node each open
+  the servo bus themselves. Run only one of them at a time.
+- **Two ROS entry points.** `servo_bridge` is a generic per joint bridge configured by
+  `config/web.yaml` ([ROS 2](#ros-2)). `drive_node` drives the four mecanum wheels from `/cmd_vel`
+  and only opens the port after `/base/enable` ([ROS 2 Jazzy mecanum base](#ros-2-jazzy-mecanum-base)).
+- **Readouts.** Both nodes publish `JointState` (position, velocity, load), a `DiagnosticArray`
+  (health, errors) and plain numeric per joint topics for plotting.
+- **Safety lives low.** `ServoBus` checks every SDK result and stops servos it started when it
+  closes. The nodes add command timeouts on top.
+
 ## Setup
 
 Use either [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh). Both install the
