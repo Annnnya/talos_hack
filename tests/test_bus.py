@@ -7,6 +7,8 @@ from scservo_sdk import (
     COMM_SUCCESS,
     SMS_STS_ID,
     SMS_STS_MODE,
+    SMS_STS_MOVING,
+    SMS_STS_PRESENT_CURRENT_L,
     SMS_STS_PRESENT_LOAD_L,
     SMS_STS_PRESENT_TEMPERATURE,
     SMS_STS_PRESENT_VOLTAGE,
@@ -198,10 +200,14 @@ def test_read_status_decodes_registers(sdk):
             SMS_STS_PRESENT_LOAD_L: (1 << 10) | 50,  # sign bit set means -50
             SMS_STS_PRESENT_VOLTAGE: 121,
             SMS_STS_PRESENT_TEMPERATURE: 34,
+            SMS_STS_PRESENT_CURRENT_L: (1 << 15) | 100,  # sign bit set means -100 counts
+            SMS_STS_MOVING: 1,
         }
     )
     with sdk.bus() as bus:
-        assert bus.read_status(1) == ServoStatus(load=-50, voltage=12.1, temperature=34)
+        assert bus.read_status(1) == ServoStatus(
+            load=-50, voltage=12.1, temperature=34, current=-0.65, moving=True
+        )
 
 
 def test_read_status_failure_raises(sdk):

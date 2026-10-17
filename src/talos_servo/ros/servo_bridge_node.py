@@ -3,7 +3,8 @@
 Topics and services live under the node name (default `/servo_bridge/...`):
 
 - `joint_states` (sensor_msgs/JointState): position rad, velocity rad/s, effort = raw load
-- `status` (diagnostic_msgs/DiagnosticArray): online, mode, torque, voltage, temperature, error
+- `status` (diagnostic_msgs/DiagnosticArray): online, mode, torque, voltage, temperature,
+  current, moving, error
 - `position_cmd` (sensor_msgs/JointState, in): goal angles by joint name, optional velocity
   (rad/s) as move speed
 - `velocity_cmd` (sensor_msgs/JointState, in): wheel speeds by joint name. A wheel servo stops
@@ -49,6 +50,18 @@ DEFAULT_STATUS_HZ = 2.0
 # Same low default as the web UI when a position command carries no velocity.
 DEFAULT_MOVE_SPEED = 200
 QUEUE_DEPTH = 10
+# ServoState fields reported as key/values on the status topic.
+STATUS_KEYS = (
+    "mode",
+    "torque",
+    "position",
+    "speed",
+    "load",
+    "voltage",
+    "temp",
+    "current",
+    "moving",
+)
 
 
 class ServoBridgeNode(Node):
@@ -123,7 +136,7 @@ class ServoBridgeNode(Node):
                 status.level, status.message = DiagnosticStatus.WARN, s["error"]
             else:
                 status.level, status.message = DiagnosticStatus.OK, "ok"
-            for key in ("mode", "torque", "position", "speed", "load", "voltage", "temp"):
+            for key in STATUS_KEYS:
                 status.values.append(KeyValue(key=key, value=str(s[key])))
             msg.status.append(status)
         return msg

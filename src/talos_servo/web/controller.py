@@ -44,6 +44,8 @@ class ServoState:
     load: int = 0
     voltage: float = 0.0
     temp: int = 0
+    current: float = 0.0
+    moving: bool = False
     target: int | None = None
     target_speed: int = 0
     error: str | None = None
@@ -110,6 +112,7 @@ class RobotController:
         self._read_fast(s)
         status = self.bus.read_status(s.id)
         s.load, s.voltage, s.temp = status.load, status.voltage, status.temperature
+        s.current, s.moving = status.current, status.moving
 
     # --- commands --------------------------------------------------------
     def set_mode(self, servo_id: int, mode: str) -> None:

@@ -207,7 +207,7 @@ Joint names come from the config names (`"Servo 1"` becomes `servo_1`). Angles a
 | Name | Type | What it does |
 |---|---|---|
 | `joint_states` (out) | `sensor_msgs/JointState` | position (rad), velocity (rad/s), effort (raw load) at `telemetry_hz` |
-| `status` (out) | `diagnostic_msgs/DiagnosticArray` | online, mode, torque, voltage, temperature, errors (2 Hz) |
+| `status` (out) | `diagnostic_msgs/DiagnosticArray` | online, mode, torque, voltage, temperature, current (A), moving, errors (2 Hz) |
 | `position_cmd` (in) | `sensor_msgs/JointState` | move joints by name; optional `velocity` (rad/s) sets the move speed |
 | `velocity_cmd` (in) | `sensor_msgs/JointState` | spin wheel-mode joints by name (rad/s) |
 | `stop_all` | `std_srvs/Trigger` | stop every wheel-mode servo |
@@ -255,7 +255,7 @@ while it is disabled, because the serial port is closed then.
 | Topic | Type | Rate param (default) | Content |
 | --- | --- | --- | --- |
 | `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000, refreshed at the diagnostics rate) |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, raw position and speed. Level ERROR with the error text if a read fails |
+| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed. Level ERROR with the error text if a read fails |
 
 Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
 and reported on `/diagnostics` but does not disable the drive. Check them with:
