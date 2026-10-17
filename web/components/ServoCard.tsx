@@ -1,46 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, Limits, Mode, ServoState } from "@/lib/protocol";
-import { stepsToDeg } from "@/lib/protocol";
+import { CommandCaption, GhostMarker } from "@/components/LastCommand";
+import { trackLeft } from "@/lib/lastCommand";
+import type { ClientMessage, Limits, Mode, ServoSettings, ServoState } from "@/lib/protocol";
+import { DEFAULT_SETTINGS, stepsToDeg } from "@/lib/protocol";
 import { useThrottle } from "@/lib/useBridge";
+import { useFollow } from "@/lib/useFollow";
 
 interface Props {
   servo: ServoState;
   limits: Limits;
+  /** Shared move speed and acceleration; undefined until the first state message. */
+  settings: ServoSettings | undefined;
+  clientId: string | null;
+  /** Commands go through the ROS bridge, which has no acceleration input. */
+  ros: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export default function ServoCard({ servo, limits, send }: Props) {
-  const [target, setTarget] = useState(servo.target ?? servo.position);
-  const [moveSpeed, setMoveSpeed] = useState(200);
-  const [acc, setAcc] = useState(20);
-  const [wheelSpeed, setWheelSpeed] = useState(servo.target_speed);
-  const dragging = useRef(false);
-
-  // Follow changes made from other laptops, unless this user is dragging.
-  useEffect(() => {
-    if (!dragging.current && servo.target !== null) setTarget(servo.target);
-  }, [servo.target]);
-  useEffect(() => {
-    if (!dragging.current) setWheelSpeed(servo.target_speed);
-  }, [servo.target_speed]);
+export default function ServoCard({ servo, limits, settings, clientId, ros, send }: Props) {
+  const shared = settings ?? DEFAULT_SETTINGS;
+  // Every control follows the last command or shared setting, wherever it came from,
+  // except while this user is holding it.
+  const target = useFollow(servo.target, servo.position);
+  const wheel = useFollow(servo.target_speed, 0);
+  const moveSpeed = useFollow(shared.move_speed, DEFAULT_SETTINGS.move_speed);
+  const acc = useFollow(shared.acc, DEFAULT_SETTINGS.acc);
 
   const sendMove = useThrottle((position: number) =>
-    send({ type: "move", id: servo.id, position, speed: moveSpeed, acc }),
+    send({ type: "move", id: servo.id, position, speed: moveSpeed.value, acc: acc.value }),
   );
-  const sendSpin = useThrottle((speed: number) => send({ type: "spin", id: servo.id, speed, acc }));
+  const sendSpin = useThrottle((speed: number) => send({ type: "spin", id: servo.id, speed, acc: acc.value }));
+  // One throttle per setting, so a quick change to one never drops the other.
+  const sendMoveSpeed = useThrottle((v: number) => send({ type: "settings", id: servo.id, move_speed: v }));
+  const sendAcc = useThrottle((v: number) => send({ type: "settings", id: servo.id, acc: v }));
 
   const isWheel = servo.mode === "wheel";
   const disabled = !servo.online;
   const setMode = (mode: Mode) => mode !== servo.mode && send({ type: "set_mode", id: servo.id, mode });
   const span = Math.max(1, servo.max_pos - servo.min_pos);
-  const markerPct = Math.min(100, Math.max(0, ((servo.position - servo.min_pos) / span) * 100));
+  const posPct = (steps: number) => ((steps - servo.min_pos) / span) * 100;
+  const speedPct = (speed: number) => ((speed + limits.speed_max) / (2 * limits.speed_max)) * 100;
 
-  const dragProps = {
-    onPointerDown: () => (dragging.current = true),
-    onPointerUp: () => (dragging.current = false),
-    onBlur: () => (dragging.current = false),
+  const goTo = (position: number) => {
+    target.setValue(position);
+    sendMove(position);
   };
 
   return (
@@ -90,29 +94,31 @@ export default function ServoCard({ servo, limits, send }: Props) {
       {/* Controls */}
       {!isWheel ? (
         <div className="flex flex-col gap-3">
-          <Field label="Target position" value={`${target} (${stepsToDeg(target).toFixed(1)}°)`}>
-            <div className="relative">
+          <Field label="Target position" value={`${target.value} (${stepsToDeg(target.value).toFixed(1)}°)`}>
+            <div className="relative pt-1">
               <input
                 type="range"
                 className="w-full"
                 min={servo.min_pos}
                 max={servo.max_pos}
-                value={target}
+                value={target.value}
                 disabled={disabled}
-                {...dragProps}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setTarget(v);
-                  sendMove(v);
-                }}
+                aria-label="Target position"
+                aria-valuetext={`${target.value} steps, ${stepsToDeg(target.value).toFixed(0)} degrees`}
+                {...target.holdProps}
+                onChange={(e) => goTo(Number(e.target.value))}
               />
-              {/* live position marker */}
-              <div
-                className="pointer-events-none absolute -bottom-1.5 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-amber-500"
-                style={{ left: `${markerPct}%` }}
-                title="Current position"
-              />
+              {servo.target !== null && servo.target !== target.value && (
+                <GhostMarker
+                  pct={posPct(servo.target)}
+                  last={servo.last_command}
+                  clientId={clientId}
+                  valueText={`${servo.target} (${stepsToDeg(servo.target).toFixed(1)}°)`}
+                />
+              )}
+              <LiveMarker pct={posPct(servo.position)} title={`Current position ${servo.position}`} />
             </div>
+            <CommandCaption last={servo.last_command} clientId={clientId} />
           </Field>
           <div className="flex gap-2">
             <input
@@ -120,59 +126,92 @@ export default function ServoCard({ servo, limits, send }: Props) {
               className="w-24 rounded-md border border-black/15 dark:border-white/15 bg-transparent px-2 py-1 text-sm"
               min={servo.min_pos}
               max={servo.max_pos}
-              value={target}
+              value={target.value}
               disabled={disabled}
-              onChange={(e) => setTarget(Number(e.target.value))}
-              onKeyDown={(e) => e.key === "Enter" && sendMove(target)}
+              aria-label="Target position (steps)"
+              onFocus={target.hold}
+              onBlur={target.release}
+              onChange={(e) => target.setValue(Number(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  sendMove(target.value);
+                  target.release();
+                }
+              }}
             />
             <button
               disabled={disabled}
-              onClick={() => sendMove(target)}
+              onClick={() => {
+                sendMove(target.value);
+                target.release();
+              }}
               className="rounded-md bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-500"
             >
               Go
             </button>
             <button
               disabled={disabled}
-              onClick={() => {
-                const center = Math.round((servo.min_pos + servo.max_pos) / 2);
-                setTarget(center);
-                sendMove(center);
-              }}
+              onClick={() => goTo(Math.round((servo.min_pos + servo.max_pos) / 2))}
               className="rounded-md border border-black/15 dark:border-white/15 px-3 py-1 text-sm hover:bg-black/5 dark:hover:bg-white/10"
             >
               Center
             </button>
           </div>
-          <Slider label="Move speed" value={moveSpeed} min={1} max={limits.speed_max} onChange={setMoveSpeed} disabled={disabled} hint="steps/s" />
+          <Slider
+            label="Move speed"
+            value={moveSpeed.value}
+            min={1}
+            max={limits.speed_max}
+            hint="steps/s"
+            disabled={disabled}
+            holdProps={moveSpeed.holdProps}
+            onChange={(v) => {
+              moveSpeed.setValue(v);
+              sendMoveSpeed(v);
+            }}
+          />
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <Field label="Speed" value={`${wheelSpeed} steps/s`}>
-            <input
-              type="range"
-              className="w-full"
-              min={-limits.speed_max}
-              max={limits.speed_max}
-              value={wheelSpeed}
-              disabled={disabled}
-              {...dragProps}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setWheelSpeed(v);
-                sendSpin(v);
-              }}
-            />
+          <Field label="Speed" value={`${wheel.value} steps/s`}>
+            <div className="relative pt-1">
+              <input
+                type="range"
+                className="w-full"
+                min={-limits.speed_max}
+                max={limits.speed_max}
+                value={wheel.value}
+                disabled={disabled}
+                aria-label="Wheel speed"
+                aria-valuetext={`${wheel.value} steps per second`}
+                {...wheel.holdProps}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  wheel.setValue(v);
+                  sendSpin(v);
+                }}
+              />
+              {servo.target_speed !== wheel.value && (
+                <GhostMarker
+                  pct={speedPct(servo.target_speed)}
+                  last={servo.last_command}
+                  clientId={clientId}
+                  valueText={`${servo.target_speed} steps/s`}
+                />
+              )}
+              <LiveMarker pct={speedPct(servo.speed)} title={`Current speed ${servo.speed} steps/s`} />
+            </div>
             <div className="flex justify-between text-[10px] text-black/40 dark:text-white/40">
               <span>◀ reverse</span>
               <span>stop</span>
               <span>forward ▶</span>
             </div>
+            <CommandCaption last={servo.last_command} clientId={clientId} />
           </Field>
           <button
             disabled={disabled}
             onClick={() => {
-              setWheelSpeed(0);
+              wheel.setValue(0);
               send({ type: "stop", id: servo.id });
             }}
             className="rounded-md bg-red-600 py-1.5 text-sm font-semibold text-white hover:bg-red-500"
@@ -182,7 +221,19 @@ export default function ServoCard({ servo, limits, send }: Props) {
         </div>
       )}
 
-      <Slider label="Acceleration" value={acc} min={0} max={limits.acc_max} onChange={setAcc} disabled={disabled} />
+      <Slider
+        label="Acceleration"
+        value={acc.value}
+        min={0}
+        max={limits.acc_max}
+        disabled={disabled || ros}
+        valueText={ros ? "not used over ROS" : undefined}
+        holdProps={acc.holdProps}
+        onChange={(v) => {
+          acc.setValue(v);
+          sendAcc(v);
+        }}
+      />
 
       {/* Telemetry */}
       <dl className="grid grid-cols-3 gap-2 text-xs font-mono">
@@ -196,6 +247,17 @@ export default function ServoCard({ servo, limits, send }: Props) {
 
       {servo.error && <p className="text-xs text-red-500 break-words">{servo.error}</p>}
     </section>
+  );
+}
+
+/** Amber diamond below the track: where the servo actually is right now. */
+function LiveMarker({ pct, title }: { pct: number; title: string }) {
+  return (
+    <div
+      className="pointer-events-none absolute -bottom-1.5 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-amber-500"
+      style={{ left: trackLeft(pct) }}
+      title={title}
+    />
   );
 }
 
@@ -217,11 +279,15 @@ function Slider(props: {
   min: number;
   max: number;
   hint?: string;
+  /** Replaces the number in the header, e.g. to say why the slider is disabled. */
+  valueText?: string;
   disabled?: boolean;
+  holdProps?: React.InputHTMLAttributes<HTMLInputElement>;
   onChange: (v: number) => void;
 }) {
+  const shown = props.valueText ?? `${props.value}${props.hint ? ` ${props.hint}` : ""}`;
   return (
-    <Field label={props.label} value={`${props.value}${props.hint ? ` ${props.hint}` : ""}`}>
+    <Field label={props.label} value={shown}>
       <input
         type="range"
         className="w-full"
@@ -229,6 +295,8 @@ function Slider(props: {
         max={props.max}
         value={props.value}
         disabled={props.disabled}
+        aria-label={props.label}
+        {...props.holdProps}
         onChange={(e) => props.onChange(Number(e.target.value))}
       />
     </Field>
