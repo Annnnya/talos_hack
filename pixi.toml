@@ -46,3 +46,15 @@ check = { depends-on = ["lint", "fmt-check", "test"] }
 ros-build = "colcon build --base-paths ros2_ws/src"
 drive = "bash -c 'source install/setup.sh && ros2 run talos_mecanum drive_node --ros-args --params-file ros2_ws/src/talos_mecanum/config/robot.yaml'"
 teleop = "bash -c 'source install/setup.sh && ros2 run talos_mecanum keyboard_teleop'"
+
+# ROS 2 Jazzy for the servo bridge node. Separate environment so the default one stays light.
+[feature.ros.dependencies]
+ros-jazzy-ros-base = "*"
+ros-jazzy-diagnostic-msgs = "*"
+
+[feature.ros.tasks]
+servo-node = "talos-servo-ros"
+servo-node-mock = "talos-servo-ros --mock"
+
+[environments]
+ros = ["ros"]
