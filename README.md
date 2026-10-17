@@ -16,9 +16,9 @@ uv sync          # pure Python, creates .venv
 pixi install     # conda based, creates .pixi/
 ```
 
-pixi is the path toward ROS 2: the workspace (`pixi.toml`) already pulls from the RoboStack
-`robostack-jazzy` channel and pins Python 3.12 to match ROS 2 Jazzy. ROS packages are not added
-yet. uv cannot install ROS, so ROS work will need pixi.
+pixi also provides ROS 2 Jazzy (from the RoboStack `robostack-jazzy` channel, Python 3.12) in a
+separate `ros` environment: `pixi install -e ros`. uv cannot install ROS, so ROS work needs pixi.
+See [ROS 2](#ros-2).
 
 The examples below use `uv run`. With pixi, use `pixi run` instead (or open `pixi shell`).
 
@@ -66,6 +66,41 @@ The old scripts map to commands like this:
 | `tests/test_daisy_chain.py` | `talos-servo spin --ids 1-3 --speed 300 --seconds 60` |
 | `tests/test_servo2.py` | `talos-servo monitor --ids 3 --speed 500 --acc 10` |
 | `tests/change_ids.py` | `talos-servo set-id --id 1 --new-id 3` |
+
+## IMU (MPU6050)
+
+The MPU6050 accelerometer and gyro connects to the Raspberry Pi over I2C, separately from the
+servo bus.
+
+| MPU6050 | Pi header |
+|---|---|
+| VCC | pin 1 (3.3 V) |
+| GND | pin 6 (GND) |
+| SDA | pin 3 (GPIO2) |
+| SCL | pin 5 (GPIO3) |
+| AD0 | GND for address 0x68 (or 3.3 V for 0x69) |
+
+Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
+`sudo raspi-config` (Interface Options, I2C), reboot, and check that `i2cdetect -y 1` shows `68`.
+
+```
+uv sync --extra imu                                # pixi install already includes it
+uv run talos-servo imu --calibrate                 # zero the gyro, then stream until Ctrl+C
+uv run talos-servo imu --seconds 5 --interval 0.05
+```
+
+Flat and still, it should read about `0 0 +1.00` g and near-zero gyro. Options: `--i2c-bus`
+(default 1, or `$TALOS_IMU_BUS`), `--address` (default 0x68), `--accel-range` (2/4/8/16 g),
+`--gyro-range` (250/500/1000/2000 deg/s).
+
+```python
+from talos_servo import Mpu6050
+
+with Mpu6050() as imu:
+    imu.calibrate_gyro()
+    sample = imu.read()
+    print(sample.accel, sample.gyro, sample.temperature)
+```
 
 ## Using the library
 
@@ -151,6 +186,49 @@ steps at the top of that file.
 UI development with hot reload: run `uv run talos-servo web --mock`, then `cd web && npm run dev`
 and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
 Pi's address instead of localhost).
+
+## ROS 2
+
+`talos-servo-ros` is a ROS 2 node (`src/talos_servo/ros/servo_bridge_node.py`) on top of the same
+controller, config (`config/web.yaml`) and simulator as the web UI. It only uses standard message
+types, so there is no colcon build step.
+
+```
+pixi install -e ros
+pixi run -e ros servo-node-mock                          # simulated servos
+TALOS_SERVO_PORT=/dev/ttyACM0 pixi run -e ros servo-node # real servos
+pixi run -e ros talos-servo-ros --help                   # all options
+```
+
+Use `pixi shell -e ros` for a shell where `ros2` works. Everything lives under `/servo_bridge/`.
+Joint names come from the config names (`"Servo 1"` becomes `servo_1`). Angles are radians with
+0 at half a turn (step 2048), so a joint covers about -pi..pi.
+
+| Name | Type | What it does |
+|---|---|---|
+| `joint_states` (out) | `sensor_msgs/JointState` | position (rad), velocity (rad/s), effort (raw load) at `telemetry_hz` |
+| `status` (out) | `diagnostic_msgs/DiagnosticArray` | online, mode, torque, voltage, temperature, errors (2 Hz) |
+| `position_cmd` (in) | `sensor_msgs/JointState` | move joints by name; optional `velocity` (rad/s) sets the move speed |
+| `velocity_cmd` (in) | `sensor_msgs/JointState` | spin wheel-mode joints by name (rad/s) |
+| `stop_all` | `std_srvs/Trigger` | stop every wheel-mode servo |
+| `<joint>/set_wheel_mode` | `std_srvs/SetBool` | true = speed (wheel) mode, false = position mode |
+| `<joint>/set_torque` | `std_srvs/SetBool` | torque on or off |
+
+```
+ros2 topic pub --once /servo_bridge/position_cmd sensor_msgs/msg/JointState   "{name: [servo_1], position: [0.5]}"
+ros2 service call /servo_bridge/servo_2/set_wheel_mode std_srvs/srv/SetBool "{data: true}"
+ros2 topic pub -r 10 /servo_bridge/velocity_cmd sensor_msgs/msg/JointState   "{name: [servo_2], velocity: [1.0]}"
+```
+
+Safety: velocity commands are a deadman signal. A wheel servo stops when it gets no new
+`velocity_cmd` within `command_timeout` seconds (default 0.5, set with
+`--ros-args -p command_timeout:=1.0`), so publish at 10 Hz or more. All wheel servos are stopped
+at startup and on shutdown (including Ctrl+C), and the same `min_pos`/`max_pos` and `max_speed`
+limits as the web UI apply. The node and the web UI both open the serial port, so run one at a
+time.
+
+The `ros` environment is tested on the Raspberry Pi 5 (linux-aarch64). On Windows it currently
+hangs while activating, so run ROS on Linux (or WSL) for now.
 
 ## ROS 2 Jazzy mecanum base
 

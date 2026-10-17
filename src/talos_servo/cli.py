@@ -18,8 +18,19 @@ from talos_servo.bus import (
     ServoBus,
     ServoError,
 )
+from talos_servo.imu import (
+    ACCEL_RANGES,
+    DEFAULT_ACCEL_RANGE,
+    DEFAULT_ADDRESS,
+    DEFAULT_GYRO_RANGE,
+    DEFAULT_I2C_BUS,
+    GYRO_RANGES,
+    ImuError,
+    Mpu6050,
+)
 
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
+IMU_BUS_ENV_VAR = "TALOS_IMU_BUS"
 DEFAULT_SPEED = 100
 EXIT_INTERRUPTED = 130
 DEFAULT_WEB_CONFIG = "config/web.yaml"
@@ -49,6 +60,14 @@ def parse_id(value: str) -> int:
     if len(ids) != 1:
         raise argparse.ArgumentTypeError(f"expected a single servo id: {value!r}")
     return ids[0]
+
+
+def parse_int_any_base(value: str) -> int:
+    """Accept "104" or "0x68"."""
+    try:
+        return int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid number: {value!r}") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -128,6 +147,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web.add_argument("--http-port", type=int, default=8000, help="http port (default: %(default)s)")
     web.add_argument("--ui-dir", default=DEFAULT_UI_DIR, help="built web UI (default: %(default)s)")
+
+    imu = sub.add_parser("imu", help="stream MPU6050 accel, gyro and temperature over i2c")
+    imu.add_argument(
+        "--i2c-bus",
+        type=int,
+        default=os.environ.get(IMU_BUS_ENV_VAR, str(DEFAULT_I2C_BUS)),
+        help=f"i2c bus number, /dev/i2c-N (default: ${IMU_BUS_ENV_VAR} or {DEFAULT_I2C_BUS})",
+    )
+    imu.add_argument(
+        "--address",
+        type=parse_int_any_base,
+        default=DEFAULT_ADDRESS,
+        help=f"i2c address, 0x69 if AD0 is high (default: 0x{DEFAULT_ADDRESS:02x})",
+    )
+    imu.add_argument(
+        "--accel-range",
+        type=int,
+        choices=sorted(ACCEL_RANGES),
+        default=DEFAULT_ACCEL_RANGE,
+        help="accelerometer full scale in g (default: %(default)s)",
+    )
+    imu.add_argument(
+        "--gyro-range",
+        type=int,
+        choices=sorted(GYRO_RANGES),
+        default=DEFAULT_GYRO_RANGE,
+        help="gyro full scale in deg/s (default: %(default)s)",
+    )
+    imu.add_argument(
+        "--interval", type=float, default=0.1, help="seconds between reads (default: %(default)s)"
+    )
+    imu.add_argument(
+        "--seconds", type=float, default=None, help="stop after this long (default: until Ctrl+C)"
+    )
+    imu.add_argument(
+        "--calibrate", action="store_true", help="zero the gyro first (keep the sensor still)"
+    )
     return parser
 
 
@@ -215,6 +271,30 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_imu(args: argparse.Namespace) -> int:
+    with Mpu6050(
+        args.i2c_bus,
+        args.address,
+        accel_range=args.accel_range,
+        gyro_range=args.gyro_range,
+    ) as imu:
+        if args.calibrate:
+            print("calibrating gyro, keep the sensor still...")
+            ox, oy, oz = imu.calibrate_gyro()
+            print(f"gyro offset [dps] {ox:+.2f} {oy:+.2f} {oz:+.2f}")
+        deadline = None if args.seconds is None else time.monotonic() + args.seconds
+        while deadline is None or time.monotonic() < deadline:
+            sample = imu.read()
+            ax, ay, az = sample.accel
+            gx, gy, gz = sample.gyro
+            print(
+                f"acc[g] {ax:+.2f} {ay:+.2f} {az:+.2f} | "
+                f"gyro[dps] {gx:+6.1f} {gy:+6.1f} {gz:+6.1f} | {sample.temperature:.1f}C"
+            )
+            time.sleep(args.interval)
+    return 0
+
+
 COMMANDS = {
     "ports": cmd_ports,
     "ping": cmd_ping,
@@ -222,6 +302,7 @@ COMMANDS = {
     "monitor": cmd_monitor,
     "set-id": cmd_set_id,
     "web": cmd_web,
+    "imu": cmd_imu,
 }
 
 
@@ -232,16 +313,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    needs_port = args.command != "ports" and not (args.command == "web" and args.mock)
+    needs_port = args.command not in ("ports", "imu") and not (args.command == "web" and args.mock)
     if needs_port and not args.port:
         parser.error(f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)")
     try:
         return COMMANDS[args.command](args)
-    except ServoError as exc:
+    except (ServoError, ImuError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("interrupted, servos stopped", file=sys.stderr)
+        print(
+            "interrupted" if args.command == "imu" else "interrupted, servos stopped",
+            file=sys.stderr,
+        )
         return EXIT_INTERRUPTED
 
 

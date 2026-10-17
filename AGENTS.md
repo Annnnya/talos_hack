@@ -17,8 +17,9 @@ Feetech STS/SMS serial bus servos daisy-chained on one half-duplex UART bus.
   `pixi run`, `pixi add`) side by side - never pip. Both read `pyproject.toml`. When you change
   dependencies, update both lockfiles (`uv lock` and `pixi install`) and commit `uv.lock` and
   `pixi.lock` together. CI checks both
-- **ROS 2 (planned):** Jazzy via RoboStack, through pixi only (`pixi.toml`, channel
-  `robostack-jazzy`). Python stays on 3.12 to match Jazzy
+- **ROS 2:** Jazzy via RoboStack, through pixi only (`pixi.toml` `ros` environment, channel
+  `robostack-jazzy`). Python stays on 3.12 to match Jazzy. ROS tests skip when rclpy is missing,
+  so run `pixi run -e ros test` to cover them
 - **Servo SDK:** `ftservo-python-sdk` (official Feetech SDK, imported as `scservo_sdk`, provides
   `sms_sts`). Do not add `feetech-servo-sdk`: it is an older fork without `sms_sts` and installs the
   same module name, so the two conflict
