@@ -7,9 +7,9 @@ PORT = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00"
 BAUDRATE = 1_000_000
 
 SERVO_IDS = [1, 2, 3]
-SPEED = 100       # Try a low speed first
+SPEED = 300       # Try a low speed first
 ACCELERATION = 20
-RUN_SECONDS = 3
+RUN_SECONDS = 60
 
 port = PortHandler(PORT)
 servo = sms_sts(port)

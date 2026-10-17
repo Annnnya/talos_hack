@@ -4,7 +4,7 @@ from scservo_sdk import sms_sts, PortHandler
 
 PORT = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00"
 BAUDRATE = 1_000_000
-SERVO_ID = 1
+SERVO_ID = 3
 
 port = PortHandler(PORT)
 servo = sms_sts(port)
