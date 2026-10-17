@@ -5,19 +5,25 @@ import os
 import time
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
 
-from talos_servo.bus import DEFAULT_ACCELERATION, DEFAULT_BAUDRATE, ServoBus
+from talos_servo.bus import DEFAULT_ACCELERATION, DEFAULT_BAUDRATE, ServoBus, ServoStatus
 from talos_servo.mecanum import (
     DEFAULT_WHEEL_DIRECTIONS,
     DEFAULT_WHEEL_IDS,
     mecanum_wheel_speeds,
 )
+from talos_servo.telemetry import WHEEL_JOINT_NAMES, WheelOdometer, speed_to_rad_s
 
 COMMAND_TIMEOUT_S = 0.5
 WATCHDOG_PERIOD_S = 0.1
+DEFAULT_JOINT_STATE_RATE_HZ = 10.0
+DEFAULT_DIAGNOSTICS_RATE_HZ = 1.0
+READ_ERROR_LOG_THROTTLE_S = 5.0
 
 
 class MecanumDriveNode(Node):
@@ -34,6 +40,8 @@ class MecanumDriveNode(Node):
         self.declare_parameter("acceleration", DEFAULT_ACCELERATION)
         self.declare_parameter("max_linear_speed", 0.1)
         self.declare_parameter("max_angular_speed", 0.5)
+        self.declare_parameter("joint_state_rate_hz", DEFAULT_JOINT_STATE_RATE_HZ)
+        self.declare_parameter("diagnostics_rate_hz", DEFAULT_DIAGNOSTICS_RATE_HZ)
 
         self._port = str(self.get_parameter("port").value)
         self._baudrate = int(self.get_parameter("baudrate").value)
@@ -48,6 +56,8 @@ class MecanumDriveNode(Node):
         self._acceleration = int(self.get_parameter("acceleration").value)
         self._max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self._max_angular_speed = float(self.get_parameter("max_angular_speed").value)
+        self._joint_state_rate_hz = float(self.get_parameter("joint_state_rate_hz").value)
+        self._diagnostics_rate_hz = float(self.get_parameter("diagnostics_rate_hz").value)
         self._validate_parameters()
 
         self._bus: ServoBus | None = None
@@ -58,6 +68,14 @@ class MecanumDriveNode(Node):
         self.create_service(SetBool, "/base/enable", self._on_enable)
         self.create_service(Trigger, "/base/stop", self._on_stop)
         self.create_timer(WATCHDOG_PERIOD_S, self._watchdog)
+
+        self._odometers = [WheelOdometer(direction) for direction in self._wheel_directions]
+        self._last_raw: list[tuple[int, int] | None] = [None] * len(self._wheel_ids)
+        self._last_status: list[ServoStatus | None] = [None] * len(self._wheel_ids)
+        self._joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
+        self._diagnostics_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self.create_timer(1.0 / self._joint_state_rate_hz, self._publish_joint_states)
+        self.create_timer(1.0 / self._diagnostics_rate_hz, self._publish_diagnostics)
         self.get_logger().info("Ready; call /base/enable with data=true before moving the robot")
 
     def _validate_parameters(self) -> None:
@@ -70,6 +88,8 @@ class MecanumDriveNode(Node):
         for value, name in (
             (self._max_linear_speed, "max_linear_speed"),
             (self._max_angular_speed, "max_angular_speed"),
+            (self._joint_state_rate_hz, "joint_state_rate_hz"),
+            (self._diagnostics_rate_hz, "diagnostics_rate_hz"),
         ):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive finite value")
@@ -119,6 +139,7 @@ class MecanumDriveNode(Node):
             return response
 
         assert bus is not None
+        self._reset_telemetry()
         self._bus = bus
         self._enabled = True
         self._last_command_at = time.monotonic()
@@ -184,6 +205,79 @@ class MecanumDriveNode(Node):
                 self.get_logger().error("Watchdog stop failed; disabling drive")
                 for error in self._deactivate():
                     self.get_logger().error(error)
+
+    def _reset_telemetry(self) -> None:
+        for odometer in self._odometers:
+            odometer.reset()
+        self._last_raw = [None] * len(self._wheel_ids)
+        self._last_status = [None] * len(self._wheel_ids)
+
+    def _publish_joint_states(self) -> None:
+        """Publish wheel angle, velocity and load. Reads only; never commands motion."""
+        bus = self._bus
+        if not self._enabled or bus is None:
+            return
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        for index, servo_id in enumerate(self._wheel_ids):
+            try:
+                position, speed = bus.read_position_speed(servo_id)
+            except Exception as exc:
+                self._last_raw[index] = None
+                self.get_logger().error(
+                    f"could not read position/speed of servo {servo_id}: {exc}",
+                    throttle_duration_sec=READ_ERROR_LOG_THROTTLE_S,
+                )
+                continue
+            self._last_raw[index] = (position, speed)
+            odometer = self._odometers[index]
+            status = self._last_status[index]
+            msg.name.append(WHEEL_JOINT_NAMES[index])
+            msg.position.append(odometer.update(position))
+            msg.velocity.append(speed_to_rad_s(speed * odometer.direction))
+            msg.effort.append(float(status.load * odometer.direction) if status else 0.0)
+        if msg.name:
+            self._joint_state_pub.publish(msg)
+
+    def _publish_diagnostics(self) -> None:
+        """Publish per-servo voltage, temperature and load, with ERROR on failed reads."""
+        bus = self._bus
+        if not self._enabled or bus is None:
+            return
+        msg = DiagnosticArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        for index, servo_id in enumerate(self._wheel_ids):
+            entry = DiagnosticStatus(
+                name=f"talos_base: {WHEEL_JOINT_NAMES[index]}",
+                hardware_id=f"servo {servo_id}",
+            )
+            try:
+                status = bus.read_status(servo_id)
+            except Exception as exc:
+                self._last_status[index] = None
+                entry.level = DiagnosticStatus.ERROR
+                entry.message = f"read failed: {exc}"
+                self.get_logger().error(
+                    f"could not read status of servo {servo_id}: {exc}",
+                    throttle_duration_sec=READ_ERROR_LOG_THROTTLE_S,
+                )
+            else:
+                self._last_status[index] = status
+                entry.level = DiagnosticStatus.OK
+                entry.message = "OK"
+                entry.values = [
+                    KeyValue(key="voltage_v", value=f"{status.voltage:.1f}"),
+                    KeyValue(key="temperature_c", value=str(status.temperature)),
+                    KeyValue(key="load", value=str(status.load)),
+                ]
+                raw = self._last_raw[index]
+                if raw is not None:
+                    entry.values += [
+                        KeyValue(key="position_steps", value=str(raw[0])),
+                        KeyValue(key="speed_steps_per_s", value=str(raw[1])),
+                    ]
+            msg.status.append(entry)
+        self._diagnostics_pub.publish(msg)
 
     def _deactivate(self) -> list[str]:
         self._enabled = False
