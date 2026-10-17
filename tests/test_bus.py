@@ -343,8 +343,11 @@ def test_read_telemetry_short_reply_raises(sdk, monkeypatch):
 
 
 class FakeSerial:
+    def __init__(self, fd: int = 7) -> None:
+        self.fd = fd
+
     def fileno(self) -> int:
-        return 7
+        return self.fd
 
 
 class FakeFcntl:
@@ -391,3 +394,57 @@ def test_open_without_flock_skips_locking(sdk, monkeypatch):
     monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
     with sdk.bus() as bus:
         assert bus.ping(1) == 777
+
+
+def test_open_locks_the_serial_object_left_after_the_baud_change(
+    sdk, monkeypatch
+):
+    # The real SDK closes and reopens the serial object in setBaudRate, so a
+    # lock taken before it would be lost.
+    from talos_servo import bus as bus_module
+
+    def reopen(self, baudrate: int) -> bool:
+        self.ser = FakeSerial(fd=9)
+        return True
+
+    lock = FakeFcntl(busy=False)
+    monkeypatch.setattr(bus_module, "fcntl", lock)
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    monkeypatch.setattr(FakePort, "setBaudRate", reopen)
+    with sdk.bus():
+        assert lock.calls == [(9, FakeFcntl.LOCK_EX | FakeFcntl.LOCK_NB)]
+
+
+def test_serial_exception_frees_the_port_for_the_next_call(sdk, monkeypatch):
+    from conftest import FakeHandler
+
+    real_ping = FakeHandler.ping
+    failures = [SerialException("device reports readiness to read")]
+
+    def flaky_ping(self, servo_id: int):
+        if failures:
+            # Like the SDK: the busy mark is set before pyserial raises.
+            self.port.is_using = True
+            raise failures.pop()
+        return real_ping(self, servo_id)
+
+    monkeypatch.setattr(FakeHandler, "ping", flaky_ping)
+    with sdk.bus() as bus:
+        with pytest.raises(ServoError, match="serial port error"):
+            bus.ping(1)
+        assert sdk.port.is_using is False
+        assert bus.ping(1) == 777
+
+
+def test_serial_exception_in_sync_write_becomes_servo_error(sdk, monkeypatch):
+    from conftest import FakeGroupSyncWrite
+
+    def boom(self) -> int:
+        self.handler.port.is_using = True
+        raise SerialException("write failed")
+
+    with sdk.bus() as bus:
+        monkeypatch.setattr(FakeGroupSyncWrite, "txPacket", boom)
+        with pytest.raises(ServoError, match="serial port error"):
+            bus.set_speeds({1: 0})
+        assert sdk.port.is_using is False
