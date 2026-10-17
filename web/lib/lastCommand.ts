@@ -25,7 +25,7 @@ export function describeSource(last: LastCommand, clientId: string | null): Sour
       return { label: "Another browser", mine: false, ...BROWSER };
     case "cli":
       return { label: "CLI", mine: false, ...CLI };
-    case "bridge":
+    case "robot":
       return { label: "Safety stop (command timeout)", mine: false, ...SAFETY };
     default:
       return { label: "ROS node", mine: false, ...ROS };

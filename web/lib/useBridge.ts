@@ -6,7 +6,7 @@ import type { ClientMessage, Limits, ServerMessage, ServoSettings, ServoState } 
 export type ConnStatus = "connecting" | "connected" | "disconnected";
 
 function bridgeUrl() {
-  // When served by the bridge (normal use), connect back to the same host.
+  // When served by talos-servo web (normal use), connect back to the same host.
   // For `npm run dev`, set NEXT_PUBLIC_BRIDGE_URL=ws://<pi>.local:8000/ws
   if (process.env.NEXT_PUBLIC_BRIDGE_URL) return process.env.NEXT_PUBLIC_BRIDGE_URL;
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
@@ -17,7 +17,6 @@ export function useBridge() {
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [servos, setServos] = useState<ServoState[]>([]);
   const [limits, setLimits] = useState<Limits>({ pos_max: 4095, speed_max: 3000, acc_max: 254 });
-  const [mock, setMock] = useState(false);
   const [ros, setRos] = useState(false);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
@@ -40,7 +39,6 @@ export function useBridge() {
         } else if (msg.type === "state") {
           setServos(msg.servos);
           setLimits(msg.limits);
-          setMock(msg.mock);
           setRos(msg.ros);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
@@ -72,7 +70,6 @@ export function useBridge() {
     status,
     servos,
     limits,
-    mock,
     ros,
     settings,
     clientId,

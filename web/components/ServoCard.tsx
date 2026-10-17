@@ -2,7 +2,7 @@
 
 import { CommandCaption, GhostMarker } from "@/components/LastCommand";
 import { trackLeft } from "@/lib/lastCommand";
-import type { ClientMessage, Limits, Mode, ServoSettings, ServoState } from "@/lib/protocol";
+import type { ClientMessage, Limits, ServoSettings, ServoState } from "@/lib/protocol";
 import { DEFAULT_SETTINGS, stepsToDeg } from "@/lib/protocol";
 import { useThrottle } from "@/lib/useBridge";
 import { useFollow } from "@/lib/useFollow";
@@ -13,7 +13,7 @@ interface Props {
   /** Shared move speed and acceleration; undefined until the first state message. */
   settings: ServoSettings | undefined;
   clientId: string | null;
-  /** Commands go through the ROS bridge, which has no acceleration input. */
+  /** Commands go through the ROS robot node, which has no acceleration input. */
   ros: boolean;
   send: (msg: ClientMessage) => void;
 }
@@ -28,16 +28,15 @@ export default function ServoCard({ servo, limits, settings, clientId, ros, send
   const acc = useFollow(shared.acc, DEFAULT_SETTINGS.acc);
 
   const sendMove = useThrottle((position: number) =>
-    send({ type: "move", id: servo.id, position, speed: moveSpeed.value, acc: acc.value }),
+    send({ type: "move", joint: servo.name, position, speed: moveSpeed.value, acc: acc.value }),
   );
-  const sendSpin = useThrottle((speed: number) => send({ type: "spin", id: servo.id, speed, acc: acc.value }));
+  const sendSpin = useThrottle((speed: number) => send({ type: "spin", joint: servo.name, speed, acc: acc.value }));
   // One throttle per setting, so a quick change to one never drops the other.
-  const sendMoveSpeed = useThrottle((v: number) => send({ type: "settings", id: servo.id, move_speed: v }));
-  const sendAcc = useThrottle((v: number) => send({ type: "settings", id: servo.id, acc: v }));
+  const sendMoveSpeed = useThrottle((v: number) => send({ type: "settings", joint: servo.name, move_speed: v }));
+  const sendAcc = useThrottle((v: number) => send({ type: "settings", joint: servo.name, acc: v }));
 
-  const isWheel = servo.mode === "wheel";
+  const isWheel = servo.control === "speed";
   const disabled = !servo.online;
-  const setMode = (mode: Mode) => mode !== servo.mode && send({ type: "set_mode", id: servo.id, mode });
   const span = Math.max(1, servo.max_pos - servo.min_pos);
   const posPct = (steps: number) => ((steps - servo.min_pos) / span) * 100;
   const speedPct = (speed: number) => ((speed + limits.speed_max) / (2 * limits.speed_max)) * 100;
@@ -61,7 +60,9 @@ export default function ServoCard({ servo, limits, settings, clientId, ros, send
             title={servo.online ? "Online" : "Offline"}
           />
           <h2 className="font-semibold truncate">{servo.name}</h2>
-          <span className="text-xs text-black/50 dark:text-white/50">ID {servo.id}</span>
+          <span className="text-xs text-black/50 dark:text-white/50">
+            ID {servo.id} · {isWheel ? "Speed" : "Position"}
+          </span>
         </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
           Torque
@@ -70,25 +71,9 @@ export default function ServoCard({ servo, limits, settings, clientId, ros, send
             className="h-4 w-4"
             checked={servo.torque}
             disabled={disabled}
-            onChange={(e) => send({ type: "torque", id: servo.id, enabled: e.target.checked })}
+            onChange={(e) => send({ type: "torque", joint: servo.name, enabled: e.target.checked })}
           />
         </label>
-      </div>
-
-      {/* Mode toggle */}
-      <div className="grid grid-cols-2 rounded-lg bg-black/5 dark:bg-white/5 p-1 text-sm font-medium">
-        {(["position", "wheel"] as Mode[]).map((m) => (
-          <button
-            key={m}
-            disabled={disabled}
-            onClick={() => setMode(m)}
-            className={`rounded-md py-1.5 transition ${
-              servo.mode === m ? "bg-blue-600 text-white shadow" : "hover:bg-black/5 dark:hover:bg-white/10"
-            }`}
-          >
-            {m === "position" ? "Position" : "Speed"}
-          </button>
-        ))}
       </div>
 
       {/* Controls */}
@@ -212,7 +197,7 @@ export default function ServoCard({ servo, limits, settings, clientId, ros, send
             disabled={disabled}
             onClick={() => {
               wheel.setValue(0);
-              send({ type: "stop", id: servo.id });
+              send({ type: "stop", joint: servo.name });
             }}
             className="rounded-md bg-red-600 py-1.5 text-sm font-semibold text-white hover:bg-red-500"
           >
