@@ -13,10 +13,10 @@ from talos_servo.mecanum import (
 @pytest.mark.parametrize(
     ("velocity", "expected"),
     [
-        ((0.1, 0.0, 0.0), (100, 100, 100, 100)),
-        ((-0.1, 0.0, 0.0), (-100, -100, -100, -100)),
-        ((0.0, 0.1, 0.0), (-100, 100, 100, -100)),
-        ((0.0, 0.0, 1.0), (-100, 100, -100, 100)),
+        ((0.1, 0.0, 0.0), (-100, 100, 100, -100)),
+        ((-0.1, 0.0, 0.0), (100, -100, -100, 100)),
+        ((0.0, 0.1, 0.0), (100, 100, -100, -100)),
+        ((0.0, 0.0, 1.0), (100, 100, 100, 100)),
     ],
 )
 def test_basic_directions(velocity, expected):
@@ -54,7 +54,7 @@ def test_speed_limit_scales_mixed_motion_without_changing_ratios():
         track_width_m=0.3,
         steps_per_meter=2000,
         max_speed=100,
-    ) == (-5, 100, 43, 52)
+    ) == (5, 100, 52, -43)
 
 
 @pytest.mark.parametrize(
@@ -80,6 +80,12 @@ def test_invalid_kinematic_parameters_are_rejected(overrides, message):
 
 
 def test_one_unique_joint_name_per_wheel():
+    assert WHEEL_JOINT_NAMES == (
+        "front_left_wheel",
+        "front_right_wheel",
+        "rear_right_wheel",
+        "rear_left_wheel",
+    )
     assert len(set(WHEEL_JOINT_NAMES)) == WHEEL_COUNT
 
 

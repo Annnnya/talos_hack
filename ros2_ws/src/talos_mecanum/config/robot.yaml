@@ -2,7 +2,7 @@
   ros__parameters:
     baudrate: 1000000
     wheel_ids: [1, 2, 3, 4]
-    wheel_directions: [1, 1, 1, 1]
+    wheel_directions: [-1, 1, 1, -1]
     wheelbase_m: 0.3
     track_width_m: 0.3
     steps_per_meter: 1000.0
