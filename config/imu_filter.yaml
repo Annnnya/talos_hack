@@ -1,0 +1,11 @@
+# imu_filter_madgwick settings for the MPU6050 (pixi run -e ros imu-filter).
+/**:
+  ros__parameters:
+    # 6-axis sensor: no magnetometer, so yaw is gyro-only and drifts slowly.
+    use_mag: false
+    # x east, y north, z up, the ROS default (REP-103).
+    world_frame: enu
+    # Leave the odom -> base_link transform to the drive node or an EKF.
+    publish_tf: false
+    # Higher trusts the accelerometer more: faster tilt correction, more vibration noise.
+    gain: 0.1
