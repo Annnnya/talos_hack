@@ -199,3 +199,40 @@ def test_readouts_skip_offline_servos(node, controller, monkeypatch):
     controller.servos[2].online = False
     node.publish_readouts()
     assert published == ["base"]
+
+
+def status_values(node, joint):
+    entry = next(s for s in node.status_msg().status if s.name.endswith(f": {joint}"))
+    return {kv.key: kv.value for kv in entry.values}
+
+
+def test_velocity_cmd_records_sender_from_frame_id(node, controller):
+    set_wheel_mode(node, "left_wheel")
+    msg = joint_cmd(["left_wheel"], velocity=[step_speed_to_rad(100)])
+    msg.header.frame_id = "cli"
+    node.on_velocity_cmd(msg)
+    values = status_values(node, "left_wheel")
+    assert values["command_source"] == "cli"
+    assert values["command_client"] == ""
+    assert values["target_speed"] == "100"
+    assert float(values["command_age"]) >= 0
+
+
+def test_position_cmd_without_frame_id_counts_as_ros(node):
+    node.on_position_cmd(joint_cmd(["base"], position=[0.0]))
+    values = status_values(node, "base")
+    assert values["command_source"] == "ros"
+    assert values["target"] == str(CENTER_STEP)
+
+
+def test_watchdog_stop_is_reported_as_the_bridge(node, controller, clock):
+    set_wheel_mode(node, "left_wheel")
+    node.on_velocity_cmd(joint_cmd(["left_wheel"], velocity=[1.0]))
+    clock.now += node.command_timeout + 0.1
+    node.enforce_command_timeout()
+    assert status_values(node, "left_wheel")["command_source"] == "bridge"
+
+
+def test_status_has_empty_command_before_any_command(node):
+    values = status_values(node, "base")
+    assert values["command_source"] == "" and values["target"] == ""

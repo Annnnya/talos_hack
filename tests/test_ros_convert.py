@@ -9,8 +9,10 @@ from talos_servo.ros.convert import (
     RAD_PER_STEP,
     STEPS_PER_TURN,
     WheelOdometer,
+    command_frame,
     joint_ids,
     joint_name,
+    parse_command_frame,
     rad_speed_to_steps,
     rad_to_steps,
     readout_topic,
@@ -130,3 +132,13 @@ def test_odometer_rejects_bad_direction():
 )
 def test_readout_topic(prefix, expected):
     assert readout_topic(prefix, "front_left_wheel", "voltage") == expected
+
+
+@pytest.mark.parametrize(("source", "client"), [("web", "3fa2c1"), ("cli", None), ("ros", None)])
+def test_command_frame_round_trip(source, client):
+    assert parse_command_frame(command_frame(source, client)) == (source, client)
+
+
+@pytest.mark.parametrize("frame_id", ["", "base_link", "bridge", "bridge:x", "WEB:1"])
+def test_unknown_or_reserved_frames_count_as_ros(frame_id):
+    assert parse_command_frame(frame_id) == ("ros", None)
