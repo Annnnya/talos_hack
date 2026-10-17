@@ -6,10 +6,11 @@ checks, clamping) so the UI behaves the same in both modes.
 
 Differences from driving the bus directly:
 
-- Wheel speeds are re-sent every telemetry tick to keep the bridge's `velocity_cmd` watchdog fed.
-  If this process dies, the bridge stops the wheels by itself.
+- Wheel speeds this backend commanded are re-sent every telemetry tick to keep the bridge's
+  `velocity_cmd` watchdog fed. If this process dies, the bridge stops the wheels by itself.
 - The bridge has no acceleration input, so the `acceleration` argument is ignored.
-- If another ROS node commands the same joint, the last command wins.
+- If another ROS node commands the same joint, the last command wins. The bridge's `status`
+  reports who sent it, and the UI shows it.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict
 from typing import Any
 
 import rclpy
@@ -31,6 +31,7 @@ from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
 from talos_servo.ros.convert import (
+    command_frame,
     joint_ids,
     rad_speed_to_steps,
     rad_to_steps,
@@ -43,10 +44,13 @@ from talos_servo.web.config import WebConfig
 from talos_servo.web.controller import (
     MODES,
     POSITION,
+    SOURCE_WEB,
     WHEEL,
     CommandError,
     ServoState,
     _clamp,
+    public_state,
+    record_command,
 )
 
 log = logging.getLogger(__name__)
@@ -60,6 +64,10 @@ STATUS_STALE_AFTER = 2.0
 # A status message sent just before a mode change can arrive just after it. Trust our own
 # change for this long instead of flipping the UI back.
 MODE_SETTLE_TIME = 1.0
+# Status lags our own commands. A command the bridge reports with a frame this backend sends,
+# and no newer than this after our last send, is our own echo (maybe of an older command), so it
+# must not move a slider back. Commands from other senders are always applied.
+COMMAND_SETTLE_TIME = 1.0
 EXECUTOR_JOIN_TIMEOUT = 2.0
 
 
@@ -95,6 +103,12 @@ class RosBackend:
         self._first_status = threading.Event()
         self._last_status: float | None = None
         self._mode_set_at: dict[int, float] = {}
+        # Wheel speeds this backend commanded and keeps re-sending for the bridge watchdog, with
+        # the frame_id they went out with. Never filled from status: a wheel started by a CLI
+        # that has died must still time out.
+        self._feeding: dict[int, tuple[int, str]] = {}
+        self._sent_at: dict[int, float] = {}
+        self._own_frames: set[str] = set()
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -149,21 +163,25 @@ class RosBackend:
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [asdict(s) for s in self.servos.values()]
+            now = self._clock()
+            return [public_state(s, now) for s in self.servos.values()]
 
     # --- telemetry -------------------------------------------------------
     def poll(self) -> None:
-        """Feed the bridge watchdog for every spinning wheel and notice a silent bridge."""
+        """Feed the bridge watchdog for the wheels we spin, and notice a silent bridge."""
         with self._lock:
-            spinning = {s.id: s.target_speed for s in self.servos.values() if s.target_speed}
+            feeding = dict(self._feeding)
             if self._last_status is not None:
                 silent = self._clock() - self._last_status
                 if silent > STATUS_STALE_AFTER:
                     for s in self.servos.values():
                         s.online = False
                         s.error = f"no status from servo bridge for {silent:.1f} s"
-        if spinning:
-            self._publish_velocity(spinning)
+        by_frame: dict[str, dict[int, int]] = {}
+        for servo_id, (speed, frame) in feeding.items():
+            by_frame.setdefault(frame, {})[servo_id] = speed
+        for frame, speeds in by_frame.items():
+            self._publish_velocity(speeds, frame)
 
     def _on_joint_states(self, msg: JointState) -> None:
         with self._lock:
@@ -204,6 +222,26 @@ class RosBackend:
         if mode in MODES and mode != s.mode and not settling:
             # Changed by someone else; drop our targets like RobotController does.
             s.mode, s.target, s.target_speed = mode, None, 0
+            self._feeding.pop(s.id, None)
+        self._apply_last_command(s, values, now)
+
+    def _apply_last_command(self, s: ServoState, values: dict[str, str], now: float) -> None:
+        """Adopt the bridge's last command for this servo unless it is our own stale echo."""
+        source = values.get("command_source") or None
+        if source is None:  # an older bridge, or no command for this servo yet
+            return
+        reported_at = now - float(values["command_age"])
+        client = values["command_client"] or None
+        sent_at = self._sent_at.get(s.id)
+        own = command_frame(source, client) in self._own_frames
+        if own and sent_at is not None and reported_at <= sent_at + COMMAND_SETTLE_TIME:
+            return
+        target = values["target"]
+        s.target = int(target) if target else None
+        s.target_speed = int(values["target_speed"])
+        record_command(s, source, client, reported_at)
+        # Someone else has the servo now. Their own commands keep it alive, not ours.
+        self._feeding.pop(s.id, None)
 
     # --- commands --------------------------------------------------------
     def set_mode(self, servo_id: int, mode: str) -> None:
@@ -212,6 +250,7 @@ class RosBackend:
         with self._lock:
             s = self._get(servo_id)
             s.target_speed = 0  # stop feeding the watchdog before the bridge switches modes
+            self._feeding.pop(servo_id, None)
         joint = self.names[servo_id]
         self._call(
             self._require_node().wheel_mode_clients[joint],
@@ -228,6 +267,7 @@ class RosBackend:
             s = self._get(servo_id)
             if not enabled:
                 s.target_speed = 0  # the bridge stops a wheel before releasing torque
+                self._feeding.pop(servo_id, None)
         joint = self.names[servo_id]
         self._call(
             self._require_node().torque_clients[joint],
@@ -238,7 +278,14 @@ class RosBackend:
             s.torque = enabled
 
     def move(
-        self, servo_id: int, position: int, speed: int, acceleration: int = DEFAULT_ACCELERATION
+        self,
+        servo_id: int,
+        position: int,
+        speed: int,
+        acceleration: int = DEFAULT_ACCELERATION,
+        *,
+        source: str = SOURCE_WEB,
+        client: str | None = None,
     ) -> None:
         with self._lock:
             s = self._get(servo_id)
@@ -247,15 +294,25 @@ class RosBackend:
             target = _clamp(position, s.min_pos, s.max_pos)
             speed = _clamp(speed, 1, self.config.max_speed)
             s.target, s.torque = target, True
-        self._require_node().position_pub.publish(
-            JointState(
-                name=[self.names[servo_id]],
-                position=[steps_to_rad(target)],
-                velocity=[step_speed_to_rad(speed)],
-            )
+            self._record(s, source, client)
+        msg = JointState(
+            name=[self.names[servo_id]],
+            position=[steps_to_rad(target)],
+            velocity=[step_speed_to_rad(speed)],
         )
+        msg.header.frame_id = command_frame(source, client)
+        self._require_node().position_pub.publish(msg)
 
-    def spin(self, servo_id: int, speed: int, acceleration: int = DEFAULT_ACCELERATION) -> None:
+    def spin(
+        self,
+        servo_id: int,
+        speed: int,
+        acceleration: int = DEFAULT_ACCELERATION,
+        *,
+        source: str = SOURCE_WEB,
+        client: str | None = None,
+    ) -> None:
+        frame = command_frame(source, client)
         with self._lock:
             s = self._get(servo_id)
             if s.mode != WHEEL:
@@ -264,37 +321,52 @@ class RosBackend:
             s.target_speed = speed
             if speed:
                 s.torque = True
-        self._publish_velocity({servo_id: speed})
+                self._feeding[servo_id] = (speed, frame)
+            else:
+                self._feeding.pop(servo_id, None)
+            self._record(s, source, client)
+        self._publish_velocity({servo_id: speed}, frame)
 
-    def stop(self, servo_id: int) -> None:
+    def stop(self, servo_id: int, *, source: str = SOURCE_WEB, client: str | None = None) -> None:
         with self._lock:
             s = self._get(servo_id)
             if s.mode != WHEEL:
                 return
             s.target_speed = 0
-        self._publish_velocity({servo_id: 0})
+            self._feeding.pop(servo_id, None)
+            self._record(s, source, client)
+        self._publish_velocity({servo_id: 0}, command_frame(source, client))
 
-    def stop_all(self) -> None:
+    def stop_all(self, *, source: str = SOURCE_WEB, client: str | None = None) -> None:
         with self._lock:
+            self._feeding.clear()
             wheels = [s.id for s in self.servos.values() if s.mode == WHEEL]
             for servo_id in wheels:
                 self.servos[servo_id].target_speed = 0
+                self._record(self.servos[servo_id], source, client)
         try:
             if wheels:
-                self._publish_velocity(dict.fromkeys(wheels, 0))
+                self._publish_velocity(dict.fromkeys(wheels, 0), command_frame(source, client))
             self._call(self._require_node().stop_all_client, Trigger.Request(), "stop all")
         except (CommandError, ServoError) as exc:
             # No more velocity commands go out, so the bridge watchdog still stops the wheels.
             log.warning("stop all through the bridge failed: %s", exc)
 
     # --- helpers ---------------------------------------------------------
-    def _publish_velocity(self, speeds: dict[int, int]) -> None:
-        self._require_node().velocity_pub.publish(
-            JointState(
-                name=[self.names[i] for i in speeds],
-                velocity=[step_speed_to_rad(v) for v in speeds.values()],
-            )
+    def _record(self, s: ServoState, source: str, client: str | None) -> None:
+        """Note a command we are about to send. Call with `_lock` held."""
+        now = self._clock()
+        record_command(s, source, client, now)
+        self._sent_at[s.id] = now
+        self._own_frames.add(command_frame(source, client))
+
+    def _publish_velocity(self, speeds: dict[int, int], frame: str) -> None:
+        msg = JointState(
+            name=[self.names[i] for i in speeds],
+            velocity=[step_speed_to_rad(v) for v in speeds.values()],
         )
+        msg.header.frame_id = frame
+        self._require_node().velocity_pub.publish(msg)
 
     def _call(self, client: Client, request: Any, what: str) -> None:
         """Call a bridge service from a worker thread; the executor thread delivers the answer.
