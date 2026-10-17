@@ -103,44 +103,51 @@ Browser control for the robot's servos: each one switches between **Position** a
 
 ```
  laptop browser(s) --http/ws-->  Pi :8000  --USB serial-->  servo bus
-                                 bridge/main.py (FastAPI)
+                                 talos-servo web
                                  serves web/out (Next.js UI)
 ```
 
-- `bridge/` - Python server that owns the serial port, streams servo state at 20 Hz over a
-  WebSocket and serves the UI. Servo IDs, names, port and position limits are in
-  `bridge/config.yaml`
+- `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of `ServoBus`
+  that streams servo state over a WebSocket and serves the UI
 - `web/` - Next.js UI, built as static files into `web/out`
+- `config/web.yaml` - servo IDs, names, joint limits and the UI speed cap
 
-Build the UI once (Node 20+, can be done on a laptop and copied over):
+Install the web extra (`pixi install` already includes it):
+
+```
+uv sync --extra web
+```
+
+Build the UI once (Node 20+; can be built on a laptop and copied to the Pi):
 
 ```
 cd web && npm install && npm run build
 ```
 
-Run the bridge (after `uv sync`):
+Run it:
 
 ```
-uv run --with fastapi --with "uvicorn[standard]" --with pyyaml python bridge/main.py          # real servos
-uv run --with fastapi --with "uvicorn[standard]" --with pyyaml python bridge/main.py --mock   # simulated
+uv run talos-servo web --port /dev/ttyACM0     # real servos (or set TALOS_SERVO_PORT)
+uv run talos-servo web --mock                  # simulated servos, no hardware
 ```
 
 Then from any laptop on the same network open `http://<pi-hostname>.local:8000` (or the Pi's IP).
 Several laptops can connect at once and see the same live state.
 
 - **Position mode**: drag the target slider (moves live) or type a value and press Go. 0-4095 is
-  one full turn; the amber marker is the current position. Move speed 0 means maximum
+  one full turn; the amber marker is the current position
 - **Speed mode**: slider centre is stop, left is reverse, right is forward
 - **STOP ALL** (or Space) stops every servo in speed mode
 - **Torque** off lets you move a joint by hand
 
-Safety: when every browser disconnects, the bridge stops all speed-mode servos. Position targets
-are clamped to `min_pos`/`max_pos` from `bridge/config.yaml`, so set real joint limits there
-before running on the robot.
+Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
+again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
+`min_pos`/`max_pos` in `config/web.yaml`, so set real joint limits there before running on the
+robot.
 
-To start on boot, edit the user and paths in `bridge/robot-bridge.service`, then
-`sudo cp bridge/robot-bridge.service /etc/systemd/system/ && sudo systemctl enable --now robot-bridge`.
+To start on boot, edit the user, paths and port in `deploy/talos-web.service`, then follow the
+steps at the top of that file.
 
-UI development with hot reload: run the bridge with `--mock`, then `cd web && npm run dev` and open
-`http://localhost:3000`. To point the dev UI at a real Pi, set
-`NEXT_PUBLIC_BRIDGE_URL=ws://<pi-hostname>.local:8000/ws`.
+UI development with hot reload: run `uv run talos-servo web --mock`, then `cd web && npm run dev`
+and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
+Pi's address instead of localhost).
