@@ -7,13 +7,23 @@ from collections.abc import Callable, Sequence
 from types import TracebackType
 from typing import Any
 
-from scservo_sdk import COMM_SUCCESS, SMS_STS_MODE, SMS_STS_TORQUE_ENABLE, PortHandler, sms_sts
+from scservo_sdk import (
+    COMM_SUCCESS,
+    SMS_STS_ID,
+    SMS_STS_MODE,
+    SMS_STS_TORQUE_ENABLE,
+    PortHandler,
+    sms_sts,
+)
 from serial import SerialException
 
 log = logging.getLogger(__name__)
 
 DEFAULT_BAUDRATE = 1_000_000
 DEFAULT_ACCELERATION = 20
+
+# 254 is the broadcast ID, so the highest assignable servo ID is 253.
+MAX_SERVO_ID = 253
 
 MODE_POSITION = 0
 MODE_WHEEL = 1
@@ -136,6 +146,38 @@ class ServoBus:
         position, speed, comm, error = self._handler.ReadPosSpeed(servo_id)
         self._check(comm, error, f"read position/speed of servo {servo_id}")
         return position, speed
+
+    def is_present(self, servo_id: int) -> bool:
+        """Return True if a servo answers a ping at this ID."""
+        _model, comm, _error = self._handler.ping(servo_id)
+        return comm == COMM_SUCCESS
+
+    def set_id(self, current_id: int, new_id: int) -> None:
+        """Permanently change a servo's ID (EEPROM write).
+
+        Refuses if the new ID is already answering, since two servos sharing an ID on one bus
+        cannot be told apart and both would need to be unplugged to fix it.
+        """
+        if not 0 <= new_id <= MAX_SERVO_ID:
+            raise ValueError(f"new id must be within 0..{MAX_SERVO_ID}, got {new_id}")
+        if new_id == current_id:
+            raise ValueError(f"servo already has id {current_id}")
+        self.ping(current_id)
+        if self.is_present(new_id):
+            raise ServoError(f"id {new_id} is already used by another servo on the bus")
+
+        comm, error = self._handler.unLockEprom(current_id)
+        self._check(comm, error, f"unlock eeprom of servo {current_id}")
+        try:
+            comm, error = self._handler.write1ByteTxRx(current_id, SMS_STS_ID, new_id)
+            self._check(comm, error, f"write id {new_id} to servo {current_id}")
+        except ServoError:
+            self._handler.LockEprom(current_id)
+            raise
+        # From here the servo only answers at its new ID.
+        comm, error = self._handler.LockEprom(new_id)
+        self._check(comm, error, f"lock eeprom of servo {new_id}")
+        self.ping(new_id)
 
     def enable_wheel_mode(self, servo_ids: Sequence[int]) -> None:
         """Put each servo in wheel mode and enable torque."""

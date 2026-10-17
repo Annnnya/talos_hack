@@ -11,7 +11,13 @@ from collections.abc import Sequence
 
 from serial.tools import list_ports
 
-from talos_servo.bus import DEFAULT_ACCELERATION, DEFAULT_BAUDRATE, ServoBus, ServoError
+from talos_servo.bus import (
+    DEFAULT_ACCELERATION,
+    DEFAULT_BAUDRATE,
+    MAX_SERVO_ID,
+    ServoBus,
+    ServoError,
+)
 
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
 DEFAULT_SPEED = 100
@@ -31,21 +37,30 @@ def parse_ids(value: str) -> list[int]:
                 ids.add(int(part))
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"invalid servo id list: {value!r}") from exc
-    if not ids or any(not 0 <= i <= 253 for i in ids):
-        raise argparse.ArgumentTypeError(f"servo ids must be in 0..253: {value!r}")
+    if not ids or any(not 0 <= i <= MAX_SERVO_ID for i in ids):
+        raise argparse.ArgumentTypeError(f"servo ids must be in 0..{MAX_SERVO_ID}: {value!r}")
     return sorted(ids)
 
 
+def parse_id(value: str) -> int:
+    ids = parse_ids(value)
+    if len(ids) != 1:
+        raise argparse.ArgumentTypeError(f"expected a single servo id: {value!r}")
+    return ids[0]
+
+
 def build_parser() -> argparse.ArgumentParser:
-    bus_opts = argparse.ArgumentParser(add_help=False)
-    bus_opts.add_argument(
+    port_opts = argparse.ArgumentParser(add_help=False)
+    port_opts.add_argument(
         "--port",
         default=os.environ.get(PORT_ENV_VAR),
         help=f"serial port, e.g. COM5 or /dev/ttyACM0 (default: ${PORT_ENV_VAR})",
     )
-    bus_opts.add_argument(
+    port_opts.add_argument(
         "--baud", type=int, default=DEFAULT_BAUDRATE, help="baud rate (default: %(default)s)"
     )
+
+    bus_opts = argparse.ArgumentParser(add_help=False, parents=[port_opts])
     bus_opts.add_argument(
         "--ids", type=parse_ids, default=[1], help='servo ids, e.g. "1,2,3" or "1-3" (default: 1)'
     )
@@ -88,6 +103,14 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument(
         "--interval", type=float, default=1.0, help="seconds between reads (default: %(default)s)"
     )
+
+    set_id = sub.add_parser(
+        "set-id",
+        parents=[port_opts],
+        help="permanently change a servo's id (refuses if the new id is already in use)",
+    )
+    set_id.add_argument("--id", type=parse_id, required=True, help="current servo id")
+    set_id.add_argument("--new-id", type=parse_id, required=True, help="id to assign")
     return parser
 
 
@@ -142,7 +165,20 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"ports": cmd_ports, "ping": cmd_ping, "spin": cmd_spin, "monitor": cmd_monitor}
+def cmd_set_id(args: argparse.Namespace) -> int:
+    with ServoBus(args.port, args.baud) as bus:
+        bus.set_id(args.id, args.new_id)
+    print(f"servo {args.id} is now servo {args.new_id}")
+    return 0
+
+
+COMMANDS = {
+    "ports": cmd_ports,
+    "ping": cmd_ping,
+    "spin": cmd_spin,
+    "monitor": cmd_monitor,
+    "set-id": cmd_set_id,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
