@@ -155,3 +155,17 @@ def test_stop_falls_back_to_per_servo_stops(sdk):
         errors = drive.stop()
         assert errors[0].startswith("sync stop failed")
         assert [c[1] for c in sdk.handler.speed_calls()] == list(IDS)
+
+
+def test_read_requests_do_not_stack_up(sdk):
+    with sdk.bus() as bus:
+        drive = make_drive(bus)
+        drive.request_reads(4)
+        drive.request_reads(4)
+        reads = [drive.tick(now=0.0).read_index for _ in range(6)]
+        assert reads == [0, 1, 2, 3, None, None]
+
+
+def test_zero_acceleration_is_rejected(sdk):
+    with sdk.bus() as bus, pytest.raises(ValueError, match="acceleration"):
+        MecanumDrive(bus, IDS, KINEMATICS, 0)

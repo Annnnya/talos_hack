@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from talos_servo.bus import ServoBus, ServoTelemetry
+from talos_servo.bus import MAX_ACCELERATION, ServoBus, ServoTelemetry
 from talos_servo.mecanum import mecanum_wheel_speeds, wheel_accelerations
 
 DEFAULT_COMMAND_TIMEOUT_S = 0.5
@@ -52,6 +52,8 @@ class MecanumDrive:
         command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S,
         max_read_failures: int = DEFAULT_MAX_READ_FAILURES,
     ) -> None:
+        if not 1 <= acceleration <= MAX_ACCELERATION:
+            raise ValueError(f"acceleration must be within 1..{MAX_ACCELERATION}")
         self.bus = bus
         self.wheel_ids = tuple(wheel_ids)
         self.kinematics = kinematics
@@ -85,8 +87,11 @@ class MecanumDrive:
         self._command_at = None
 
     def request_reads(self, count: int) -> None:
-        """Ask the next `count` ticks to read telemetry, one servo per tick, round robin."""
-        self._reads_requested += count
+        """Ask the next `count` ticks to read telemetry, one servo per tick, round robin.
+
+        Requests do not stack up, so late ticks never build a backlog of reads.
+        """
+        self._reads_requested = max(self._reads_requested, count)
 
     def tick(self, now: float) -> TickResult:
         """Send wheel speeds, then read at most one servo. Raises DriveFault on a bus failure."""
