@@ -67,6 +67,41 @@ The old scripts map to commands like this:
 | `tests/test_servo2.py` | `talos-servo monitor --ids 3 --speed 500 --acc 10` |
 | `tests/change_ids.py` | `talos-servo set-id --id 1 --new-id 3` |
 
+## IMU (MPU6050)
+
+The MPU6050 accelerometer and gyro connects to the Raspberry Pi over I2C, separately from the
+servo bus.
+
+| MPU6050 | Pi header |
+|---|---|
+| VCC | pin 1 (3.3 V) |
+| GND | pin 6 (GND) |
+| SDA | pin 3 (GPIO2) |
+| SCL | pin 5 (GPIO3) |
+| AD0 | GND for address 0x68 (or 3.3 V for 0x69) |
+
+Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
+`sudo raspi-config` (Interface Options, I2C), reboot, and check that `i2cdetect -y 1` shows `68`.
+
+```
+uv sync --extra imu                                # pixi install already includes it
+uv run talos-servo imu --calibrate                 # zero the gyro, then stream until Ctrl+C
+uv run talos-servo imu --seconds 5 --interval 0.05
+```
+
+Flat and still, it should read about `0 0 +1.00` g and near-zero gyro. Options: `--i2c-bus`
+(default 1, or `$TALOS_IMU_BUS`), `--address` (default 0x68), `--accel-range` (2/4/8/16 g),
+`--gyro-range` (250/500/1000/2000 deg/s).
+
+```python
+from talos_servo import Mpu6050
+
+with Mpu6050() as imu:
+    imu.calibrate_gyro()
+    sample = imu.read()
+    print(sample.accel, sample.gyro, sample.temperature)
+```
+
 ## Using the library
 
 ```python
