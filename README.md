@@ -194,3 +194,43 @@ time.
 
 The `ros` environment is tested on the Raspberry Pi 5 (linux-aarch64). On Windows it currently
 hangs while activating, so run ROS on Linux (or WSL) for now.
+
+## ROS 2 Jazzy mecanum base
+
+The `ros2_ws/src/talos_mecanum` package provides a four-wheel base driver and a terminal
+keyboard interface. Pixi installs ROS 2 Jazzy and colcon for Linux ARM64, including Raspberry Pi
+OS 64-bit. Build once with `pixi run ros-build`, then start the driver with `pixi run drive` and
+the keyboard interface in another terminal with `pixi run teleop`. Set the servo port before
+starting the driver, for example:
+
+```
+export TALOS_SERVO_PORT=/dev/serial/by-id/your-servo-adapter
+```
+
+The driver accepts `geometry_msgs/msg/Twist` on `/cmd_vel`. It provides `/base/enable`
+(`std_srvs/srv/SetBool`) to ping IDs 1-4, select wheel mode, and enable torque, and `/base/stop`
+(`std_srvs/srv/Trigger`) to stop all four wheels. Drive starts disabled; press `m` in the keyboard
+interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to strafe, `q`/`e` to
+turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
+continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
+
+Before enabling on the floor, edit `ros2_ws/src/talos_mecanum/config/robot.yaml` to match the
+physical wheel-to-servo mapping and each wheel's direction. The defaults assume IDs 1-4 are ordered
+front-left, front-right, rear-left, rear-right and use positive direction signs. Set
+`wheel_ids`, `wheel_directions`, measured `wheelbase_m` and `track_width_m`, and calibrated
+`steps_per_meter` for the actual robot. The geometry and scale defaults are placeholders; the
+driver caps commands to 100 servo steps/s and 0.1 m/s linear speed until configured. Start with the
+wheels lifted and a clear area.
+
+On Raspberry Pi OS 64-bit, install Pixi, then run these commands from the repository:
+
+```
+pixi install
+pixi run ros-build
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+pixi run drive
+```
+
+In a second terminal, from the repository, run `pixi run teleop`. If the adapter uses another
+device, set `TALOS_SERVO_PORT` to its `/dev/serial/by-id/...` path instead. Keep the wheels lifted
+until wheel order, direction, and calibration are verified.
