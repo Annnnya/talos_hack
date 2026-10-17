@@ -10,6 +10,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
 from std_srvs.srv import SetBool, Trigger
 
 KEY_TIMEOUT_S = 0.3
@@ -90,7 +91,9 @@ class KeyboardTeleop(Node):
 def main(args: list[str] | None = None) -> None:
     if not sys.stdin.isatty():
         raise RuntimeError("Keyboard teleop requires an interactive terminal")
-    rclpy.init(args=args)
+    # rclpy's own SIGINT handler shuts the context down from another thread, which races the stop
+    # published below. Without it, Ctrl+C is a plain KeyboardInterrupt and the context stays valid.
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = KeyboardTeleop()
     terminal_state = termios.tcgetattr(sys.stdin.fileno())
     print("W/A/S/D move, Q/E turn, space stops, M toggles drive, X exits")
@@ -108,8 +111,8 @@ def main(args: list[str] | None = None) -> None:
     finally:
         # Restore the terminal first so a failure below cannot leave it in cbreak mode.
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal_state)
-        # On Jazzy, Ctrl+C has already shut the context down; the drive node watchdog then
-        # stops the wheels once /cmd_vel goes quiet.
+        # If something else shut the context down, the drive node watchdog stops the wheels once
+        # /cmd_vel goes quiet.
         if rclpy.ok():
             node._set_command(0.0, 0.0, 0.0)
             node.publish_command()
