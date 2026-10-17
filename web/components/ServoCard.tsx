@@ -13,8 +13,8 @@ interface Props {
 
 export default function ServoCard({ servo, limits, send }: Props) {
   const [target, setTarget] = useState(servo.target ?? servo.position);
-  const [moveSpeed, setMoveSpeed] = useState(1000);
-  const [acc, setAcc] = useState(50);
+  const [moveSpeed, setMoveSpeed] = useState(200);
+  const [acc, setAcc] = useState(20);
   const [wheelSpeed, setWheelSpeed] = useState(servo.target_speed);
   const dragging = useRef(false);
 
@@ -144,7 +144,7 @@ export default function ServoCard({ servo, limits, send }: Props) {
               Center
             </button>
           </div>
-          <Slider label="Move speed" value={moveSpeed} min={0} max={limits.speed_max} onChange={setMoveSpeed} disabled={disabled} hint={moveSpeed === 0 ? "max" : "steps/s"} />
+          <Slider label="Move speed" value={moveSpeed} min={1} max={limits.speed_max} onChange={setMoveSpeed} disabled={disabled} hint="steps/s" />
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -182,7 +182,7 @@ export default function ServoCard({ servo, limits, send }: Props) {
         </div>
       )}
 
-      <Slider label="Acceleration" value={acc} min={0} max={limits.acc_max} onChange={setAcc} disabled={disabled} hint={acc === 0 ? "max" : ""} />
+      <Slider label="Acceleration" value={acc} min={0} max={limits.acc_max} onChange={setAcc} disabled={disabled} />
 
       {/* Telemetry */}
       <dl className="grid grid-cols-3 gap-2 text-xs font-mono">

@@ -1,4 +1,4 @@
-// Message types shared with bridge/main.py
+// Message types shared with src/talos_servo/web/server.py
 
 export type Mode = "position" | "wheel";
 

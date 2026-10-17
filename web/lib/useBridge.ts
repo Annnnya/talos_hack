@@ -16,7 +16,7 @@ function bridgeUrl() {
 export function useBridge() {
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [servos, setServos] = useState<ServoState[]>([]);
-  const [limits, setLimits] = useState<Limits>({ pos_max: 4095, speed_max: 3400, acc_max: 254 });
+  const [limits, setLimits] = useState<Limits>({ pos_max: 4095, speed_max: 1000, acc_max: 254 });
   const [mock, setMock] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
