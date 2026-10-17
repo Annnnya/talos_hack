@@ -116,7 +116,7 @@ flowchart LR
   bridge --> num[/"#lt;joint#gt;/temperature,<br/>voltage, current, load, moving"/]
 ```
 
-The IMU, with orientation from the Madgwick filter:
+The IMU, with orientation from the Madgwick filter and a pose estimate from the EKF:
 
 ```mermaid
 flowchart LR
@@ -126,6 +126,9 @@ flowchart LR
   imunode --> temp[/"/imu/temperature"/]
   raw --> madgwick(["imu_filter_madgwick"])
   madgwick --> data[/"/imu/data<br/>with orientation"/]
+  raw --> ekf(["ekf"])
+  odom[/"/odom<br/>wheel odometry, not yet"/] -.-> ekf
+  ekf --> filtered[/"/odometry/filtered<br/>odom -> base_link"/]
 ```
 
 `servo_bridge` topics live under `/servo_bridge/`. Both nodes stop the wheels when commands stop
@@ -272,7 +275,38 @@ node exits after that many failed reads in a row), `angular_velocity_variance` a
 
 No Kalman filter is needed for orientation. The MPU6050 has no magnetometer, so roll and pitch
 are corrected by gravity and stay stable, but yaw comes from the gyro alone and drifts slowly. A
-`robot_localization` EKF that fuses the IMU with wheel odometry is tracked in #36.
+`robot_localization` EKF combines it with wheel odometry, see below.
+
+### Pose estimate (EKF)
+
+`robot_localization`'s EKF fuses the gyro with wheel odometry into one estimate of where the base
+is on the floor. Run each in its own terminal, in this order:
+
+```
+pixi run -e ros imu-node    # gyro, keep the robot still while it calibrates
+pixi run -e ros imu-tf      # where the IMU sits on the robot (base_link -> imu_link)
+pixi run -e ros ekf         # settings in config/ekf.yaml
+```
+
+| Topic | Type | What it carries |
+|---|---|---|
+| `/odometry/filtered` (out) | `nav_msgs/Odometry` | 2D pose and velocity of `base_link` in the `odom` frame, 30 Hz |
+| `/tf` `odom -> base_link` (out) | `tf2_msgs/TFMessage` | the same pose as a transform. Nothing else may publish it |
+| `/imu/data_raw` (in) | `sensor_msgs/Imu` | only the yaw rate is used |
+| `/odom` (in) | `nav_msgs/Odometry` | wheel velocities vx, vy and yaw rate. Not published yet: the drive node gets it in #36 |
+
+What is fused and why:
+
+- **Yaw rate from the gyro.** The IMU has no magnetometer, so its absolute yaw means nothing, roll
+  and pitch are not used on a flat floor, and servo vibration makes the accelerometer mostly
+  noise.
+- **Velocities from the wheels, not positions.** Mecanum wheels slip, and a slip then shows up as
+  a short velocity error instead of a jump in the pose.
+
+Until `/odom` exists the EKF runs on the gyro alone: heading follows rotation, position stays at
+0. The `imu-tf` transform is all zeros for now because the IMU is not mounted yet. Once it is,
+measure where it sits and set `--x --y --z` (m) and `--roll --pitch --yaw` (rad) in the `imu-tf`
+task in `pixi.toml`.
 
 ## Using the library
 
