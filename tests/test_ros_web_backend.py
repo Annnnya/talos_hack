@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 
@@ -35,6 +36,8 @@ CONFIG = parse_config(
     }
 )
 BASE, WHEEL_ID = 1, 2
+# Never the default /servo_bridge: a real bridge on the same ROS network must not get our commands.
+BRIDGE_NAME = f"test_servo_bridge_{os.getpid()}"
 
 
 class FakeClock:
@@ -63,7 +66,7 @@ def controller():
 
 @pytest.fixture
 def bridge(controller):
-    node = ServoBridgeNode(controller)
+    node = ServoBridgeNode(controller, node_name=BRIDGE_NAME)
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     thread = threading.Thread(target=executor.spin, daemon=True)
@@ -75,6 +78,7 @@ def bridge(controller):
 
 
 def make_backend(**kwargs) -> RosBackend:
+    kwargs.setdefault("bridge", f"/{BRIDGE_NAME}")
     return RosBackend(CONFIG, context=rclpy.get_default_context(), **kwargs)
 
 
