@@ -47,9 +47,14 @@ class FakeHandler:
     present: set[int] | None = None
     # register address -> value returned by read1ByteTxRx / read2ByteTxRx
     registers: dict[int, int] = field(default_factory=dict)
+    # (servo id, address) -> value from a successful write1ByteTxRx, read back like a real servo
+    written: dict[tuple[int, int], int] = field(default_factory=dict)
 
     def _result(self, method: str, servo_id: int) -> tuple[int, int]:
         return self.fail.get((method, servo_id), (COMM_SUCCESS, 0))
+
+    def _register(self, servo_id: int, address: int) -> int:
+        return self.written.get((servo_id, address), self.registers.get(address, 0))
 
     def ping(self, servo_id: int) -> tuple[int, int, int]:
         self.calls.append(("ping", servo_id))
@@ -61,6 +66,8 @@ class FakeHandler:
     def write1ByteTxRx(self, servo_id: int, address: int, value: int) -> tuple[int, int]:
         self.calls.append(("write1", servo_id, address, value))
         result = self._result("write1", servo_id)
+        if result == (COMM_SUCCESS, 0):
+            self.written[(servo_id, address)] = value
         if address == SMS_STS_ID and result == (COMM_SUCCESS, 0) and self.present is not None:
             self.present.discard(servo_id)
             self.present.add(value)
@@ -85,12 +92,12 @@ class FakeHandler:
     def read1ByteTxRx(self, servo_id: int, address: int) -> tuple[int, int, int]:
         self.calls.append(("read1", servo_id, address))
         comm, error = self._result("read1", servo_id)
-        return self.registers.get(address, 0), comm, error
+        return self._register(servo_id, address), comm, error
 
     def read2ByteTxRx(self, servo_id: int, address: int) -> tuple[int, int, int]:
         self.calls.append(("read2", servo_id, address))
         comm, error = self._result("read2", servo_id)
-        return self.registers.get(address, 0), comm, error
+        return self._register(servo_id, address), comm, error
 
     @staticmethod
     def scs_tohost(value: int, sign_bit: int) -> int:

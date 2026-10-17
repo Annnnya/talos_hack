@@ -117,6 +117,17 @@ def test_close_stops_spinning_servos_and_closes_port(sdk, controller):
     assert sdk.port.closed_count == 1
 
 
+def test_full_poll_keeps_wheel_mode_so_stop_all_still_stops(sdk, controller, monkeypatch):
+    monkeypatch.setattr("talos_servo.web.controller.SLOW_POLL_EVERY", 1)
+    controller.open()
+    controller.set_mode(2, "wheel")
+    controller.spin(2, 300)
+    controller.poll()
+    assert controller.servos[2].mode == "wheel"
+    controller.stop_all()
+    assert sdk.handler.speed_calls()[-1] == ("speed", 2, 0, 20)
+
+
 def test_open_reads_current_mode_from_servo(sdk, controller):
     sdk.registers[SMS_STS_MODE] = MODE_WHEEL
     controller.open()
