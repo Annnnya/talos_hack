@@ -10,6 +10,7 @@ platforms = ["win-64", "linux-64", "linux-aarch64", "osx-arm64"]
 python = "3.12.*"
 pyserial = ">=3.5"
 pytest = ">=8"
+httpx = ">=0.27"
 ruff = ">=0.6"
 
 [target.linux-64.dependencies]
@@ -33,8 +34,8 @@ colcon-ros = "*"
 colcon-python-setup-py = "*"
 
 [pypi-dependencies]
-# Editable install of our package; also pulls ftservo-python-sdk from PyPI
-talos-servo = { path = ".", editable = true }
+# Editable install of our package with the web extra; also pulls ftservo-python-sdk from PyPI
+talos-servo = { path = ".", editable = true, extras = ["web"] }
 
 [tasks]
 test = "pytest"

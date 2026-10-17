@@ -1,0 +1,19 @@
+# Start the web UI on boot. Edit User, paths and the serial port, then:
+#   sudo cp deploy/talos-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now talos-web
+#   journalctl -u talos-web -f
+[Unit]
+Description=Talos servo web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/talos_hack
+Environment=TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+ExecStart=/home/pi/.local/bin/uv run --extra web talos-servo web --config config/web.yaml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
