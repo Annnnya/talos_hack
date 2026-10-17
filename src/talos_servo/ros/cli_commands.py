@@ -15,8 +15,8 @@ from talos_servo.controller import SOURCE_CLI, WHEEL
 from talos_servo.ros.web_backend import RosBackend
 
 Output = Callable[[str], None]
-# Lets the last stop command leave before the node goes away. If it is lost anyway, the bridge's
-# command timeout stops the wheel.
+# How long stop commands are re-sent before the node goes away. If they are all lost anyway, the
+# bridge's command timeout stops the wheel.
 STOP_FLUSH_TIME = 0.2
 
 
@@ -114,9 +114,16 @@ def _print_states(backend: RosBackend, ids: Sequence[int], out: Output) -> None:
 
 
 def _stop_and_release(backend: RosBackend, ids: Sequence[int]) -> None:
+    # A single stop is a fire-and-forget publish a busy bridge can miss, so repeat it until the
+    # node goes away.
+    period = 1.0 / backend.config.telemetry_hz
+    deadline = time.monotonic() + STOP_FLUSH_TIME
     try:
-        for servo_id in ids:
-            backend.stop(servo_id, source=SOURCE_CLI)
-        time.sleep(STOP_FLUSH_TIME)
+        while True:
+            for servo_id in ids:
+                backend.stop(servo_id, source=SOURCE_CLI)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(period)
     finally:
         backend.release()

@@ -19,7 +19,12 @@ from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
 from talos_servo.config import parse_config  # noqa: E402
-from talos_servo.controller import WHEEL, CommandError, RobotController  # noqa: E402
+from talos_servo.controller import (  # noqa: E402
+    SOURCE_CLI,
+    WHEEL,
+    CommandError,
+    RobotController,
+)
 from talos_servo.ros import cli_commands  # noqa: E402
 from talos_servo.ros.servo_bridge_node import ServoBridgeNode  # noqa: E402
 from talos_servo.ros.web_backend import STATUS_STALE_AFTER, RosBackend  # noqa: E402
@@ -220,6 +225,13 @@ def run_in_thread(fn, *args, **kwargs) -> threading.Thread:
     return thread
 
 
+def assert_stopped_by_cli(controller: RobotController) -> None:
+    # The bridge applies the stop on its own executor thread, so it can land just after the CLI
+    # returns. Checking the source rules out the bridge's command timeout doing the stop instead.
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 0)
+    assert controller.servos[WHEEL_ID].command_source == SOURCE_CLI
+
+
 def test_cli_spin_over_ros_spins_then_stops(bridge, controller):
     lines: list[str] = []
     thread = run_in_thread(
@@ -228,7 +240,7 @@ def test_cli_spin_over_ros_spins_then_stops(bridge, controller):
     wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 300)
     assert controller.servos[WHEEL_ID].mode == WHEEL
     thread.join(5.0)
-    assert controller.servos[WHEEL_ID].target_speed == 0
+    assert_stopped_by_cli(controller)
     assert lines[-1] == "stopped"
 
 
@@ -248,7 +260,7 @@ def test_cli_monitor_over_ros_keeps_spinning_with_slow_prints(bridge, controller
     time.sleep(1.0)
     assert controller.servos[WHEEL_ID].target_speed == 200
     thread.join(5.0)
-    assert controller.servos[WHEEL_ID].target_speed == 0
+    assert_stopped_by_cli(controller)
     assert any(line.startswith(f"servo {WHEEL_ID}: position=") for line in lines)
 
 
@@ -290,17 +302,21 @@ def test_cli_spin_shows_up_in_the_web_backend(backend, controller):
 def test_web_backend_stops_feeding_a_wheel_someone_else_took_over(backend, controller):
     backend.set_mode(WHEEL_ID, WHEEL)
     backend.spin(WHEEL_ID, 200)
+    # Two publishers do not share an order, so let ours land before the other one sends.
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 200)
     other = make_backend()
     other.open()
     try:
         other.spin(WHEEL_ID, 100, source="cli")
         wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 100)
+        # The backend only learns about the takeover from bridge status.
+        wait_for(lambda: backend_state(backend, WHEEL_ID)["last_command"]["source"] == "cli")
     finally:
         other.release()  # like a CLI process dying without a stop
     # The web backend keeps polling, but must not keep the CLI's wheel alive.
     feed_watchdog(backend, 1.5)
     assert controller.servos[WHEEL_ID].target_speed == 0
-    assert backend_state(backend, WHEEL_ID)["last_command"]["source"] in ("cli", "bridge")
+    wait_for(lambda: backend_state(backend, WHEEL_ID)["last_command"]["source"] == "bridge")
 
 
 def test_own_stale_echo_does_not_move_the_slider_back():
