@@ -35,8 +35,8 @@ flowchart LR
 The four servo programs can open the servo port themselves, so run only one of them at a time.
 The exception is `--ros` (on `talos-servo web`, `spin` and `monitor`): it leaves the port to
 `servo_bridge` and sends commands over ROS 2, so the browser UI, the CLI and your ROS nodes can
-drive the robot together (see [Web UI over ROS 2](#web-ui-over-ros-2)). The imu node only uses I2C and can run alongside any of
-them.
+drive the robot together (see [Web UI over ROS 2](#web-ui-over-ros-2)). The boot services in
+`deploy/` start it this way. The imu node only uses I2C and can run alongside any of them.
 
 | Program | Start it with | Use it for | Details |
 |---|---|---|---|
@@ -352,8 +352,20 @@ again on shutdown. Speeds are capped by `max_speed` and targets are clamped to e
 `min_pos`/`max_pos` in `config/web.yaml`, so set real joint limits there before running on the
 robot.
 
-To start on boot, edit the user, paths and port in `deploy/talos-web.service`, then follow the
-steps at the top of that file.
+To start on boot, use the two services in `deploy/`: `talos-servo-bridge.service` owns the servo
+port and `talos-web.service` runs the UI with `--ros` through it, so CLI `--ros` commands and other
+ROS nodes work while the UI is up. Edit the user, paths and port in both files, then:
+
+```
+sudo cp deploy/talos-servo-bridge.service deploy/talos-web.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now talos-servo-bridge talos-web
+journalctl -u talos-servo-bridge -u talos-web -f
+```
+
+Stop any hand-started `talos-servo web` first: in its default mode it holds the port, and the
+bridge then cannot open it. Restarting the bridge (`sudo systemctl restart talos-servo-bridge`)
+restarts the UI too. On a Pi without ROS, `talos-web.service` explains how to switch back to
+driving the port directly.
 
 UI development with hot reload: run `uv run talos-servo web --mock`, then `cd web && npm run dev`
 and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
@@ -394,6 +406,7 @@ TALOS_SERVO_PORT=/dev/ttyACM0 pixi run -e ros servo-node # real servos
 pixi run -e ros talos-servo-ros --help                   # all options
 ```
 
+To start it on boot, see `deploy/talos-servo-bridge.service` and [Web UI](#web-ui).
 Use `pixi shell -e ros` for a shell where `ros2` works. Everything lives under `/servo_bridge/`.
 Joint names come from the config names (`"Servo 1"` becomes `servo_1`). Angles are radians with
 0 at half a turn (step 2048), so a joint covers about -pi..pi.
