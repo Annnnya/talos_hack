@@ -601,6 +601,15 @@ wheels = [
 ]
 
 [[package]]
+name = "smbus2"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/37/b3f7b501502c4915ba3819d1dc277bf3f5fae4a9d067caa4f502aaddd889/smbus2-0.6.1.tar.gz", hash = "sha256:2b043372abf8f6029a632c3aab36b641c5d5872b1cbad599fc68e17ac4fd90a5", size = 17274, upload-time = "2026-04-09T20:37:54.821Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/f2/c78a68bd739ac8fc608747cff73a4db3b19f3135658ed4e64374f6425cbf/smbus2-0.6.1-py2.py3-none-any.whl", hash = "sha256:650feeb27ca0ed58b07db4c10201c2a662c41305b7bf6e5fab9d888056f48180", size = 11767, upload-time = "2026-04-09T20:37:53.728Z" },
+]
+
+[[package]]
 name = "starlette"
 version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -642,6 +651,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+imu = [
+    { name = "smbus2" },
+]
 web = [
     { name = "fastapi" },
     { name = "pyyaml" },
@@ -653,7 +665,7 @@ dev = [
     { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
-    { name = "talos-servo", extra = ["web"] },
+    { name = "talos-servo", extra = ["imu", "web"] },
 ]
 
 [package.metadata]
@@ -662,16 +674,17 @@ requires-dist = [
     { name = "ftservo-python-sdk", specifier = ">=2.0.1" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pyyaml", marker = "extra == 'web'", specifier = ">=6.0" },
+    { name = "smbus2", marker = "extra == 'imu'", specifier = ">=0.4" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.30" },
 ]
-provides-extras = ["web"]
+provides-extras = ["imu", "web"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "talos-servo", extras = ["web"], editable = "." },
+    { name = "talos-servo", extras = ["imu", "web"], editable = "." },
 ]
 
 [[package]]
