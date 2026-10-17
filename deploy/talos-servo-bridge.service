@@ -5,6 +5,8 @@
 #   sudo systemctl daemon-reload && sudo systemctl enable --now talos-servo-bridge talos-web
 #   journalctl -u talos-servo-bridge -u talos-web -f
 # Stop any hand-started `talos-servo web` first: in direct mode it holds the port.
+# The mecanum drive (`pixi run drive`) also opens the port itself, so stop this service before
+# enabling it. The second program to open the port fails with "already in use".
 
 [Unit]
 Description=Talos ROS servo bridge (owns the servo port)
