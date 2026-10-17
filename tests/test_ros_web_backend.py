@@ -302,17 +302,21 @@ def test_cli_spin_shows_up_in_the_web_backend(backend, controller):
 def test_web_backend_stops_feeding_a_wheel_someone_else_took_over(backend, controller):
     backend.set_mode(WHEEL_ID, WHEEL)
     backend.spin(WHEEL_ID, 200)
+    # Two publishers do not share an order, so let ours land before the other one sends.
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 200)
     other = make_backend()
     other.open()
     try:
         other.spin(WHEEL_ID, 100, source="cli")
         wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 100)
+        # The backend only learns about the takeover from bridge status.
+        wait_for(lambda: backend_state(backend, WHEEL_ID)["last_command"]["source"] == "cli")
     finally:
         other.release()  # like a CLI process dying without a stop
     # The web backend keeps polling, but must not keep the CLI's wheel alive.
     feed_watchdog(backend, 1.5)
     assert controller.servos[WHEEL_ID].target_speed == 0
-    assert backend_state(backend, WHEEL_ID)["last_command"]["source"] in ("cli", "bridge")
+    wait_for(lambda: backend_state(backend, WHEEL_ID)["last_command"]["source"] == "bridge")
 
 
 def test_own_stale_echo_does_not_move_the_slider_back():
