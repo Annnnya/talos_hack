@@ -126,7 +126,9 @@ def create_app(
             hub.clients.discard(ws)
             if not hub.clients:
                 log.warning("last client disconnected, stopping wheel-mode servos")
-                await _run(controller.stop_all)
+                # Shielded: the connection task can be cancelled right after a
+                # disconnect, and the motors must still stop.
+                await asyncio.shield(_run(controller.stop_all))
 
     if ui_dir is not None and ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True), name="ui")
