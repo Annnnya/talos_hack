@@ -23,3 +23,15 @@ lint = "ruff check ."
 fmt = "ruff format ."
 fmt-check = "ruff format --check ."
 check = { depends-on = ["lint", "fmt-check", "test"] }
+
+# ROS 2 Jazzy for the servo bridge node. Separate environment so the default one stays light.
+[feature.ros.dependencies]
+ros-jazzy-ros-base = "*"
+ros-jazzy-diagnostic-msgs = "*"
+
+[feature.ros.tasks]
+servo-node = "talos-servo-ros"
+servo-node-mock = "talos-servo-ros --mock"
+
+[environments]
+ros = ["ros"]
