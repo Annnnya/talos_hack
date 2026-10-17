@@ -10,12 +10,14 @@ rclpy = pytest.importorskip("rclpy")
 # The default pixi env has rclpy on Linux (for the mecanum base) but not these messages.
 pytest.importorskip("diagnostic_msgs")
 pytest.importorskip("sensor_msgs")
+pytest.importorskip("std_msgs")
 
 from diagnostic_msgs.msg import DiagnosticStatus  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
 from talos_servo.ros.convert import CENTER_STEP, step_speed_to_rad  # noqa: E402
+from talos_servo.ros.readouts import JointReadoutPublishers  # noqa: E402
 from talos_servo.ros.servo_bridge_node import DEFAULT_MOVE_SPEED, ServoBridgeNode  # noqa: E402
 from talos_servo.web.config import parse_config  # noqa: E402
 from talos_servo.web.controller import POSITION, WHEEL, RobotController  # noqa: E402
@@ -170,3 +172,30 @@ def test_status_reports_each_servo(node):
     msg = node.status_msg()
     assert [s.hardware_id for s in msg.status] == ["feetech id 1", "feetech id 2"]
     assert all(s.level == DiagnosticStatus.OK for s in msg.status)
+
+
+def test_readout_topics_live_under_the_node(node):
+    fields = ("current", "load", "moving", "temperature", "voltage")
+    expected = sorted(f"/servo_bridge/{j}/{f}" for j in ("base", "left_wheel") for f in fields)
+    assert node.readouts.topic_names == expected
+
+
+def test_readout_messages_carry_values():
+    stamp = rclpy.clock.Clock().now().to_msg()
+    msgs = JointReadoutPublishers.messages(
+        "base", stamp, temperature=31, voltage=12.1, current=-0.5, load=-40, moving=True
+    )
+    assert msgs["temperature"].temperature == 31.0
+    assert msgs["temperature"].header.frame_id == "base"
+    assert msgs["voltage"].data == pytest.approx(12.1)
+    assert msgs["current"].data == pytest.approx(-0.5)
+    assert msgs["load"].data == -40.0
+    assert msgs["moving"].data is True
+
+
+def test_readouts_skip_offline_servos(node, controller, monkeypatch):
+    published = []
+    monkeypatch.setattr(node.readouts, "publish", lambda joint, *_a, **_k: published.append(joint))
+    controller.servos[2].online = False
+    node.publish_readouts()
+    assert published == ["base"]

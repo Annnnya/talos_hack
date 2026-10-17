@@ -19,12 +19,14 @@ from talos_servo.mecanum import (
     mecanum_wheel_speeds,
 )
 from talos_servo.ros.convert import WheelOdometer, step_speed_to_rad
+from talos_servo.ros.readouts import JointReadoutPublishers
 
 COMMAND_TIMEOUT_S = 0.5
 WATCHDOG_PERIOD_S = 0.1
 DEFAULT_JOINT_STATE_RATE_HZ = 10.0
 DEFAULT_DIAGNOSTICS_RATE_HZ = 1.0
 READ_ERROR_LOG_THROTTLE_S = 5.0
+READOUT_PREFIX = "/base"
 
 
 class MecanumDriveNode(Node):
@@ -75,6 +77,7 @@ class MecanumDriveNode(Node):
         self._last_status: list[ServoStatus | None] = [None] * len(self._wheel_ids)
         self._joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
         self._diagnostics_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self._readouts = JointReadoutPublishers(self, READOUT_PREFIX, WHEEL_JOINT_NAMES)
         self.create_timer(1.0 / self._joint_state_rate_hz, self._publish_joint_states)
         self.create_timer(1.0 / self._diagnostics_rate_hz, self._publish_diagnostics)
         self.get_logger().info("Ready; call /base/enable with data=true before moving the robot")
@@ -279,6 +282,15 @@ class MecanumDriveNode(Node):
                         KeyValue(key="position_steps", value=str(raw[0])),
                         KeyValue(key="speed_steps_per_s", value=str(raw[1])),
                     ]
+                self._readouts.publish(
+                    WHEEL_JOINT_NAMES[index],
+                    msg.header.stamp,
+                    temperature=status.temperature,
+                    voltage=status.voltage,
+                    current=status.current,
+                    load=status.load * self._odometers[index].direction,
+                    moving=status.moving,
+                )
             msg.status.append(entry)
         self._diagnostics_pub.publish(msg)
 
