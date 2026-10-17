@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from talos_servo.bus import MAX_SPEED
+from talos_servo.bus import MAX_ACCELERATION, MAX_SPEED
 
 WHEEL_COUNT = 4
 DEFAULT_WHEEL_IDS = (1, 2, 3, 4)
@@ -58,3 +58,22 @@ def mecanum_wheel_speeds(
         for speed, direction in zip(raw_speeds, wheel_directions, strict=True)
     )
     return scaled_speeds[0], scaled_speeds[1], scaled_speeds[2], scaled_speeds[3]
+
+
+def wheel_accelerations(
+    previous: Sequence[int], target: Sequence[int], base_acceleration: int
+) -> tuple[int, ...]:
+    """Scale each wheel's acceleration so all wheels finish their speed change together.
+
+    The wheel with the largest speed change uses `base_acceleration`; the others ramp
+    proportionally slower. Never returns 0, which the servo treats as "no ramp".
+    """
+    if len(previous) != len(target):
+        raise ValueError("previous and target must have the same number of wheels")
+    if not 1 <= base_acceleration <= MAX_ACCELERATION:
+        raise ValueError(f"base_acceleration must be within 1..{MAX_ACCELERATION}")
+    deltas = [abs(new - old) for old, new in zip(previous, target, strict=True)]
+    largest = max(deltas, default=0)
+    if not largest:
+        return tuple(base_acceleration for _ in deltas)
+    return tuple(max(1, round(base_acceleration * delta / largest)) for delta in deltas)

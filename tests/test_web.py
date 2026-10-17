@@ -48,6 +48,14 @@ def wait_for(predicate, timeout: float = 2.0) -> None:
         time.sleep(0.01)
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def receive_until(ws, predicate, limit: int = 200) -> dict:
     for _ in range(limit):
         msg = ws.receive_json()
@@ -143,10 +151,68 @@ def test_open_reads_current_mode_from_servo(sdk, controller):
 
 def test_initial_state_lists_configured_servos(client):
     with client.websocket_connect("/ws") as ws:
+        hello = ws.receive_json()
         msg = ws.receive_json()
+    assert hello["type"] == "hello" and hello["client_id"]
     assert msg["type"] == "state"
     assert [s["name"] for s in msg["servos"]] == ["base", "wheel"]
     assert msg["limits"]["speed_max"] == 500
+    assert msg["ros"] is False
+    assert all(s["last_command"] is None for s in msg["servos"])
+
+
+def test_each_browser_gets_its_own_client_id(client):
+    with client.websocket_connect("/ws") as a, client.websocket_connect("/ws") as b:
+        assert a.receive_json()["client_id"] != b.receive_json()["client_id"]
+
+
+def test_move_records_who_sent_it(client):
+    with client.websocket_connect("/ws") as ws:
+        me = ws.receive_json()["client_id"]
+        ws.send_json({"type": "move", "id": 1, "position": 2000, "speed": 100})
+        msg = receive_until(ws, lambda m: m["type"] == "state" and servo(m, 1)["last_command"])
+    last = servo(msg, 1)["last_command"]
+    assert (last["source"], last["client"]) == ("web", me)
+    assert 0 <= last["age"] < 1
+
+
+def test_last_command_age_grows():
+    clock = FakeClock()
+    port_factory, handler_factory = sim_factories([1])
+    bus = ServoBus("sim", port_factory=port_factory, handler_factory=handler_factory)
+    controller = RobotController(bus, parse_config({"servos": [{"id": 1}]}), clock=clock)
+    controller.open()
+    controller.move(1, 2100, 100, source="cli")
+    clock.now += 12.34
+    assert controller.snapshot()[0]["last_command"] == {
+        "source": "cli",
+        "client": None,
+        "age": 12.3,
+    }
+    controller.close()
+
+
+def test_settings_are_clamped_shared_and_kept_across_reconnects(client):
+    with client.websocket_connect("/ws") as a, client.websocket_connect("/ws") as b:
+        a.receive_json()
+        b.receive_json()
+        assert receive_until(b, lambda m: m["type"] == "state")["settings"]["1"] == {
+            "move_speed": 200,
+            "acc": 20,
+        }
+        a.send_json({"type": "settings", "id": 1, "move_speed": 9999, "acc": 30})
+        msg = receive_until(b, lambda m: m["type"] == "state" and m["settings"]["1"]["acc"] == 30)
+        assert msg["settings"]["1"]["move_speed"] == 500  # capped by max_speed
+    with client.websocket_connect("/ws") as c:
+        c.receive_json()
+        assert c.receive_json()["settings"]["1"] == {"move_speed": 500, "acc": 30}
+
+
+def test_settings_for_unknown_servo_is_an_error(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "settings", "id": 9, "acc": 10})
+        msg = receive_until(ws, lambda m: m["type"] == "error")
+    assert "unknown servo id 9" in msg["message"]
 
 
 def test_move_command_reaches_the_bus(client, sdk):

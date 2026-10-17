@@ -11,6 +11,7 @@ from collections.abc import Iterable
 
 from talos_servo.bus import MAX_POSITION
 from talos_servo.config import ServoConfig
+from talos_servo.controller import SOURCE_BRIDGE, SOURCE_ROS, SOURCES
 
 STEPS_PER_TURN = MAX_POSITION + 1
 # Step 2048 (half a turn) is joint angle 0, so the usable range is about -pi..pi.
@@ -18,6 +19,7 @@ CENTER_STEP = STEPS_PER_TURN // 2
 RAD_PER_STEP = 2 * math.pi / STEPS_PER_TURN
 
 _INVALID_NAME_CHARS = re.compile(r"[^a-z0-9]+")
+_FRAME_SEPARATOR = ":"
 
 
 def steps_to_rad(steps: int) -> float:
@@ -99,6 +101,22 @@ def joint_ids(servos: Iterable[ServoConfig]) -> dict[str, int]:
             )
         ids[name] = servo.id
     return ids
+
+
+def command_frame(source: str, client: str | None = None) -> str:
+    """Who sent a command, for `header.frame_id` of position_cmd / velocity_cmd: 'web:3fa2c1'."""
+    return f"{source}{_FRAME_SEPARATOR}{client}" if client else source
+
+
+def parse_command_frame(frame_id: str) -> tuple[str, str | None]:
+    """Inverse of command_frame. Anything unknown (most ROS nodes send '') counts as 'ros'.
+
+    'bridge' is reserved for the bridge's own stops, so a sender cannot claim it.
+    """
+    source, _, client = frame_id.partition(_FRAME_SEPARATOR)
+    if source not in SOURCES or source == SOURCE_BRIDGE:
+        return SOURCE_ROS, None
+    return source, client or None
 
 
 def _require_finite(value: float, what: str) -> None:

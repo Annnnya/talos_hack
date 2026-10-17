@@ -116,7 +116,7 @@ flowchart LR
   bridge --> num[/"#lt;joint#gt;/temperature,<br/>voltage, current, load, moving"/]
 ```
 
-The IMU, with orientation from the Madgwick filter:
+The IMU, with orientation from the Madgwick filter and a pose estimate from the EKF:
 
 ```mermaid
 flowchart LR
@@ -126,6 +126,9 @@ flowchart LR
   imunode --> temp[/"/imu/temperature"/]
   raw --> madgwick(["imu_filter_madgwick"])
   madgwick --> data[/"/imu/data<br/>with orientation"/]
+  raw --> ekf(["ekf"])
+  odom[/"/odom<br/>wheel odometry, not yet"/] -.-> ekf
+  ekf --> filtered[/"/odometry/filtered<br/>odom -> base_link"/]
 ```
 
 `servo_bridge` topics live under `/servo_bridge/`. Both nodes stop the wheels when commands stop
@@ -272,7 +275,38 @@ node exits after that many failed reads in a row), `angular_velocity_variance` a
 
 No Kalman filter is needed for orientation. The MPU6050 has no magnetometer, so roll and pitch
 are corrected by gravity and stay stable, but yaw comes from the gyro alone and drifts slowly. A
-`robot_localization` EKF that fuses the IMU with wheel odometry is tracked in #36.
+`robot_localization` EKF combines it with wheel odometry, see below.
+
+### Pose estimate (EKF)
+
+`robot_localization`'s EKF fuses the gyro with wheel odometry into one estimate of where the base
+is on the floor. Run each in its own terminal, in this order:
+
+```
+pixi run -e ros imu-node    # gyro, keep the robot still while it calibrates
+pixi run -e ros imu-tf      # where the IMU sits on the robot (base_link -> imu_link)
+pixi run -e ros ekf         # settings in config/ekf.yaml
+```
+
+| Topic | Type | What it carries |
+|---|---|---|
+| `/odometry/filtered` (out) | `nav_msgs/Odometry` | 2D pose and velocity of `base_link` in the `odom` frame, 30 Hz |
+| `/tf` `odom -> base_link` (out) | `tf2_msgs/TFMessage` | the same pose as a transform. Nothing else may publish it |
+| `/imu/data_raw` (in) | `sensor_msgs/Imu` | only the yaw rate is used |
+| `/odom` (in) | `nav_msgs/Odometry` | wheel velocities vx, vy and yaw rate. Not published yet: the drive node gets it in #36 |
+
+What is fused and why:
+
+- **Yaw rate from the gyro.** The IMU has no magnetometer, so its absolute yaw means nothing, roll
+  and pitch are not used on a flat floor, and servo vibration makes the accelerometer mostly
+  noise.
+- **Velocities from the wheels, not positions.** Mecanum wheels slip, and a slip then shows up as
+  a short velocity error instead of a jump in the pose.
+
+Until `/odom` exists the EKF runs on the gyro alone: heading follows rotation, position stays at
+0. The `imu-tf` transform is all zeros for now because the IMU is not mounted yet. Once it is,
+measure where it sits and set `--x --y --z` (m) and `--roll --pitch --yaw` (rad) in the `imu-tf`
+task in `pixi.toml`.
 
 ## Using the library
 
@@ -347,6 +381,14 @@ Several laptops can connect at once and see the same live state.
 - **Speed mode**: slider centre is stop, left is reverse, right is forward
 - **STOP ALL** (or Space) stops every servo in speed mode
 - **Torque** off lets you move a joint by hand
+- **Last command**: the line under each main slider says who sent the servo its last move or
+  spin, and when: You, Another browser, CLI, ROS node, or a safety stop (the bridge's command
+  timeout, or the server stopping wheels after the last browser left). The sliders follow the last
+  command from any source, except while you hold them. If someone else commands a servo while you
+  are dragging, a hollow ring on the track marks their value
+- **Move speed and acceleration** are shared by every browser and kept until the server restarts,
+  when they go back to the low defaults. Over ROS (`--ros`) the bridge has no acceleration input,
+  so that slider is disabled
 
 Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
 again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
@@ -461,19 +503,31 @@ interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to str
 turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
 continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
 
+The driver owns the servo port while enabled, so stop the servo bridge first
+(`sudo systemctl stop talos-servo-bridge`). If another process holds the port, enabling fails with
+"already in use by another process".
+
+One control loop (`control_rate_hz`, default 50) owns the bus. Each tick sends all four wheel
+speeds in a single sync-write packet, so the wheels start together, then reads at most one servo.
+`/cmd_vel` only stores the latest command. Each wheel's acceleration is scaled by its speed change
+so all wheels finish ramping at the same time; `acceleration` (1..254) is the rate of the wheel with
+the largest change.
+
 While the drive is enabled, the driver also publishes the wheel servo readouts. Nothing is read
 while it is disabled, because the serial port is closed then.
 
 | Topic | Type | Rate param (default) | Content |
 | --- | --- | --- | --- |
-| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000, refreshed at the diagnostics rate) |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed. Level ERROR with the error text if a read fails |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10, at most `control_rate_hz` / 4) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000) |
+| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed, from the latest joint state read. Level ERROR with the error text if a read fails |
 | `/base/<wheel>/temperature` | `sensor_msgs/msg/Temperature` | `diagnostics_rate_hz` (1) | deg C, `header.frame_id` is the wheel joint name |
 | `/base/<wheel>/voltage`, `current`, `load` | `std_msgs/msg/Float32` | `diagnostics_rate_hz` (1) | V, A, raw load. Not published for a wheel whose read failed |
 | `/base/<wheel>/moving` | `std_msgs/msg/Bool` | `diagnostics_rate_hz` (1) | the servo's moving flag |
 
 Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
-and reported on `/diagnostics` but does not disable the drive. Check them with:
+and reported on `/diagnostics`; five failed reads in a row on one servo disable the drive, since a
+sync write gets no reply and reads are the only way to notice a servo that stopped answering.
+Check them with:
 
 ```
 ros2 topic echo /joint_states

@@ -178,6 +178,11 @@ def status_msg(level: int = DiagnosticStatus.OK, **values: str) -> DiagnosticArr
         "temp": "31",
         "current": "0.2",
         "moving": "False",
+        "target": "",
+        "target_speed": "0",
+        "command_source": "",
+        "command_client": "",
+        "command_age": "",
     } | values
     status = DiagnosticStatus(
         name="servo_bridge: base",
@@ -263,3 +268,61 @@ def test_cli_over_ros_rejects_unconfigured_ids_before_connecting():
     with pytest.raises(ServoError, match=r"servo ids \[7\] are not in the config"):
         cli_commands.spin_over_ros(backend, [7], 100, 1.0)
     assert backend._node is None
+
+
+# --- last command: who moved a servo ---------------------------------------------
+
+
+def test_cli_spin_shows_up_in_the_web_backend(backend, controller):
+    thread = run_in_thread(
+        cli_commands.spin_over_ros, make_backend(), [WHEEL_ID], 300, 1.5, out=lambda _l: None
+    )
+    wait_for(
+        lambda: (
+            (backend_state(backend, WHEEL_ID)["last_command"] or {}).get("source") == "cli"
+            and backend_state(backend, WHEEL_ID)["target_speed"] == 300
+        )
+    )
+    assert backend_state(backend, WHEEL_ID)["mode"] == WHEEL
+    thread.join(5.0)
+
+
+def test_web_backend_stops_feeding_a_wheel_someone_else_took_over(backend, controller):
+    backend.set_mode(WHEEL_ID, WHEEL)
+    backend.spin(WHEEL_ID, 200)
+    other = make_backend()
+    other.open()
+    try:
+        other.spin(WHEEL_ID, 100, source="cli")
+        wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 100)
+    finally:
+        other.release()  # like a CLI process dying without a stop
+    # The web backend keeps polling, but must not keep the CLI's wheel alive.
+    feed_watchdog(backend, 1.5)
+    assert controller.servos[WHEEL_ID].target_speed == 0
+    assert backend_state(backend, WHEEL_ID)["last_command"]["source"] in ("cli", "bridge")
+
+
+def test_own_stale_echo_does_not_move_the_slider_back():
+    clock = FakeClock()
+    backend = make_backend(clock=clock)
+    s = backend.servos[BASE]
+    with backend._lock:
+        backend._record(s, "web", "a1")
+    s.target = 1500
+    clock.now += 0.3
+    backend._on_status(
+        status_msg(target="1200", command_source="web", command_client="a1", command_age="0.2")
+    )
+    assert backend_state(backend, BASE)["target"] == 1500
+
+
+def test_command_from_another_sender_is_adopted_right_away():
+    clock = FakeClock()
+    backend = make_backend(clock=clock)
+    with backend._lock:
+        backend._record(backend.servos[BASE], "web", "a1")
+    backend._on_status(status_msg(target="1200", command_source="cli", command_age="0.0"))
+    state = backend_state(backend, BASE)
+    assert state["target"] == 1200
+    assert state["last_command"] == {"source": "cli", "client": None, "age": 0.0}

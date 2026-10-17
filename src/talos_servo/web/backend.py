@@ -25,15 +25,34 @@ class RobotBackend(Protocol):
 
     def snapshot(self) -> list[dict[str, Any]]: ...
 
-    def stop_all(self) -> None:
+    # `source` and `client` say who sent a command (see SOURCE_* in controller.py); the UI shows
+    # it next to the sliders.
+    def stop_all(self, *, source: str = ..., client: str | None = None) -> None:
         """Best effort: never raises, because it runs when the last browser disconnects."""
 
-    def stop(self, servo_id: int) -> None: ...
+    def stop(self, servo_id: int, *, source: str = ..., client: str | None = None) -> None: ...
 
     def set_mode(self, servo_id: int, mode: str) -> None: ...
 
     def set_torque(self, servo_id: int, enabled: bool) -> None: ...
 
-    def move(self, servo_id: int, position: int, speed: int, acceleration: int = ...) -> None: ...
+    def move(
+        self,
+        servo_id: int,
+        position: int,
+        speed: int,
+        acceleration: int = ...,
+        *,
+        source: str = ...,
+        client: str | None = None,
+    ) -> None: ...
 
-    def spin(self, servo_id: int, speed: int, acceleration: int = ...) -> None: ...
+    def spin(
+        self,
+        servo_id: int,
+        speed: int,
+        acceleration: int = ...,
+        *,
+        source: str = ...,
+        client: str | None = None,
+    ) -> None: ...

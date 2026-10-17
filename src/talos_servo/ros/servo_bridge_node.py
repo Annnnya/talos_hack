@@ -35,10 +35,18 @@ from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_BAUDRATE, ServoError
 from talos_servo.config import load_config
-from talos_servo.controller import POSITION, WHEEL, CommandError, RobotController
+from talos_servo.controller import (
+    POSITION,
+    SOURCE_BRIDGE,
+    SOURCE_ROS,
+    WHEEL,
+    CommandError,
+    RobotController,
+)
 from talos_servo.defaults import DEFAULT_CONFIG, PORT_ENV_VAR
 from talos_servo.ros.convert import (
     joint_ids,
+    parse_command_frame,
     rad_speed_to_steps,
     rad_to_steps,
     step_speed_to_rad,
@@ -64,6 +72,12 @@ STATUS_KEYS = (
     "temp",
     "current",
     "moving",
+    # Last command, so clients such as the web UI can show who moved a servo and when.
+    "target",
+    "target_speed",
+    "command_source",
+    "command_client",
+    "command_age",
 )
 
 
@@ -157,8 +171,16 @@ class ServoBridgeNode(Node):
                 status.level, status.message = DiagnosticStatus.WARN, s["error"]
             else:
                 status.level, status.message = DiagnosticStatus.OK, "ok"
+            last = s["last_command"] or {}
+            fields = {
+                **s,
+                "command_source": last.get("source"),
+                "command_client": last.get("client"),
+                "command_age": last.get("age"),
+            }
             for key in STATUS_KEYS:
-                status.values.append(KeyValue(key=key, value=str(s[key])))
+                value = fields[key]
+                status.values.append(KeyValue(key=key, value="" if value is None else str(value)))
             msg.status.append(status)
         return msg
 
@@ -168,12 +190,17 @@ class ServoBridgeNode(Node):
             self._reject("position_cmd needs one position per name")
             return
         has_speed = len(msg.velocity) == len(msg.name)
+        source, client = parse_command_frame(msg.header.frame_id)
         for i, name in enumerate(msg.name):
             speed = abs(rad_speed_to_steps(msg.velocity[i])) if has_speed else 0
             self._run(
                 name,
                 lambda servo_id, i=i, speed=speed: self.controller.move(
-                    servo_id, rad_to_steps(msg.position[i]), speed or DEFAULT_MOVE_SPEED
+                    servo_id,
+                    rad_to_steps(msg.position[i]),
+                    speed or DEFAULT_MOVE_SPEED,
+                    source=source,
+                    client=client,
                 ),
             )
 
@@ -182,10 +209,13 @@ class ServoBridgeNode(Node):
             self._reject("velocity_cmd needs one velocity per name")
             return
         now = self._monotonic()
+        source, client = parse_command_frame(msg.header.frame_id)
         for i, name in enumerate(msg.name):
 
             def spin(servo_id: int, i: int = i) -> None:
-                self.controller.spin(servo_id, rad_speed_to_steps(msg.velocity[i]))
+                self.controller.spin(
+                    servo_id, rad_speed_to_steps(msg.velocity[i]), source=source, client=client
+                )
                 self._last_velocity_cmd[servo_id] = now
 
             self._run(name, spin)
@@ -202,11 +232,14 @@ class ServoBridgeNode(Node):
                     f"{self.names[s['id']]}: no velocity command for {self.command_timeout} s, "
                     "stopping"
                 )
-                self._run(self.names[s["id"]], self.controller.stop)
+                self._run(
+                    self.names[s["id"]],
+                    lambda servo_id: self.controller.stop(servo_id, source=SOURCE_BRIDGE),
+                )
 
     def on_stop_all(self, _request: Trigger.Request, response: Trigger.Response):
         try:
-            self.controller.stop_all()
+            self.controller.stop_all(source=SOURCE_ROS)
         except ServoError as exc:
             response.success, response.message = False, str(exc)
         else:
@@ -284,7 +317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         controller.open()
         # A crash may have left wheels spinning; start from a stopped robot.
-        controller.stop_all()
+        controller.stop_all(source=SOURCE_BRIDGE)
         node = ServoBridgeNode(controller)
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
