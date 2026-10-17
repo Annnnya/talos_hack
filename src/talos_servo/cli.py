@@ -22,6 +22,8 @@ from talos_servo.bus import (
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
 DEFAULT_SPEED = 100
 EXIT_INTERRUPTED = 130
+DEFAULT_WEB_CONFIG = "config/web.yaml"
+DEFAULT_UI_DIR = "web/out"
 
 
 def parse_ids(value: str) -> list[int]:
@@ -111,6 +113,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     set_id.add_argument("--id", type=parse_id, required=True, help="current servo id")
     set_id.add_argument("--new-id", type=parse_id, required=True, help="id to assign")
+
+    web = sub.add_parser(
+        "web",
+        parents=[port_opts],
+        help="serve the browser control UI (needs the web extra)",
+    )
+    web.add_argument(
+        "--config", default=DEFAULT_WEB_CONFIG, help="servo layout file (default: %(default)s)"
+    )
+    web.add_argument("--mock", action="store_true", help="simulate the servos, no serial port")
+    web.add_argument(
+        "--host", default="0.0.0.0", help="address to listen on (default: %(default)s)"
+    )
+    web.add_argument("--http-port", type=int, default=8000, help="http port (default: %(default)s)")
+    web.add_argument("--ui-dir", default=DEFAULT_UI_DIR, help="built web UI (default: %(default)s)")
     return parser
 
 
@@ -172,12 +189,39 @@ def cmd_set_id(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    try:
+        from talos_servo.web.config import ConfigError
+        from talos_servo.web.server import serve
+    except ImportError as exc:
+        print(
+            f"error: the web command needs the web extra ({exc.name} missing): uv sync --extra web",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        serve(
+            config_path=args.config,
+            port=args.port,
+            baudrate=args.baud,
+            mock=args.mock,
+            host=args.host,
+            http_port=args.http_port,
+            ui_dir=args.ui_dir,
+        )
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 COMMANDS = {
     "ports": cmd_ports,
     "ping": cmd_ping,
     "spin": cmd_spin,
     "monitor": cmd_monitor,
     "set-id": cmd_set_id,
+    "web": cmd_web,
 }
 
 
@@ -188,7 +232,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    if args.command != "ports" and not args.port:
+    needs_port = args.command != "ports" and not (args.command == "web" and args.mock)
+    if needs_port and not args.port:
         parser.error(f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)")
     try:
         return COMMANDS[args.command](args)

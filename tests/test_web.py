@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE
+
+from talos_servo import cli
+from talos_servo.bus import MODE_POSITION, MODE_WHEEL, ServoBus
+from talos_servo.web.config import ConfigError, parse_config
+from talos_servo.web.controller import CommandError, RobotController
+from talos_servo.web.server import create_app
+from talos_servo.web.sim import sim_factories
+
+CONFIG = parse_config(
+    {
+        "max_speed": 500,
+        "telemetry_hz": 50,
+        "servos": [
+            {"id": 1, "name": "base", "min_pos": 1000, "max_pos": 3000},
+            {"id": 2, "name": "wheel"},
+        ],
+    }
+)
+
+
+@pytest.fixture
+def controller(sdk) -> RobotController:
+    return RobotController(sdk.bus(), CONFIG)
+
+
+@pytest.fixture
+def client(controller):
+    with TestClient(create_app(controller)) as c:
+        yield c
+
+
+def wait_for(predicate, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not met in time")
+        time.sleep(0.01)
+
+
+def receive_until(ws, predicate, limit: int = 200) -> dict:
+    for _ in range(limit):
+        msg = ws.receive_json()
+        if predicate(msg):
+            return msg
+    raise AssertionError("expected message never arrived")
+
+
+def servo(msg: dict, servo_id: int) -> dict:
+    return next(s for s in msg["servos"] if s["id"] == servo_id)
+
+
+# --- config ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"servos": []},
+        {"servos": [{"id": 1}, {"id": 1}]},
+        {"servos": [{"id": 1, "min_pos": 3000, "max_pos": 1000}]},
+        {"servos": [{"id": 1}], "max_speed": 0},
+    ],
+)
+def test_invalid_config_is_rejected(data):
+    with pytest.raises(ConfigError):
+        parse_config(data)
+
+
+# --- controller ----------------------------------------------------------------
+
+
+def test_move_is_clamped_to_joint_and_speed_limits(sdk, controller):
+    controller.open()
+    controller.move(1, 4000, 9999, 20)
+    assert ("move", 1, 3000, 500, 20) in sdk.handler.calls
+    assert controller.servos[1].target == 3000
+
+
+def test_spin_in_position_mode_is_refused(sdk, controller):
+    controller.open()
+    with pytest.raises(CommandError, match="position mode"):
+        controller.spin(2, 100)
+    assert sdk.handler.speed_calls() == []
+
+
+def test_switching_away_from_wheel_mode_stops_first(sdk, controller):
+    controller.open()
+    controller.set_mode(2, "wheel")
+    controller.spin(2, 300)
+    controller.set_mode(2, "position")
+    calls = [c for c in sdk.handler.calls if c[0] in ("speed", "write1")]
+    assert calls[-2:] == [("speed", 2, 0, 20), ("write1", 2, SMS_STS_MODE, MODE_POSITION)]
+
+
+def test_unreachable_servo_is_marked_offline_and_others_keep_polling(sdk, controller):
+    sdk.fail[("read", 2)] = (COMM_RX_TIMEOUT, 0)
+    controller.open()
+    controller.poll()
+    assert controller.servos[1].online
+    assert not controller.servos[2].online
+    assert "timeout" in controller.servos[2].error
+
+
+def test_close_stops_spinning_servos_and_closes_port(sdk, controller):
+    controller.open()
+    controller.set_mode(2, "wheel")
+    controller.spin(2, 300)
+    controller.close()
+    assert sdk.handler.speed_calls()[-1] == ("speed", 2, 0, 20)
+    assert sdk.port.closed_count == 1
+
+
+def test_open_reads_current_mode_from_servo(sdk, controller):
+    sdk.registers[SMS_STS_MODE] = MODE_WHEEL
+    controller.open()
+    assert controller.servos[1].mode == "wheel"
+
+
+# --- websocket server ----------------------------------------------------------
+
+
+def test_initial_state_lists_configured_servos(client):
+    with client.websocket_connect("/ws") as ws:
+        msg = ws.receive_json()
+    assert msg["type"] == "state"
+    assert [s["name"] for s in msg["servos"]] == ["base", "wheel"]
+    assert msg["limits"]["speed_max"] == 500
+
+
+def test_move_command_reaches_the_bus(client, sdk):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "move", "id": 1, "position": 2000, "speed": 100, "acc": 10})
+        receive_until(ws, lambda m: m["type"] == "state" and servo(m, 1)["target"] == 2000)
+    assert ("move", 1, 2000, 100, 10) in sdk.handler.calls
+
+
+def test_bad_command_returns_error_message(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "spin", "id": 1, "speed": 100})
+        msg = receive_until(ws, lambda m: m["type"] == "error")
+    assert "position mode" in msg["message"]
+
+
+def test_stop_all_command(client, sdk):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "set_mode", "id": 2, "mode": "wheel"})
+        ws.send_json({"type": "spin", "id": 2, "speed": 200})
+        ws.send_json({"type": "stop_all"})
+        receive_until(ws, lambda m: m["type"] == "state" and servo(m, 2)["mode"] == "wheel")
+        wait_for(lambda: sdk.handler.speed_calls()[-1:] == [("speed", 2, 0, 20)])
+
+
+def test_last_client_leaving_stops_spinning_servos(client, sdk):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "set_mode", "id": 2, "mode": "wheel"})
+        ws.send_json({"type": "spin", "id": 2, "speed": 200})
+        receive_until(ws, lambda m: m["type"] == "state" and servo(m, 2)["target_speed"] == 200)
+    wait_for(lambda: sdk.handler.speed_calls()[-1] == ("speed", 2, 0, 20))
+
+
+# --- simulation ------------------------------------------------------------------
+
+
+def test_simulated_servo_moves_toward_target():
+    port_factory, handler_factory = sim_factories([1])
+    bus = ServoBus("sim", port_factory=port_factory, handler_factory=handler_factory)
+    controller = RobotController(bus, parse_config({"servos": [{"id": 1}]}))
+    controller.open()
+    start = controller.servos[1].position
+    controller.move(1, start + 400, 500)
+    time.sleep(0.2)
+    controller.poll()
+    assert start < controller.servos[1].position <= start + 400
+    controller.close()
+
+
+def test_simulated_unknown_id_is_offline():
+    port_factory, handler_factory = sim_factories([1])
+    bus = ServoBus("sim", port_factory=port_factory, handler_factory=handler_factory)
+    controller = RobotController(bus, parse_config({"servos": [{"id": 1}, {"id": 9}]}))
+    controller.open()
+    assert controller.servos[1].online
+    assert not controller.servos[9].online
+
+
+# --- cli -------------------------------------------------------------------------
+
+
+def test_web_command_needs_port_without_mock(monkeypatch, capsys):
+    monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["web"])
+    assert exc.value.code == 2
+    assert "TALOS_SERVO_PORT" in capsys.readouterr().err
+
+
+def test_web_command_mock_runs_without_port(monkeypatch):
+    seen = {}
+    monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
+    monkeypatch.setattr("talos_servo.web.server.serve", lambda **kw: seen.update(kw))
+    assert cli.main(["web", "--mock"]) == 0
+    assert seen["mock"] is True
+    assert seen["port"] is None
