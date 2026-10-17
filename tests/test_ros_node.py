@@ -102,7 +102,7 @@ def test_position_cmd_moves_and_clamps(node, controller):
 
 def test_position_cmd_velocity_sets_move_speed(node, controller, monkeypatch):
     calls = []
-    monkeypatch.setattr(controller, "move", lambda *a: calls.append(a))
+    monkeypatch.setattr(controller, "move", lambda *a, **_kw: calls.append(a))
     node.on_position_cmd(joint_cmd(["base"], position=[0.0], velocity=[-step_speed_to_rad(300)]))
     node.on_position_cmd(joint_cmd(["base"], position=[0.0]))
     assert calls == [(1, CENTER_STEP, 300), (1, CENTER_STEP, DEFAULT_MOVE_SPEED)]
