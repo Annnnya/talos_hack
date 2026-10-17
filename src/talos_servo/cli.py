@@ -28,6 +28,7 @@ from talos_servo.imu import (
     ImuError,
     Mpu6050,
 )
+from talos_servo.web.backend import DEFAULT_BRIDGE
 
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
 IMU_BUS_ENV_VAR = "TALOS_IMU_BUS"
@@ -147,6 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web.add_argument("--http-port", type=int, default=8000, help="http port (default: %(default)s)")
     web.add_argument("--ui-dir", default=DEFAULT_UI_DIR, help="built web UI (default: %(default)s)")
+    web.add_argument(
+        "--ros",
+        action="store_true",
+        help="drive the servos through the running ROS servo bridge instead of the serial port "
+        "(needs the pixi ros environment; --port is ignored)",
+    )
+    web.add_argument(
+        "--bridge",
+        default=DEFAULT_BRIDGE,
+        help="servo bridge namespace for --ros (default: %(default)s)",
+    )
 
     imu = sub.add_parser("imu", help="stream MPU6050 accel, gyro and temperature over i2c")
     imu.add_argument(
@@ -255,6 +267,16 @@ def cmd_web(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.ros:
+        try:
+            import talos_servo.ros.web_backend  # noqa: F401
+        except ImportError as exc:
+            print(
+                f"error: --ros needs ROS 2 ({exc.name} missing): run it with `pixi run -e ros "
+                "web-ros`",
+                file=sys.stderr,
+            )
+            return 1
     try:
         serve(
             config_path=args.config,
@@ -264,6 +286,8 @@ def cmd_web(args: argparse.Namespace) -> int:
             host=args.host,
             http_port=args.http_port,
             ui_dir=args.ui_dir,
+            ros=args.ros,
+            bridge=args.bridge,
         )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -313,7 +337,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    needs_port = args.command not in ("ports", "imu") and not (args.command == "web" and args.mock)
+    web_without_port = args.command == "web" and (args.mock or args.ros)
+    if args.command == "web" and args.mock and args.ros:
+        parser.error(
+            "--mock and --ros do not mix: for simulated servos over ROS, run the bridge "
+            "with `pixi run -e ros servo-node-mock`"
+        )
+    needs_port = args.command not in ("ports", "imu") and not web_without_port
     if needs_port and not args.port:
         parser.error(f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)")
     try:

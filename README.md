@@ -16,7 +16,7 @@ slanted box = ROS 2 topic.
 ```mermaid
 flowchart LR
   accTitle: What runs where
-  accDescr: The servo bus connects over USB serial to exactly one program at a time
+  accDescr: The servo bus connects over USB serial to exactly one program at a time. With --ros the web server goes through servo_bridge instead of the port
   servos[("Servo bus<br/>STS3215 servos")] ==>|USB serial| port{{"Serial port<br/>one owner at a time"}}
   port --> cli(["talos-servo CLI"])
   port --> web(["talos-servo web"])
@@ -28,15 +28,19 @@ flowchart LR
   web <-->|WebSocket| browser["Browser UI"]
   bridge <--> ros(("ROS 2"))
   drive <--> ros
+  web <-.->|"--ros mode"| ros
 ```
 
-The four servo programs open the servo port themselves, so run only one of them at a time. The
-imu node only uses I2C and can run alongside any of them.
+The four servo programs can open the servo port themselves, so run only one of them at a time.
+The exception is `talos-servo web --ros`: it leaves the port to `servo_bridge` and sends its
+commands over ROS 2, so the browser UI and your ROS nodes can drive the robot together (see
+[Web UI over ROS 2](#web-ui-over-ros-2)). The imu node only uses I2C and can run alongside any of
+them.
 
 | Program | Start it with | Use it for | Details |
 |---|---|---|---|
 | `talos-servo` CLI | `uv run talos-servo ...` | ping, spin, set IDs, read the IMU | [Usage](#usage) |
-| `talos-servo web` | `uv run talos-servo web` | control servos from a browser | [Web UI](#web-ui) |
+| `talos-servo web` | `uv run talos-servo web`, or `pixi run -e ros web-ros` next to `servo_bridge` | control servos from a browser | [Web UI](#web-ui) |
 | `servo_bridge` node | `pixi run -e ros servo-node` | any servo from ROS 2, one joint per servo | [ROS 2](#ros-2) |
 | `drive_node` | `pixi run drive` | the four mecanum wheels from `/cmd_vel` | [Mecanum base](#ros-2-jazzy-mecanum-base) |
 | `imu` node | `pixi run -e ros imu-node` | IMU accel and gyro on `/imu/data_raw` | [IMU on ROS 2](#imu-on-ros-2) |
@@ -46,7 +50,7 @@ imu node only uses I2C and can run alongside any of them.
 ```mermaid
 flowchart TB
   accTitle: Code layers
-  accDescr: Programs use logic modules, which all talk to the servos through ServoBus
+  accDescr: Programs use logic modules, which talk to the servos through ServoBus. In --ros mode the web server uses RosBackend, which talks to servo_bridge instead
   subgraph programs["Programs"]
     cli(["CLI"])
     web(["web"])
@@ -55,12 +59,15 @@ flowchart TB
   end
   subgraph logic["Logic - src/talos_servo/"]
     ctrl["RobotController"]
+    rosweb["RosBackend"]
     ros["ROS helpers"]
     kin["mecanum"]
   end
   bus["ServoBus"]
   sdk["Feetech SDK<br/>or simulator"]
   web --> ctrl
+  web -.->|"--ros"| rosweb
+  rosweb --> ros
   bridge --> ctrl
   bridge --> ros
   drive --> ros
@@ -74,6 +81,7 @@ flowchart TB
 | Box | File | Job |
 |---|---|---|
 | RobotController | `web/controller.py` | shared servo state, polling, command limits from `config/web.yaml` |
+| RosBackend | `ros/web_backend.py`, `ros/web_client_node.py` | same commands as RobotController, sent to `servo_bridge` over topics and services (`web --ros`) |
 | ROS helpers | `ros/convert.py`, `ros/readouts.py` | steps to radians, wheel odometry, per joint readout topics |
 | mecanum | `mecanum.py` | body velocity to four wheel speeds |
 | ServoBus | `bus.py` | every servo read and write; checks each SDK result and stops spinning servos on close |
@@ -99,8 +107,8 @@ Any servo, driven by your own node:
 ```mermaid
 flowchart LR
   accTitle: servo_bridge topics
-  accDescr: your node sends position or velocity commands to servo_bridge, which publishes joint readouts
-  you(["your node"]) --> cmd[/"position_cmd<br/>velocity_cmd"/]
+  accDescr: your node or the web server in --ros mode sends position or velocity commands to servo_bridge, which publishes joint readouts
+  you(["your node or<br/>talos-servo web --ros"]) --> cmd[/"position_cmd<br/>velocity_cmd"/]
   cmd --> bridge(["servo_bridge"])
   bridge --> js[/"joint_states"/]
   bridge --> status[/"status"/]
@@ -332,6 +340,28 @@ UI development with hot reload: run `uv run talos-servo web --mock`, then `cd we
 and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
 Pi's address instead of localhost).
 
+### Web UI over ROS 2
+
+By default `talos-servo web` owns the serial port, so nothing else can drive the servos while it
+runs. With `--ros` it opens no port and drives the robot through a running `servo_bridge` node
+instead, so the browser UI and your own ROS nodes share the robot:
+
+```
+pixi run -e ros servo-node-mock     # or servo-node for real servos (it owns the port)
+pixi run -e ros web-ros             # same UI on :8000, commands go over ROS 2
+```
+
+`--bridge /other_bridge` picks a bridge running under another name. The UI works the same, with
+these differences:
+
+- the server re-sends each wheel speed every telemetry tick to feed the bridge's
+  `command_timeout` watchdog, so if the web server dies the bridge stops the wheels
+- the acceleration setting is ignored (the bridge has no acceleration input)
+- when a ROS node and the browser command the same joint, the last command wins
+- servos show as offline if the bridge stops publishing `status`
+
+`drive_node` opens the port itself, so it still cannot run next to `servo_bridge` or the web UI.
+
 ## ROS 2
 
 `talos-servo-ros` is a ROS 2 node (`src/talos_servo/ros/servo_bridge_node.py`) on top of the same
@@ -372,8 +402,9 @@ Safety: velocity commands are a deadman signal. A wheel servo stops when it gets
 `velocity_cmd` within `command_timeout` seconds (default 0.5, set with
 `--ros-args -p command_timeout:=1.0`), so publish at 10 Hz or more. All wheel servos are stopped
 at startup and on shutdown (including Ctrl+C), and the same `min_pos`/`max_pos` and `max_speed`
-limits as the web UI apply. The node and the web UI both open the serial port, so run one at a
-time.
+limits as the web UI apply. The node and the web UI in its default mode both open the serial
+port, so run one at a time, or run the web UI with `--ros` (see
+[Web UI over ROS 2](#web-ui-over-ros-2)).
 
 The `ros` environment is tested on the Raspberry Pi 5 (linux-aarch64). On Windows it currently
 hangs while activating, so run ROS on Linux (or WSL) for now.

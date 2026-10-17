@@ -14,6 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from talos_servo.bus import DEFAULT_ACCELERATION, MAX_ACCELERATION, MAX_POSITION, ServoError
+from talos_servo.web.backend import DEFAULT_BRIDGE, RobotBackend
 from talos_servo.web.controller import CommandError, RobotController
 
 log = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
     return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
-def _dispatch(controller: RobotController, msg: dict[str, Any]) -> Callable[[], None]:
+def _dispatch(controller: RobotBackend, msg: dict[str, Any]) -> Callable[[], None]:
     """Turn a client message into a controller call (validated, not yet run)."""
     kind = msg.get("type")
     if kind == "stop_all":
@@ -67,7 +68,7 @@ def _dispatch(controller: RobotController, msg: dict[str, Any]) -> Callable[[], 
 
 
 def create_app(
-    controller: RobotController, *, ui_dir: Path | None = None, mock: bool = False
+    controller: RobotBackend, *, ui_dir: Path | None = None, mock: bool = False
 ) -> FastAPI:
     hub = Hub()
     period = 1.0 / controller.config.telemetry_hz
@@ -150,15 +151,25 @@ def serve(
     host: str,
     http_port: int,
     ui_dir: str | Path,
+    ros: bool = False,
+    bridge: str = DEFAULT_BRIDGE,
 ) -> None:
-    """Build the bus (real or simulated) and run the web server until Ctrl+C."""
+    """Build the backend (serial bus, simulator or ROS bridge) and serve until Ctrl+C."""
     import uvicorn
 
     from talos_servo.web.config import load_config
-    from talos_servo.web.sim import make_bus
 
     config = load_config(config_path)
-    bus = make_bus(port, baudrate, mock=mock, ids=(s.id for s in config.servos))
-    app = create_app(RobotController(bus, config), ui_dir=Path(ui_dir), mock=mock)
-    print(f"talos-servo web: http://{host}:{http_port} ({'simulated' if mock else port})")
+    backend: RobotBackend
+    if ros:
+        from talos_servo.ros.web_backend import RosBackend
+
+        backend, source = RosBackend(config, bridge=bridge), f"ros bridge {bridge}"
+    else:
+        from talos_servo.web.sim import make_bus
+
+        bus = make_bus(port, baudrate, mock=mock, ids=(s.id for s in config.servos))
+        backend, source = RobotController(bus, config), "simulated" if mock else str(port)
+    app = create_app(backend, ui_dir=Path(ui_dir), mock=mock)
+    print(f"talos-servo web: http://{host}:{http_port} ({source})")
     uvicorn.run(app, host=host, port=http_port, log_level="warning")
