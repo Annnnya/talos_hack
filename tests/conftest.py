@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import pytest
-from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS
+from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, SMS_STS_ID
 
 from talos_servo.bus import ServoBus
 
@@ -33,7 +33,10 @@ class FakePort:
 
 @dataclass
 class FakeHandler:
-    """Records every call; `fail` maps (method, servo_id) to (comm, error) to inject failures."""
+    """Records every call; `fail` maps (method, servo_id) to (comm, error) to inject failures.
+
+    If `present` is set, only those IDs answer pings, and an ID write moves a servo to its new ID.
+    """
 
     port: FakePort
     calls: list[tuple] = field(default_factory=list)
@@ -41,6 +44,7 @@ class FakeHandler:
     model: int = 777
     position: int = 2048
     speed: int = 0
+    present: set[int] | None = None
 
     def _result(self, method: str, servo_id: int) -> tuple[int, int]:
         return self.fail.get((method, servo_id), (COMM_SUCCESS, 0))
@@ -48,11 +52,25 @@ class FakeHandler:
     def ping(self, servo_id: int) -> tuple[int, int, int]:
         self.calls.append(("ping", servo_id))
         comm, error = self._result("ping", servo_id)
+        if self.present is not None and servo_id not in self.present:
+            comm = COMM_RX_TIMEOUT
         return (self.model if comm == COMM_SUCCESS else 0), comm, error
 
     def write1ByteTxRx(self, servo_id: int, address: int, value: int) -> tuple[int, int]:
         self.calls.append(("write1", servo_id, address, value))
-        return self._result("write1", servo_id)
+        result = self._result("write1", servo_id)
+        if address == SMS_STS_ID and result == (COMM_SUCCESS, 0) and self.present is not None:
+            self.present.discard(servo_id)
+            self.present.add(value)
+        return result
+
+    def unLockEprom(self, servo_id: int) -> tuple[int, int]:
+        self.calls.append(("unlock", servo_id))
+        return self._result("unlock", servo_id)
+
+    def LockEprom(self, servo_id: int) -> tuple[int, int]:
+        self.calls.append(("lock", servo_id))
+        return self._result("lock", servo_id)
 
     def WriteSpec(self, servo_id: int, speed: int, acc: int) -> tuple[int, int]:
         self.calls.append(("speed", servo_id, speed, acc))
@@ -79,13 +97,14 @@ class FakeSdk:
     handler: FakeHandler | None = None
     port_kwargs: dict = field(default_factory=dict)
     fail: dict = field(default_factory=dict)
+    present: set[int] | None = None
 
     def make_port(self, name: str) -> FakePort:
         self.port = FakePort(name, **self.port_kwargs)
         return self.port
 
     def make_handler(self, port: FakePort) -> FakeHandler:
-        self.handler = FakeHandler(port, fail=self.fail)
+        self.handler = FakeHandler(port, fail=self.fail, present=self.present)
         return self.handler
 
     def bus(self, port: str = "FAKE", baudrate: int = 1_000_000) -> ServoBus:

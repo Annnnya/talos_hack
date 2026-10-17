@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 from conftest import FakePort
-from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, SMS_STS_MODE, SMS_STS_TORQUE_ENABLE
+from scservo_sdk import (
+    COMM_RX_TIMEOUT,
+    COMM_SUCCESS,
+    SMS_STS_ID,
+    SMS_STS_MODE,
+    SMS_STS_TORQUE_ENABLE,
+)
 from serial import SerialException
 
 from talos_servo.bus import MODE_WHEEL, ServoError
@@ -102,3 +108,41 @@ def test_set_speed_rejects_out_of_range(sdk, speed, acc):
 def test_read_position_speed(sdk):
     with sdk.bus() as bus:
         assert bus.read_position_speed(1) == (2048, 0)
+
+
+def test_set_id_unlocks_writes_and_relocks_at_new_id(sdk):
+    sdk.present = {1}
+    with sdk.bus() as bus:
+        bus.set_id(1, 3)
+    calls = [c for c in sdk.handler.calls if c[0] != "ping"]
+    assert calls == [("unlock", 1), ("write1", 1, SMS_STS_ID, 3), ("lock", 3)]
+    assert sdk.present == {3}
+    assert sdk.handler.calls[-1] == ("ping", 3)
+
+
+def test_set_id_refuses_when_new_id_is_taken(sdk):
+    sdk.present = {1, 3}
+    with sdk.bus() as bus, pytest.raises(ServoError, match="id 3 is already used"):
+        bus.set_id(1, 3)
+    assert not [c for c in sdk.handler.calls if c[0] in ("unlock", "write1")]
+
+
+def test_set_id_fails_if_current_servo_missing(sdk):
+    sdk.present = {2}
+    with sdk.bus() as bus, pytest.raises(ServoError, match="ping servo 1"):
+        bus.set_id(1, 3)
+
+
+def test_set_id_relocks_old_id_when_write_fails(sdk):
+    sdk.present = {1}
+    sdk.fail[("write1", 1)] = (COMM_RX_TIMEOUT, 0)
+    with sdk.bus() as bus, pytest.raises(ServoError, match="write id 3"):
+        bus.set_id(1, 3)
+    assert sdk.handler.calls[-1] == ("lock", 1)
+    assert sdk.present == {1}
+
+
+@pytest.mark.parametrize(("current", "new"), [(1, 1), (1, 254), (1, -1)])
+def test_set_id_rejects_bad_ids(sdk, current, new):
+    with sdk.bus() as bus, pytest.raises(ValueError):
+        bus.set_id(current, new)

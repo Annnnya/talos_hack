@@ -84,3 +84,15 @@ def test_monitor_reads_without_moving_by_default(run, sdk, capsys):
     assert run(["monitor", "--port", "COM5", "--seconds", "0.05", "--interval", "0"]) == 0
     assert sdk.handler.speed_calls() == []
     assert "servo 1: position=2048 speed=0" in capsys.readouterr().out
+
+
+def test_set_id(run, sdk, capsys):
+    sdk.present = {1}
+    assert run(["set-id", "--port", "COM5", "--id", "1", "--new-id", "3"]) == 0
+    assert sdk.present == {3}
+    assert "servo 1 is now servo 3" in capsys.readouterr().out
+
+
+def test_set_id_rejects_id_lists(run):
+    with pytest.raises(SystemExit):
+        run(["set-id", "--port", "COM5", "--id", "1,2", "--new-id", "3"])
