@@ -1,4 +1,4 @@
-"""Servo bridge node against the simulated bus. Skipped where rclpy is missing (uv env)."""
+"""Servo bridge node against the simulated bus. Skipped where ROS messages are missing."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ import math
 import pytest
 
 rclpy = pytest.importorskip("rclpy")
+# The default pixi env has rclpy on Linux (for the mecanum base) but not these messages.
+pytest.importorskip("diagnostic_msgs")
+pytest.importorskip("sensor_msgs")
 
 from diagnostic_msgs.msg import DiagnosticStatus  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
