@@ -152,20 +152,11 @@ def serve(
     """Build the bus (real or simulated) and run the web server until Ctrl+C."""
     import uvicorn
 
-    from talos_servo.bus import ServoBus
     from talos_servo.web.config import load_config
-    from talos_servo.web.sim import sim_factories
+    from talos_servo.web.sim import make_bus
 
     config = load_config(config_path)
-    if mock:
-        port_factory, handler_factory = sim_factories(s.id for s in config.servos)
-        bus = ServoBus(
-            "simulated", baudrate, port_factory=port_factory, handler_factory=handler_factory
-        )
-    else:
-        if not port:
-            raise ValueError("a serial port is required unless --mock is set")
-        bus = ServoBus(port, baudrate)
+    bus = make_bus(port, baudrate, mock=mock, ids=(s.id for s in config.servos))
     app = create_app(RobotController(bus, config), ui_dir=Path(ui_dir), mock=mock)
     print(f"talos-servo web: http://{host}:{http_port} ({'simulated' if mock else port})")
     uvicorn.run(app, host=host, port=http_port, log_level="warning")

@@ -21,7 +21,14 @@ from scservo_sdk import (
     SMS_STS_TORQUE_ENABLE,
 )
 
-from talos_servo.bus import LOAD_SIGN_BIT, MAX_POSITION, MAX_SPEED, MODE_POSITION, MODE_WHEEL
+from talos_servo.bus import (
+    LOAD_SIGN_BIT,
+    MAX_POSITION,
+    MAX_SPEED,
+    MODE_POSITION,
+    MODE_WHEEL,
+    ServoBus,
+)
 
 SIM_MODEL = 777
 SIM_VOLTAGE_RAW = 120  # 12.0 V
@@ -160,3 +167,15 @@ def sim_factories(
     """Return (port_factory, handler_factory) for ServoBus that simulate the given IDs."""
     ids = list(ids)
     return SimPort, lambda port: SimHandler(port, ids)
+
+
+def make_bus(port: str | None, baudrate: int, *, mock: bool, ids: Iterable[int]) -> ServoBus:
+    """A real bus on `port`, or a simulated one answering for `ids` when `mock` is set."""
+    if mock:
+        port_factory, handler_factory = sim_factories(ids)
+        return ServoBus(
+            "simulated", baudrate, port_factory=port_factory, handler_factory=handler_factory
+        )
+    if not port:
+        raise ValueError("a serial port is required unless --mock is set")
+    return ServoBus(port, baudrate)
