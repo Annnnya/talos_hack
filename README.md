@@ -128,7 +128,7 @@ On Raspberry Pi OS 64-bit, install Pixi, then run these commands from the reposi
 ```
 pixi install
 pixi run ros-build
-export TALOS_SERVO_PORT=/dev/serial0
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
 pixi run drive
 ```
 
