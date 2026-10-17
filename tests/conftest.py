@@ -9,6 +9,7 @@ import pytest
 from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, SMS_STS_ID
 
 from talos_servo.bus import ServoBus
+from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
 
 
 @dataclass
@@ -142,3 +143,67 @@ class FakeSdk:
 @pytest.fixture
 def sdk() -> FakeSdk:
     return FakeSdk()
+
+
+@dataclass
+class FakeI2c:
+    """In-memory i2c bus with one device. `fail` maps an operation name to an OSError to raise."""
+
+    bus_number: int
+    address: int = 0x68
+    registers: dict[int, int] = field(default_factory=lambda: {WHO_AM_I: WHO_AM_I_MPU6050})
+    writes: list[tuple[int, int]] = field(default_factory=list)
+    fail: dict[str, OSError] = field(default_factory=dict)
+    closed: bool = False
+
+    def _maybe_fail(self, op: str, address: int) -> None:
+        if op in self.fail:
+            raise self.fail[op]
+        if address != self.address:
+            raise OSError(121, "Remote I/O error")
+
+    def read_byte_data(self, address: int, register: int) -> int:
+        self._maybe_fail("read_byte", address)
+        return self.registers.get(register, 0)
+
+    def write_byte_data(self, address: int, register: int, value: int) -> None:
+        self._maybe_fail("write_byte", address)
+        self.writes.append((register, value))
+        self.registers[register] = value
+
+    def read_i2c_block_data(self, address: int, register: int, length: int) -> list[int]:
+        self._maybe_fail("read_block", address)
+        return [self.registers.get(register + i, 0) for i in range(length)]
+
+    def close(self) -> None:
+        self.closed = True
+
+    def set_words(self, start: int, words: list[int]) -> None:
+        """Store signed 16-bit words big-endian from `start`, like the sensor's data registers."""
+        for i, word in enumerate(words):
+            raw = word & 0xFFFF
+            self.registers[start + 2 * i] = raw >> 8
+            self.registers[start + 2 * i + 1] = raw & 0xFF
+
+
+@dataclass
+class FakeI2cFactory:
+    bus: FakeI2c | None = None
+    open_error: OSError | None = None
+    registers: dict[int, int] | None = None
+
+    def __call__(self, bus_number: int) -> FakeI2c:
+        if self.open_error is not None:
+            raise self.open_error
+        self.bus = FakeI2c(bus_number)
+        if self.registers is not None:
+            self.bus.registers.update(self.registers)
+        return self.bus
+
+
+@pytest.fixture
+def i2c(monkeypatch) -> FakeI2cFactory:
+    from talos_servo import imu
+
+    monkeypatch.setattr(imu.time, "sleep", lambda _s: None)
+    return FakeI2cFactory()
