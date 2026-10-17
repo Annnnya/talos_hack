@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -8,6 +9,7 @@ from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE
 
 from talos_servo import cli
 from talos_servo.bus import MODE_POSITION, MODE_WHEEL, ServoBus
+from talos_servo.web import server
 from talos_servo.web.config import ConfigError, parse_config
 from talos_servo.web.controller import CommandError, RobotController
 from talos_servo.web.server import create_app
@@ -169,6 +171,23 @@ def test_stop_all_command(client, sdk):
 
 
 def test_last_client_leaving_stops_spinning_servos(client, sdk):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "set_mode", "id": 2, "mode": "wheel"})
+        ws.send_json({"type": "spin", "id": 2, "speed": 200})
+        receive_until(ws, lambda m: m["type"] == "state" and servo(m, 2)["target_speed"] == 200)
+    wait_for(lambda: sdk.handler.speed_calls()[-1] == ("speed", 2, 0, 20))
+
+
+def test_last_client_stop_survives_connection_task_cancel(client, sdk, monkeypatch):
+    # The test client cancels the server task right after disconnect. Delaying the bus
+    # call makes that cancel land before the stop starts, which must not skip it.
+    real_run = server._run
+
+    async def slow_run(fn, *args):
+        await asyncio.sleep(0.05)
+        return await real_run(fn, *args)
+
+    monkeypatch.setattr(server, "_run", slow_run)
     with client.websocket_connect("/ws") as ws:
         ws.send_json({"type": "set_mode", "id": 2, "mode": "wheel"})
         ws.send_json({"type": "spin", "id": 2, "speed": 200})
