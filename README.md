@@ -96,58 +96,42 @@ pixi run fmt
 pixi run check   # lint + format check + tests, like CI
 ```
 
-## Web UI
+## ROS 2 Jazzy mecanum base
 
-Browser control for the robot's servos: each one switches between **Position** and **Speed**
-(wheel) mode, with live position, speed, load, voltage and temperature.
-
-```
- laptop browser(s) --http/ws-->  Pi :8000  --USB serial-->  servo bus
-                                 talos-servo web
-                                 serves web/out (Next.js UI)
-```
-
-- `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of `ServoBus`
-  that streams servo state over a WebSocket and serves the UI
-- `web/` - Next.js UI, built as static files into `web/out`
-- `config/web.yaml` - servo IDs, names, joint limits and the UI speed cap
-
-Install the web extra (`pixi install` already includes it):
+The `ros2_ws/src/talos_mecanum` package provides a four-wheel base driver and a terminal
+keyboard interface. Pixi installs ROS 2 Jazzy and colcon for Linux ARM64, including Raspberry Pi
+OS 64-bit. Build once with `pixi run ros-build`, then start the driver with `pixi run drive` and
+the keyboard interface in another terminal with `pixi run teleop`. Set the servo port before
+starting the driver, for example:
 
 ```
-uv sync --extra web
+export TALOS_SERVO_PORT=/dev/serial/by-id/your-servo-adapter
 ```
 
-Build the UI once (Node 20+; can be built on a laptop and copied to the Pi):
+The driver accepts `geometry_msgs/msg/Twist` on `/cmd_vel`. It provides `/base/enable`
+(`std_srvs/srv/SetBool`) to ping IDs 1-4, select wheel mode, and enable torque, and `/base/stop`
+(`std_srvs/srv/Trigger`) to stop all four wheels. Drive starts disabled; press `m` in the keyboard
+interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to strafe, `q`/`e` to
+turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
+continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
+
+Before enabling on the floor, edit `ros2_ws/src/talos_mecanum/config/robot.yaml` to match the
+physical wheel-to-servo mapping and each wheel's direction. The defaults assume IDs 1-4 are ordered
+front-left, front-right, rear-left, rear-right and use positive direction signs. Set
+`wheel_ids`, `wheel_directions`, measured `wheelbase_m` and `track_width_m`, and calibrated
+`steps_per_meter` for the actual robot. The geometry and scale defaults are placeholders; the
+driver caps commands to 100 servo steps/s and 0.1 m/s linear speed until configured. Start with the
+wheels lifted and a clear area.
+
+On Raspberry Pi OS 64-bit, install Pixi, then run these commands from the repository:
 
 ```
-cd web && npm install && npm run build
+pixi install
+pixi run ros-build
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+pixi run drive
 ```
 
-Run it:
-
-```
-uv run talos-servo web --port /dev/ttyACM0     # real servos (or set TALOS_SERVO_PORT)
-uv run talos-servo web --mock                  # simulated servos, no hardware
-```
-
-Then from any laptop on the same network open `http://<pi-hostname>.local:8000` (or the Pi's IP).
-Several laptops can connect at once and see the same live state.
-
-- **Position mode**: drag the target slider (moves live) or type a value and press Go. 0-4095 is
-  one full turn; the amber marker is the current position
-- **Speed mode**: slider centre is stop, left is reverse, right is forward
-- **STOP ALL** (or Space) stops every servo in speed mode
-- **Torque** off lets you move a joint by hand
-
-Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
-again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
-`min_pos`/`max_pos` in `config/web.yaml`, so set real joint limits there before running on the
-robot.
-
-To start on boot, edit the user, paths and port in `deploy/talos-web.service`, then follow the
-steps at the top of that file.
-
-UI development with hot reload: run `uv run talos-servo web --mock`, then `cd web && npm run dev`
-and open `http://localhost:3000` with `NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8000/ws` set (or a
-Pi's address instead of localhost).
+In a second terminal, from the repository, run `pixi run teleop`. If the adapter uses another
+device, set `TALOS_SERVO_PORT` to its `/dev/serial/by-id/...` path instead. Keep the wheels lifted
+until wheel order, direction, and calibration are verified.

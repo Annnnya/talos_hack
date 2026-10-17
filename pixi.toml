@@ -13,6 +13,26 @@ pytest = ">=8"
 httpx = ">=0.27"
 ruff = ">=0.6"
 
+[target.linux-64.dependencies]
+ros-jazzy-rclpy = "*"
+ros-jazzy-geometry-msgs = "*"
+ros-jazzy-std-srvs = "*"
+ros-jazzy-ros2cli = "*"
+ros-jazzy-ros2run = "*"
+ros-jazzy-ros2service = "*"
+colcon-ros = "*"
+colcon-python-setup-py = "*"
+
+[target.linux-aarch64.dependencies]
+ros-jazzy-rclpy = "*"
+ros-jazzy-geometry-msgs = "*"
+ros-jazzy-std-srvs = "*"
+ros-jazzy-ros2cli = "*"
+ros-jazzy-ros2run = "*"
+ros-jazzy-ros2service = "*"
+colcon-ros = "*"
+colcon-python-setup-py = "*"
+
 [pypi-dependencies]
 # Editable install of our package with the web extra; also pulls ftservo-python-sdk from PyPI
 talos-servo = { path = ".", editable = true, extras = ["web"] }
@@ -23,3 +43,6 @@ lint = "ruff check ."
 fmt = "ruff format ."
 fmt-check = "ruff format --check ."
 check = { depends-on = ["lint", "fmt-check", "test"] }
+ros-build = "colcon build --base-paths ros2_ws/src"
+drive = "bash -c 'source install/setup.sh && ros2 run talos_mecanum drive_node --ros-args --params-file ros2_ws/src/talos_mecanum/config/robot.yaml'"
+teleop = "bash -c 'source install/setup.sh && ros2 run talos_mecanum keyboard_teleop'"

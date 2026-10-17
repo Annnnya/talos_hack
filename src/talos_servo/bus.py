@@ -19,6 +19,7 @@ from scservo_sdk import (
     PortHandler,
     sms_sts,
 )
+
 from serial import SerialException
 
 log = logging.getLogger(__name__)
