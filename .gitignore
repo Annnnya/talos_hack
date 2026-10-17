@@ -5,8 +5,13 @@ __pycache__/
 build/
 dist/
 
-# uv / virtualenv
+# uv / pixi / virtualenv
+.pixi/
 .venv/
+
+# ROS 2 / colcon build output
+install/
+log/
 
 # Tooling caches
 .pytest_cache/

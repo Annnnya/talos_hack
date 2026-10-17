@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  check:
+  uv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,3 +15,15 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+
+  pixi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.11.2
+        with:
+          pixi-version: v0.73.0
+          locked: true
+      - run: pixi run lint
+      - run: pixi run fmt-check
+      - run: pixi run test
