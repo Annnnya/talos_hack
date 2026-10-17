@@ -171,6 +171,22 @@ interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to str
 turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
 continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
 
+While the drive is enabled, the driver also publishes the wheel servo readouts. Nothing is read
+while it is disabled, because the serial port is closed then.
+
+| Topic | Type | Rate param (default) | Content |
+| --- | --- | --- | --- |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000, refreshed at the diagnostics rate) |
+| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, raw position and speed. Level ERROR with the error text if a read fails |
+
+Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
+and reported on `/diagnostics` but does not disable the drive. Check them with:
+
+```
+ros2 topic echo /joint_states
+ros2 topic echo /diagnostics
+```
+
 Before enabling on the floor, edit `ros2_ws/src/talos_mecanum/config/robot.yaml` to match the
 physical wheel-to-servo mapping and each wheel's direction. The defaults assume IDs 1-4 are ordered
 front-left, front-right, rear-left, rear-right and use positive direction signs. Set
