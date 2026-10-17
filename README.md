@@ -39,6 +39,10 @@ export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-
 | `talos-servo spin --ids 1,2,3 --speed 100 --seconds 3` | Wheel mode + torque on, spin, then stop |
 | `talos-servo monitor --ids 1` | Print position and speed every second until Ctrl+C |
 | `talos-servo monitor --ids 1 --speed 500` | Same, while spinning (stops on exit) |
+| `talos-servo set-id --id 1 --new-id 3` | Permanently change a servo's ID (refuses if 3 is taken) |
+
+New servos ship with ID 1. To build a daisy chain, connect them one at a time and give each a
+unique ID with `set-id` before chaining them.
 
 Common options: `--baud` (default 1000000), `--acc` (acceleration, default 20), `-v` for debug logs.
 Negative `--speed` spins the other way. Servos are always stopped on exit, including Ctrl+C and
@@ -50,8 +54,9 @@ The old scripts map to commands like this:
 |---|---|
 | `tests/test_servo.py` | `talos-servo ping` |
 | `tests/rotate_servo.py` | `talos-servo spin` |
-| `tests/test_daisy_chain.py` | `talos-servo spin --ids 1-3 --seconds 3` |
-| `tests/test_servo2.py` | `talos-servo monitor --speed 500 --acc 10` |
+| `tests/test_daisy_chain.py` | `talos-servo spin --ids 1-3 --speed 300 --seconds 60` |
+| `tests/test_servo2.py` | `talos-servo monitor --ids 3 --speed 500 --acc 10` |
+| `tests/change_ids.py` | `talos-servo set-id --id 1 --new-id 3` |
 
 ## Using the library
 
