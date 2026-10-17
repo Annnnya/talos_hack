@@ -346,6 +346,14 @@ Several laptops can connect at once and see the same live state.
 - **Speed mode**: slider centre is stop, left is reverse, right is forward
 - **STOP ALL** (or Space) stops every servo in speed mode
 - **Torque** off lets you move a joint by hand
+- **Last command**: the line under each main slider says who sent the servo its last move or
+  spin, and when: You, Another browser, CLI, ROS node, or a safety stop (the bridge's command
+  timeout, or the server stopping wheels after the last browser left). The sliders follow the last
+  command from any source, except while you hold them. If someone else commands a servo while you
+  are dragging, a hollow ring on the track marks their value
+- **Move speed and acceleration** are shared by every browser and kept until the server restarts,
+  when they go back to the low defaults. Over ROS (`--ros`) the bridge has no acceleration input,
+  so that slider is disabled
 
 Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
 again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
