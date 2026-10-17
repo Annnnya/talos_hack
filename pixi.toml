@@ -14,8 +14,8 @@ httpx = ">=0.27"
 ruff = ">=0.6"
 
 [pypi-dependencies]
-# Editable install of our package with the web extra; also pulls ftservo-python-sdk from PyPI
-talos-servo = { path = ".", editable = true, extras = ["web"] }
+# Editable install of our package with the web and imu extras; also pulls ftservo-python-sdk from PyPI
+talos-servo = { path = ".", editable = true, extras = ["web", "imu"] }
 
 [tasks]
 test = "pytest"
