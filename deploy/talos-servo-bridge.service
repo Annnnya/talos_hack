@@ -1,0 +1,28 @@
+# Start the ROS servo bridge on boot. It is the only program that opens the servo port; the web UI
+# (talos-web.service) and `talos-servo spin --ros` / `monitor --ros` all go through it.
+# Edit User, paths and the serial port, then:
+#   sudo cp deploy/talos-servo-bridge.service deploy/talos-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now talos-servo-bridge talos-web
+#   journalctl -u talos-servo-bridge -u talos-web -f
+# Stop any hand-started `talos-servo web` first: in direct mode it holds the port.
+
+[Unit]
+Description=Talos ROS servo bridge (owns the servo port)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/talos_hack
+Environment=TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+# The bridge, the web UI and every shell running --ros commands must use the same domain.
+# Environment=ROS_DOMAIN_ID=0
+ExecStart=/home/pi/.pixi/bin/pixi run -e ros servo-node
+# SIGINT runs the bridge's Ctrl+C path: stop every wheel-mode servo, then close the port.
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
