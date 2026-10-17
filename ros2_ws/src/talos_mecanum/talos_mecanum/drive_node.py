@@ -15,9 +15,10 @@ from talos_servo.bus import DEFAULT_ACCELERATION, DEFAULT_BAUDRATE, ServoBus, Se
 from talos_servo.mecanum import (
     DEFAULT_WHEEL_DIRECTIONS,
     DEFAULT_WHEEL_IDS,
+    WHEEL_JOINT_NAMES,
     mecanum_wheel_speeds,
 )
-from talos_servo.telemetry import WHEEL_JOINT_NAMES, WheelOdometer, speed_to_rad_s
+from talos_servo.ros.convert import WheelOdometer, step_speed_to_rad
 
 COMMAND_TIMEOUT_S = 0.5
 WATCHDOG_PERIOD_S = 0.1
@@ -234,7 +235,7 @@ class MecanumDriveNode(Node):
             status = self._last_status[index]
             msg.name.append(WHEEL_JOINT_NAMES[index])
             msg.position.append(odometer.update(position))
-            msg.velocity.append(speed_to_rad_s(speed * odometer.direction))
+            msg.velocity.append(step_speed_to_rad(speed * odometer.direction))
             msg.effort.append(float(status.load * odometer.direction) if status else 0.0)
         if msg.name:
             self._joint_state_pub.publish(msg)

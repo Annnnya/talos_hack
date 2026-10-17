@@ -6,6 +6,9 @@ import pytest
 
 from talos_servo.ros.convert import (
     CENTER_STEP,
+    RAD_PER_STEP,
+    STEPS_PER_TURN,
+    WheelOdometer,
     joint_ids,
     joint_name,
     rad_speed_to_steps,
@@ -66,3 +69,51 @@ def test_joint_ids_maps_names():
 def test_joint_ids_rejects_collisions():
     with pytest.raises(ValueError, match="both map to"):
         joint_ids([ServoConfig(id=1, name="arm 1"), ServoConfig(id=2, name="Arm-1")])
+
+
+def _steps(steps: int) -> float:
+    return steps * RAD_PER_STEP
+
+
+def test_odometer_first_reading_is_zero():
+    odo = WheelOdometer()
+    assert odo.update(1234) == 0
+
+
+def test_odometer_forward_across_wrap():
+    odo = WheelOdometer()
+    odo.update(4000)
+    assert odo.update(100) == pytest.approx(_steps(196))
+
+
+def test_odometer_backward_across_wrap():
+    odo = WheelOdometer()
+    odo.update(100)
+    assert odo.update(4000) == pytest.approx(_steps(-196))
+
+
+def test_odometer_accumulates_over_turns():
+    odo = WheelOdometer()
+    for raw in [0, 1000, 2000, 3000, 0, 1000]:
+        odo.update(raw)
+    assert odo.angle == pytest.approx(_steps(STEPS_PER_TURN + 1000))
+
+
+def test_odometer_direction_sign_flips_angle():
+    odo = WheelOdometer(direction=-1)
+    odo.update(0)
+    assert odo.update(500) == pytest.approx(_steps(-500))
+
+
+def test_odometer_reset():
+    odo = WheelOdometer()
+    odo.update(0)
+    odo.update(500)
+    odo.reset()
+    assert odo.angle == 0
+    assert odo.update(3000) == 0
+
+
+def test_odometer_rejects_bad_direction():
+    with pytest.raises(ValueError):
+        WheelOdometer(direction=0)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from talos_servo.mecanum import mecanum_wheel_speeds
+from talos_servo.mecanum import WHEEL_COUNT, WHEEL_JOINT_NAMES, mecanum_wheel_speeds
 
 
 @pytest.mark.parametrize(
@@ -72,3 +72,7 @@ def test_invalid_kinematic_parameters_are_rejected(overrides, message):
     parameters.update(overrides)
     with pytest.raises(ValueError, match=message):
         mecanum_wheel_speeds(0.0, 0.0, 0.0, **parameters)
+
+
+def test_one_unique_joint_name_per_wheel():
+    assert len(set(WHEEL_JOINT_NAMES)) == WHEEL_COUNT

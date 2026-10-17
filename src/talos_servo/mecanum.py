@@ -10,6 +10,13 @@ from talos_servo.bus import MAX_SPEED
 WHEEL_COUNT = 4
 DEFAULT_WHEEL_IDS = (1, 2, 3, 4)
 DEFAULT_WHEEL_DIRECTIONS = (1, 1, 1, 1)
+# ROS joint names, in the same FL, FR, RL, RR order as mecanum_wheel_speeds returns.
+WHEEL_JOINT_NAMES = (
+    "front_left_wheel",
+    "front_right_wheel",
+    "rear_left_wheel",
+    "rear_right_wheel",
+)
 
 
 def mecanum_wheel_speeds(
