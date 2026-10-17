@@ -81,7 +81,7 @@ flowchart TB
 
 | Box | File | Job |
 |---|---|---|
-| RobotController | `web/controller.py` | shared servo state, polling, command limits from `config/web.yaml` |
+| RobotController | `web/controller.py` | shared servo state, polling, command limits from `config/robot.yaml` |
 | RosBackend | `ros/web_backend.py`, `ros/web_client_node.py` | same commands as RobotController, sent to `servo_bridge` over topics and services (`web --ros`) |
 | ROS helpers | `ros/convert.py`, `ros/readouts.py` | steps to radians, wheel odometry, per joint readout topics |
 | mecanum | `mecanum.py` | body velocity to four wheel speeds |
@@ -198,7 +198,7 @@ pixi run -e ros talos-servo spin --ros --ids 2 --speed 300 --seconds 3
 pixi run -e ros talos-servo monitor --ros --ids 1,2
 ```
 
-With `--ros` the servos must be listed in `config/web.yaml` (`--config` picks another file),
+With `--ros` the servos must be listed in `config/robot.yaml` (`--config` picks another file),
 speeds are capped by its `max_speed`, and `--acc` is ignored. Each command stops only the servos it
 started. `ping` and `set-id` have no `--ros` mode: stop the bridge first.
 
@@ -317,7 +317,7 @@ Browser control for the robot's servos: each one switches between **Position** a
 - `src/talos_servo/web/` - the `talos-servo web` command: FastAPI server on top of `ServoBus`
   that streams servo state over a WebSocket and serves the UI
 - `web/` - Next.js UI, built as static files into `web/out`
-- `config/web.yaml` - servo IDs, names, joint limits and the UI speed cap
+- `config/robot.yaml` - servo IDs, names, joint limits and the UI speed cap
 
 Install the web extra (`pixi install` already includes it):
 
@@ -349,7 +349,7 @@ Several laptops can connect at once and see the same live state.
 
 Safety: when every browser disconnects, the server stops all speed-mode servos, and it stops them
 again on shutdown. Speeds are capped by `max_speed` and targets are clamped to each servo's
-`min_pos`/`max_pos` in `config/web.yaml`, so set real joint limits there before running on the
+`min_pos`/`max_pos` in `config/robot.yaml`, so set real joint limits there before running on the
 robot.
 
 To start on boot, use the two services in `deploy/`: `talos-servo-bridge.service` owns the servo
@@ -396,7 +396,7 @@ these differences:
 ## ROS 2
 
 `talos-servo-ros` is a ROS 2 node (`src/talos_servo/ros/servo_bridge_node.py`) on top of the same
-controller, config (`config/web.yaml`) and simulator as the web UI. It only uses standard message
+controller, config (`config/robot.yaml`) and simulator as the web UI. It only uses standard message
 types, so there is no colcon build step.
 
 ```

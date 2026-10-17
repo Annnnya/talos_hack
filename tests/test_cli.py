@@ -119,7 +119,7 @@ def over_ros(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", stub)
     monkeypatch.setattr(talos_servo.ros, "cli_commands", stub, raising=False)
     monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
-    config = tmp_path / "web.yaml"
+    config = tmp_path / "robot.yaml"
     config.write_text("servos:\n  - id: 1\n  - id: 2\n")
     return calls, str(config)
 

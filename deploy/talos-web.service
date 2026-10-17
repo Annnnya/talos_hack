@@ -4,7 +4,7 @@
 #
 # Pi without ROS: drop the bridge lines below and drive the port directly instead with
 #   Environment=TALOS_SERVO_PORT=/dev/serial/by-id/...
-#   ExecStart=/home/pi/.local/bin/uv run --extra web talos-servo web --config config/web.yaml
+#   ExecStart=/home/pi/.local/bin/uv run --extra web talos-servo web --config config/robot.yaml
 # Then nothing else can use the servos while the UI runs.
 
 [Unit]
