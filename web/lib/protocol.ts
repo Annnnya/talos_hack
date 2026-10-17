@@ -15,6 +15,8 @@ export interface ServoState {
   load: number;
   voltage: number;
   temp: number;
+  current: number;
+  moving: boolean;
   target: number | null;
   target_speed: number;
   error: string | null;

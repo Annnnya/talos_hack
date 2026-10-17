@@ -240,7 +240,7 @@ class MecanumDriveNode(Node):
             self._joint_state_pub.publish(msg)
 
     def _publish_diagnostics(self) -> None:
-        """Publish per-servo voltage, temperature and load, with ERROR on failed reads."""
+        """Publish per-servo readouts, with ERROR level on failed reads."""
         bus = self._bus
         if not self._enabled or bus is None:
             return
@@ -269,6 +269,8 @@ class MecanumDriveNode(Node):
                     KeyValue(key="voltage_v", value=f"{status.voltage:.1f}"),
                     KeyValue(key="temperature_c", value=str(status.temperature)),
                     KeyValue(key="load", value=str(status.load)),
+                    KeyValue(key="current_a", value=f"{status.current:.3f}"),
+                    KeyValue(key="moving", value=str(status.moving)),
                 ]
                 raw = self._last_raw[index]
                 if raw is not None:
