@@ -13,6 +13,7 @@ from talos_servo.ros.convert import (
     joint_name,
     rad_speed_to_steps,
     rad_to_steps,
+    readout_topic,
     step_speed_to_rad,
     steps_to_rad,
 )
@@ -117,3 +118,15 @@ def test_odometer_reset():
 def test_odometer_rejects_bad_direction():
     with pytest.raises(ValueError):
         WheelOdometer(direction=0)
+
+
+@pytest.mark.parametrize(
+    ("prefix", "expected"),
+    [
+        ("/base", "/base/front_left_wheel/voltage"),
+        ("/base/", "/base/front_left_wheel/voltage"),
+        ("~", "~/front_left_wheel/voltage"),
+    ],
+)
+def test_readout_topic(prefix, expected):
+    assert readout_topic(prefix, "front_left_wheel", "voltage") == expected

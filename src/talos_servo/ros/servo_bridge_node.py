@@ -9,6 +9,8 @@ Topics and services live under the node name (default `/servo_bridge/...`):
   (rad/s) as move speed
 - `velocity_cmd` (sensor_msgs/JointState, in): wheel speeds by joint name. A wheel servo stops
   if it gets no new command within `command_timeout` seconds
+- `<joint>/temperature`, `voltage`, `current`, `load`, `moving`: plain numeric readouts at the
+  status rate, see `talos_servo.ros.readouts`
 - `stop_all` (std_srvs/Trigger), `<joint>/set_torque` and `<joint>/set_wheel_mode`
   (std_srvs/SetBool)
 
@@ -40,6 +42,7 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.readouts import JointReadoutPublishers
 from talos_servo.web.config import load_config
 from talos_servo.web.controller import POSITION, WHEEL, CommandError, RobotController
 from talos_servo.web.sim import make_bus
@@ -86,6 +89,7 @@ class ServoBridgeNode(Node):
 
         self.joint_pub = self.create_publisher(JointState, "~/joint_states", QUEUE_DEPTH)
         self.status_pub = self.create_publisher(DiagnosticArray, "~/status", QUEUE_DEPTH)
+        self.readouts = JointReadoutPublishers(self, "~", self.joints)
         self.create_subscription(JointState, "~/position_cmd", self.on_position_cmd, QUEUE_DEPTH)
         self.create_subscription(JointState, "~/velocity_cmd", self.on_velocity_cmd, QUEUE_DEPTH)
         self.create_service(Trigger, "~/stop_all", self.on_stop_all)
@@ -122,6 +126,23 @@ class ServoBridgeNode(Node):
 
     def publish_status(self) -> None:
         self.status_pub.publish(self.status_msg())
+        self.publish_readouts()
+
+    def publish_readouts(self) -> None:
+        """Numeric readouts for every online servo; offline ones show up in `status` instead."""
+        stamp = self.get_clock().now().to_msg()
+        for s in self.controller.snapshot():
+            if not s["online"]:
+                continue
+            self.readouts.publish(
+                self.names[s["id"]],
+                stamp,
+                temperature=s["temp"],
+                voltage=s["voltage"],
+                current=s["current"],
+                load=s["load"],
+                moving=s["moving"],
+            )
 
     def status_msg(self) -> DiagnosticArray:
         msg = DiagnosticArray()

@@ -73,6 +73,12 @@ class WheelOdometer:
         return self._steps * self.direction * RAD_PER_STEP
 
 
+def readout_topic(prefix: str, joint: str, field: str) -> str:
+    """Topic for one numeric readout: ('/base', 'front_left_wheel', 'voltage') ->
+    '/base/front_left_wheel/voltage'. A prefix of '~' keeps it under the node name."""
+    return f"{prefix.rstrip('/')}/{joint}/{field}"
+
+
 def joint_name(name: str) -> str:
     """Make a config name usable as a ROS name: 'Servo 1' -> 'servo_1'."""
     cleaned = _INVALID_NAME_CHARS.sub("_", name.lower()).strip("_")

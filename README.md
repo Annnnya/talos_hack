@@ -208,6 +208,9 @@ Joint names come from the config names (`"Servo 1"` becomes `servo_1`). Angles a
 |---|---|---|
 | `joint_states` (out) | `sensor_msgs/JointState` | position (rad), velocity (rad/s), effort (raw load) at `telemetry_hz` |
 | `status` (out) | `diagnostic_msgs/DiagnosticArray` | online, mode, torque, voltage, temperature, current (A), moving, errors (2 Hz) |
+| `<joint>/temperature` (out) | `sensor_msgs/Temperature` | deg C, at the status rate, online servos only |
+| `<joint>/voltage`, `<joint>/current`, `<joint>/load` (out) | `std_msgs/Float32` | V, A, raw load (about -1000..1000) |
+| `<joint>/moving` (out) | `std_msgs/Bool` | the servo's moving flag |
 | `position_cmd` (in) | `sensor_msgs/JointState` | move joints by name; optional `velocity` (rad/s) sets the move speed |
 | `velocity_cmd` (in) | `sensor_msgs/JointState` | spin wheel-mode joints by name (rad/s) |
 | `stop_all` | `std_srvs/Trigger` | stop every wheel-mode servo |
@@ -256,12 +259,16 @@ while it is disabled, because the serial port is closed then.
 | --- | --- | --- | --- |
 | `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000, refreshed at the diagnostics rate) |
 | `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed. Level ERROR with the error text if a read fails |
+| `/base/<wheel>/temperature` | `sensor_msgs/msg/Temperature` | `diagnostics_rate_hz` (1) | deg C, `header.frame_id` is the wheel joint name |
+| `/base/<wheel>/voltage`, `current`, `load` | `std_msgs/msg/Float32` | `diagnostics_rate_hz` (1) | V, A, raw load. Not published for a wheel whose read failed |
+| `/base/<wheel>/moving` | `std_msgs/msg/Bool` | `diagnostics_rate_hz` (1) | the servo's moving flag |
 
 Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
 and reported on `/diagnostics` but does not disable the drive. Check them with:
 
 ```
 ros2 topic echo /joint_states
+ros2 topic echo /base/front_left_wheel/temperature
 ros2 topic echo /diagnostics
 ```
 
