@@ -121,7 +121,7 @@ class RosBackend:
             if not self._first_status.wait(self.wait_timeout):
                 raise ServoError(f"servo bridge at {self.bridge} publishes no status ({hint})")
         except BaseException:
-            self._shutdown()
+            self.release()
             raise
         log.info("connected to servo bridge at %s", self.bridge)
 
@@ -130,9 +130,13 @@ class RosBackend:
             if self._node is not None:
                 self.stop_all()
         finally:
-            self._shutdown()
+            self.release()
 
-    def _shutdown(self) -> None:
+    def release(self) -> None:
+        """Disconnect without `stop_all`, for callers that stop only the servos they started.
+
+        A wheel left spinning still stops within the bridge's command timeout.
+        """
         if self._executor is not None:
             self._executor.shutdown()
         if self._thread is not None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+import types
 
 import pytest
 from scservo_sdk import COMM_RX_TIMEOUT
@@ -96,3 +98,56 @@ def test_set_id(run, sdk, capsys):
 def test_set_id_rejects_id_lists(run):
     with pytest.raises(SystemExit):
         run(["set-id", "--port", "COM5", "--id", "1,2", "--new-id", "3"])
+
+
+# --- --ros: spin and monitor through the servo bridge -----------------------------------
+
+
+@pytest.fixture
+def over_ros(monkeypatch, tmp_path):
+    """Stub cli_commands so these run without rclpy; records what each command got."""
+    import talos_servo.ros
+
+    calls = {}
+    stub = types.ModuleType("talos_servo.ros.cli_commands")
+    stub.RosBackend = lambda config, bridge: {
+        "servos": [s.id for s in config.servos],
+        "bridge": bridge,
+    }
+    stub.spin_over_ros = lambda backend, *a: calls.update(spin=(backend, a))
+    stub.monitor_over_ros = lambda backend, *a: calls.update(monitor=(backend, a))
+    monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", stub)
+    monkeypatch.setattr(talos_servo.ros, "cli_commands", stub, raising=False)
+    monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
+    config = tmp_path / "web.yaml"
+    config.write_text("servos:\n  - id: 1\n  - id: 2\n")
+    return calls, str(config)
+
+
+def test_spin_over_ros_needs_no_port(over_ros):
+    calls, config = over_ros
+    args = ["spin", "--ros", "--config", config, "--bridge", "/b", "--ids", "2", "--speed", "300"]
+    assert cli.main(args) == 0
+    assert calls["spin"] == ({"servos": [1, 2], "bridge": "/b"}, ([2], 300, 1.0))
+
+
+def test_monitor_over_ros_passes_interval(over_ros):
+    calls, config = over_ros
+    args = ["monitor", "--ros", "--config", config, "--seconds", "2", "--interval", "0.5"]
+    assert cli.main(args) == 0
+    assert calls["monitor"][1] == ([1], 0, 2.0, 0.5)
+
+
+def test_over_ros_says_acceleration_is_ignored(over_ros, capsys):
+    _calls, config = over_ros
+    assert cli.main(["spin", "--ros", "--config", config, "--acc", "50"]) == 0
+    assert "--acc is ignored" in capsys.readouterr().out
+
+
+def test_over_ros_without_ros_installed_explains(monkeypatch, capsys):
+    import talos_servo.ros
+
+    monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", None)
+    monkeypatch.delattr(talos_servo.ros, "cli_commands", raising=False)
+    assert cli.main(["spin", "--ros"]) == 1
+    assert "pixi run -e ros talos-servo spin --ros" in capsys.readouterr().err
