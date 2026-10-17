@@ -39,6 +39,40 @@ def rad_speed_to_steps(rad_per_s: float) -> int:
     return round(rad_per_s / RAD_PER_STEP)
 
 
+class WheelOdometer:
+    """Unwrap a 0..4095 wheel encoder into a running angle in radians.
+
+    Assumes the wheel turns less than half a revolution between two reads, so the shortest
+    step between readings is the real one. The direction sign makes positive mean forward.
+    """
+
+    def __init__(self, direction: int = 1) -> None:
+        if direction not in (-1, 1):
+            raise ValueError(f"direction must be -1 or 1, got {direction}")
+        self.direction = direction
+        self._last_raw: int | None = None
+        self._steps = 0
+
+    def reset(self) -> None:
+        self._last_raw = None
+        self._steps = 0
+
+    def update(self, raw_position: int) -> float:
+        """Feed one encoder reading and return the unwrapped angle in radians."""
+        raw = raw_position % STEPS_PER_TURN
+        if self._last_raw is not None:
+            delta = (raw - self._last_raw) % STEPS_PER_TURN
+            if delta > STEPS_PER_TURN // 2:
+                delta -= STEPS_PER_TURN
+            self._steps += delta
+        self._last_raw = raw
+        return self.angle
+
+    @property
+    def angle(self) -> float:
+        return self._steps * self.direction * RAD_PER_STEP
+
+
 def joint_name(name: str) -> str:
     """Make a config name usable as a ROS name: 'Servo 1' -> 'servo_1'."""
     cleaned = _INVALID_NAME_CHARS.sub("_", name.lower()).strip("_")
