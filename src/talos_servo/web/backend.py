@@ -9,11 +9,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:  # config needs pyyaml
-    from talos_servo.config import WebConfig
+    from talos_servo.config import RobotConfig
 
 
 class RobotBackend(Protocol):
-    config: WebConfig
+    config: RobotConfig
 
     def open(self) -> None: ...
 

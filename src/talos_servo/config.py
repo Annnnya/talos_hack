@@ -27,13 +27,13 @@ class ServoConfig:
 
 
 @dataclass(frozen=True)
-class WebConfig:
+class RobotConfig:
     servos: tuple[ServoConfig, ...]
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
 
 
-def parse_config(data: dict) -> WebConfig:
+def parse_config(data: dict) -> RobotConfig:
     raw_servos = data.get("servos") or []
     if not raw_servos:
         raise ConfigError("config needs at least one entry under 'servos'")
@@ -63,10 +63,10 @@ def parse_config(data: dict) -> WebConfig:
     telemetry_hz = float(data.get("telemetry_hz", DEFAULT_TELEMETRY_HZ))
     if telemetry_hz <= 0:
         raise ConfigError(f"telemetry_hz must be > 0, got {telemetry_hz}")
-    return WebConfig(servos=tuple(servos), max_speed=max_speed, telemetry_hz=telemetry_hz)
+    return RobotConfig(servos=tuple(servos), max_speed=max_speed, telemetry_hz=telemetry_hz)
 
 
-def load_config(path: str | Path) -> WebConfig:
+def load_config(path: str | Path) -> RobotConfig:
     try:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except OSError as exc:

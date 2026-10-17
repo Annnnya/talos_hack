@@ -30,7 +30,7 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
-from talos_servo.config import WebConfig
+from talos_servo.config import RobotConfig
 from talos_servo.controller import (
     MODES,
     POSITION,
@@ -72,7 +72,7 @@ class RosBackend:
 
     def __init__(
         self,
-        config: WebConfig,
+        config: RobotConfig,
         *,
         bridge: str = DEFAULT_BRIDGE,
         context: Context | None = None,

@@ -14,7 +14,7 @@ from talos_servo.bus import (
     ServoBus,
     ServoError,
 )
-from talos_servo.config import ServoConfig, WebConfig
+from talos_servo.config import RobotConfig, ServoConfig
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class RobotController:
     so one unplugged servo never stops telemetry for the others.
     """
 
-    def __init__(self, bus: ServoBus, config: WebConfig) -> None:
+    def __init__(self, bus: ServoBus, config: RobotConfig) -> None:
         self.bus = bus
         self.config = config
         self.servos = {cfg.id: ServoState.from_config(cfg) for cfg in config.servos}
