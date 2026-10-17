@@ -16,7 +16,7 @@ slanted box = ROS 2 topic.
 ```mermaid
 flowchart LR
   accTitle: What runs where
-  accDescr: The servo bus connects over USB serial to exactly one program at a time. With --ros the web server goes through servo_bridge instead of the port
+  accDescr: The servo bus connects over USB serial to exactly one program at a time. With --ros the web server and the CLI spin and monitor commands go through servo_bridge instead of the port
   servos[("Servo bus<br/>STS3215 servos")] ==>|USB serial| port{{"Serial port<br/>one owner at a time"}}
   port --> cli(["talos-servo CLI"])
   port --> web(["talos-servo web"])
@@ -29,12 +29,13 @@ flowchart LR
   bridge <--> ros(("ROS 2"))
   drive <--> ros
   web <-.->|"--ros mode"| ros
+  cli <-.->|"spin, monitor --ros"| ros
 ```
 
 The four servo programs can open the servo port themselves, so run only one of them at a time.
-The exception is `talos-servo web --ros`: it leaves the port to `servo_bridge` and sends its
-commands over ROS 2, so the browser UI and your ROS nodes can drive the robot together (see
-[Web UI over ROS 2](#web-ui-over-ros-2)). The imu node only uses I2C and can run alongside any of
+The exception is `--ros` (on `talos-servo web`, `spin` and `monitor`): it leaves the port to
+`servo_bridge` and sends commands over ROS 2, so the browser UI, the CLI and your ROS nodes can
+drive the robot together (see [Web UI over ROS 2](#web-ui-over-ros-2)). The imu node only uses I2C and can run alongside any of
 them.
 
 | Program | Start it with | Use it for | Details |
@@ -182,6 +183,24 @@ unique ID with `set-id` before chaining them.
 Common options: `--baud` (default 1000000), `--acc` (acceleration, default 20), `-v` for debug logs.
 Negative `--speed` spins the other way. Servos are always stopped on exit, including Ctrl+C and
 errors.
+
+### Next to the web UI or ROS
+
+While `servo_bridge` (and the web UI with `--ros`) runs, do not run plain CLI commands: on Linux
+the port is not locked, so two programs would talk on the bus at once and garble each other's
+packets. Add `--ros` to `spin` and `monitor` instead. They then go through the bridge, and the web
+UI shows what they do:
+
+```
+pixi run -e ros servo-node                                         # owns the port
+pixi run -e ros web-ros                                            # browser UI through the bridge
+pixi run -e ros talos-servo spin --ros --ids 2 --speed 300 --seconds 3
+pixi run -e ros talos-servo monitor --ros --ids 1,2
+```
+
+With `--ros` the servos must be listed in `config/web.yaml` (`--config` picks another file),
+speeds are capped by its `max_speed`, and `--acc` is ignored. Each command stops only the servos it
+started. `ping` and `set-id` have no `--ros` mode: stop the bridge first.
 
 The old scripts map to commands like this:
 
