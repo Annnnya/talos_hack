@@ -198,6 +198,49 @@ base:
 `command_timeout_s`. Every client on the robot must use the same
 `ROS_DOMAIN_ID`.
 
+### ROS commands
+
+Run these in `pixi shell -e ros` (or prefix them with `pixi run -e ros`). Keep
+the wheels lifted the first time.
+
+Drive the base. `/cmd_vel` stops unless repeated, so publish at a rate; Ctrl+C
+stops the wheels within `command_timeout_s`:
+
+```
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.05}}"                  # forward
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {y: 0.05}}"                  # strafe left
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{angular: {z: 0.3}}"                  # turn left
+```
+
+One joint. Velocities are rad/s (1 rad/s is about 650 steps/s), positions are
+rad with 0 at mid travel:
+
+```
+ros2 topic pub -r 10 /robot/velocity_cmd sensor_msgs/msg/JointState \
+  "{name: [front_left_wheel], velocity: [1.0]}"
+ros2 topic pub --once /robot/position_cmd sensor_msgs/msg/JointState \
+  "{name: [bend], position: [0.5], velocity: [1.0]}"
+```
+
+Services and state:
+
+```
+ros2 service call /robot/stop_all std_srvs/srv/Trigger
+ros2 service call /robot/front_left_wheel/set_torque std_srvs/srv/SetBool \
+  "{data: false}"
+ros2 topic echo /joint_states
+ros2 topic echo /odom
+ros2 topic echo /diagnostics             # one entry per joint
+ros2 topic echo /robot/front_left_wheel/temperature
+ros2 topic hz /odom
+```
+
+Robot node parameters go after `--ros-args`, e.g.
+`pixi run -e ros talos-robot-ros --ros-args -p status_hz:=5.0`.
+
 ## Web UI
 
 Each joint gets a card: a position slider for position joints, a speed slider
