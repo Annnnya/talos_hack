@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from talos_servo.mecanum import WHEEL_COUNT, WHEEL_JOINT_NAMES, mecanum_wheel_speeds
+from talos_servo.mecanum import (
+    WHEEL_COUNT,
+    WHEEL_JOINT_NAMES,
+    mecanum_wheel_speeds,
+    wheel_accelerations,
+)
 
 
 @pytest.mark.parametrize(
@@ -76,3 +81,27 @@ def test_invalid_kinematic_parameters_are_rejected(overrides, message):
 
 def test_one_unique_joint_name_per_wheel():
     assert len(set(WHEEL_JOINT_NAMES)) == WHEEL_COUNT
+
+
+def test_accelerations_scale_with_speed_change():
+    assert wheel_accelerations((0, 0, 0, 0), (100, 50, -100, 25), 20) == (20, 10, 20, 5)
+
+
+def test_accelerations_count_reversal_as_larger_change():
+    assert wheel_accelerations((100, 0, 0, 0), (-100, 100, 0, 0), 20) == (20, 10, 1, 1)
+
+
+def test_accelerations_never_zero():
+    assert min(wheel_accelerations((0, 0, 0, 0), (1000, 1, 0, 0), 20)) == 1
+
+
+def test_accelerations_without_change_use_base():
+    assert wheel_accelerations((5, 5, 5, 5), (5, 5, 5, 5), 20) == (20, 20, 20, 20)
+
+
+@pytest.mark.parametrize(
+    ("previous", "target", "base"), [((0,), (0, 0), 20), ((0,), (1,), 0), ((0,), (1,), 255)]
+)
+def test_accelerations_reject_bad_input(previous, target, base):
+    with pytest.raises(ValueError):
+        wheel_accelerations(previous, target, base)

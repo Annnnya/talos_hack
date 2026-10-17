@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import pytest
-from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, SMS_STS_ID
+from scservo_sdk import (
+    COMM_RX_TIMEOUT,
+    COMM_SUCCESS,
+    SMS_STS_ID,
+    SMS_STS_PRESENT_POSITION_L,
+    SMS_STS_PRESENT_SPEED_L,
+)
 
 from talos_servo.bus import ServoBus
 from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
@@ -32,6 +38,30 @@ class FakePort:
         self.closed_count += 1
 
 
+BROADCAST_ID = 254
+
+
+@dataclass
+class FakeGroupSyncWrite:
+    """Mimics the SDK GroupSyncWrite; each sent packet is recorded on the handler."""
+
+    handler: FakeHandler
+    data: dict[int, list[int]] = field(default_factory=dict)
+
+    def clearParam(self) -> None:
+        self.data.clear()
+
+    def addParam(self, servo_id: int, data: list[int]) -> bool:
+        if servo_id in self.data:
+            return False
+        self.data[servo_id] = list(data)
+        return True
+
+    def txPacket(self) -> int:
+        self.handler.calls.append(("sync_write", dict(self.data)))
+        return self.handler._result("sync_write", BROADCAST_ID)[0]
+
+
 @dataclass
 class FakeHandler:
     """Records every call; `fail` maps (method, servo_id) to (comm, error) to inject failures.
@@ -50,6 +80,10 @@ class FakeHandler:
     registers: dict[int, int] = field(default_factory=dict)
     # (servo id, address) -> value from a successful write1ByteTxRx, read back like a real servo
     written: dict[tuple[int, int], int] = field(default_factory=dict)
+    groupSyncWrite: FakeGroupSyncWrite = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.groupSyncWrite = FakeGroupSyncWrite(self)
 
     def _result(self, method: str, servo_id: int) -> tuple[int, int]:
         return self.fail.get((method, servo_id), (COMM_SUCCESS, 0))
@@ -104,6 +138,25 @@ class FakeHandler:
     def scs_tohost(value: int, sign_bit: int) -> int:
         return -(value & ~(1 << sign_bit)) if value & (1 << sign_bit) else value
 
+    def readTxRx(self, servo_id: int, address: int, length: int) -> tuple[list[int], int, int]:
+        """Block read over a little-endian memory image built from position, speed, registers."""
+        self.calls.append(("read_block", servo_id, address, length))
+        comm, error = self._result("read_block", servo_id)
+        if comm != COMM_SUCCESS:
+            return [], comm, error
+        memory: dict[int, int] = {}
+        for start, value in self.registers.items():
+            memory[start] = value & 0xFF
+            if value > 0xFF:
+                memory[start + 1] = value >> 8
+        for start, value in (
+            (SMS_STS_PRESENT_POSITION_L, self.position),
+            (SMS_STS_PRESENT_SPEED_L, self.speed),
+        ):
+            raw = abs(value) | (0x8000 if value < 0 else 0)
+            memory[start], memory[start + 1] = raw & 0xFF, raw >> 8
+        return [memory.get(address + i, 0) for i in range(length)], comm, error
+
     def ReadPosSpeed(self, servo_id: int) -> tuple[int, int, int, int]:
         self.calls.append(("read", servo_id))
         comm, error = self._result("read", servo_id)
@@ -117,6 +170,9 @@ class FakeHandler:
 
     def speed_calls(self) -> list[tuple]:
         return [c for c in self.calls if c[0] == "speed"]
+
+    def sync_writes(self) -> list[dict[int, list[int]]]:
+        return [c[1] for c in self.calls if c[0] == "sync_write"]
 
 
 @dataclass

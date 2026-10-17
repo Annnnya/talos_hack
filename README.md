@@ -502,19 +502,31 @@ interface to enable or disable. Use `w`/`s` to move forward/back, `a`/`d` to str
 turn, space to stop, and `x` to exit. Direction keys send short pulses; press repeatedly for
 continuous movement. Commands stop automatically if `/cmd_vel` is not updated for 0.5 seconds.
 
+The driver owns the servo port while enabled, so stop the servo bridge first
+(`sudo systemctl stop talos-servo-bridge`). If another process holds the port, enabling fails with
+"already in use by another process".
+
+One control loop (`control_rate_hz`, default 50) owns the bus. Each tick sends all four wheel
+speeds in a single sync-write packet, so the wheels start together, then reads at most one servo.
+`/cmd_vel` only stores the latest command. Each wheel's acceleration is scaled by its speed change
+so all wheels finish ramping at the same time; `acceleration` (1..254) is the rate of the wheel with
+the largest change.
+
 While the drive is enabled, the driver also publishes the wheel servo readouts. Nothing is read
 while it is disabled, because the serial port is closed then.
 
 | Topic | Type | Rate param (default) | Content |
 | --- | --- | --- | --- |
-| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000, refreshed at the diagnostics rate) |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed. Level ERROR with the error text if a read fails |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_rate_hz` (10, at most `control_rate_hz` / 4) | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel`: position in rad (unwrapped, 0 at enable), velocity in rad/s, effort = raw servo load (about -1000..1000) |
+| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | `diagnostics_rate_hz` (1) | One status per servo with voltage, temperature, load, current (A), moving flag, raw position and speed, from the latest joint state read. Level ERROR with the error text if a read fails |
 | `/base/<wheel>/temperature` | `sensor_msgs/msg/Temperature` | `diagnostics_rate_hz` (1) | deg C, `header.frame_id` is the wheel joint name |
 | `/base/<wheel>/voltage`, `current`, `load` | `std_msgs/msg/Float32` | `diagnostics_rate_hz` (1) | V, A, raw load. Not published for a wheel whose read failed |
 | `/base/<wheel>/moving` | `std_msgs/msg/Bool` | `diagnostics_rate_hz` (1) | the servo's moving flag |
 
 Signs follow `wheel_directions`, so positive means forward for every wheel. A failed read is logged
-and reported on `/diagnostics` but does not disable the drive. Check them with:
+and reported on `/diagnostics`; five failed reads in a row on one servo disable the drive, since a
+sync write gets no reply and reads are the only way to notice a servo that stopped answering.
+Check them with:
 
 ```
 ros2 topic echo /joint_states

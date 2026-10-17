@@ -22,6 +22,7 @@ from talos_servo.bus import (
     MODE_WHEEL,
     ServoError,
     ServoStatus,
+    ServoTelemetry,
 )
 
 
@@ -214,3 +215,143 @@ def test_read_status_failure_raises(sdk):
     sdk.fail[("read2", 1)] = (COMM_RX_TIMEOUT, 0)
     with sdk.bus() as bus, pytest.raises(ServoError, match="read load of servo 1"):
         bus.read_status(1)
+
+
+def test_set_speeds_sends_one_sync_packet(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: -100, 3: 0, 4: 300}, 20)
+        assert sdk.handler.sync_writes() == [
+            {
+                1: [20, 0, 0, 0, 0, 100, 0],
+                2: [20, 0, 0, 0, 0, 100, 0x80],
+                3: [20, 0, 0, 0, 0, 0, 0],
+                4: [20, 0, 0, 0, 0, 300 & 0xFF, 300 >> 8],
+            }
+        ]
+        assert sdk.handler.speed_calls() == []
+
+
+def test_set_speeds_accepts_per_servo_acceleration(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 50}, {1: 20, 2: 10})
+        packet = sdk.handler.sync_writes()[0]
+        assert packet[1][0] == 20
+        assert packet[2][0] == 10
+
+
+def test_set_speeds_tracks_moving_servos_for_exit_stop(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 0})
+    assert sdk.handler.speed_calls() == [("speed", 1, 0, 20)]
+
+
+def test_stop_many_clears_moving_servos(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 100})
+        bus.stop_many([1, 2])
+        assert sdk.handler.sync_writes()[-1] == {
+            1: [20, 0, 0, 0, 0, 0, 0],
+            2: [20, 0, 0, 0, 0, 0, 0],
+        }
+    assert sdk.handler.speed_calls() == []
+
+
+def test_set_speeds_comm_failure_raises_and_still_stops_on_exit(sdk):
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    with pytest.raises(ServoError, match="sync set speeds"), sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 100})
+    stops = sdk.handler.speed_calls()
+    assert ("speed", 1, 0, 20) in stops
+    assert ("speed", 2, 0, 20) in stops
+
+
+@pytest.mark.parametrize(
+    ("speeds", "acc"), [({}, 20), ({1: 40_000}, 20), ({1: 100}, 255), ({1: 100}, -1)]
+)
+def test_set_speeds_rejects_bad_input_without_writing(sdk, speeds, acc):
+    with sdk.bus() as bus, pytest.raises(ValueError):
+        bus.set_speeds(speeds, acc)
+    assert sdk.handler.sync_writes() == []
+
+
+def test_read_telemetry_decodes_one_block_read(sdk):
+    sdk.registers.update(
+        {
+            SMS_STS_PRESENT_LOAD_L: (1 << 10) | 50,
+            SMS_STS_PRESENT_VOLTAGE: 121,
+            SMS_STS_PRESENT_TEMPERATURE: 34,
+            SMS_STS_PRESENT_CURRENT_L: (1 << 15) | 100,
+            SMS_STS_MOVING: 1,
+        }
+    )
+    with sdk.bus() as bus:
+        sdk.handler.position = 3000
+        sdk.handler.speed = -250
+        assert bus.read_telemetry(2) == ServoTelemetry(
+            position=3000,
+            speed=-250,
+            status=ServoStatus(load=-50, voltage=12.1, temperature=34, current=-0.65, moving=True),
+        )
+        reads = [c for c in sdk.handler.calls if c[0].startswith("read")]
+        assert reads == [("read_block", 2, 56, 15)]
+
+
+def test_read_telemetry_failure_raises(sdk):
+    sdk.fail[("read_block", 3)] = (COMM_RX_TIMEOUT, 0)
+    with sdk.bus() as bus, pytest.raises(ServoError, match="read telemetry of servo 3"):
+        bus.read_telemetry(3)
+
+
+def test_read_telemetry_short_reply_raises(sdk, monkeypatch):
+    with sdk.bus() as bus:
+        monkeypatch.setattr(sdk.handler, "readTxRx", lambda *_a: ([0] * 4, COMM_SUCCESS, 0))
+        with pytest.raises(ServoError, match="got 4 bytes"):
+            bus.read_telemetry(1)
+
+
+class FakeSerial:
+    def fileno(self) -> int:
+        return 7
+
+
+class FakeFcntl:
+    LOCK_EX = 2
+    LOCK_NB = 4
+
+    def __init__(self, busy: bool) -> None:
+        self.busy = busy
+        self.calls: list[tuple[int, int]] = []
+
+    def flock(self, fd: int, operation: int) -> None:
+        self.calls.append((fd, operation))
+        if self.busy:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+
+
+def test_open_locks_the_port(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    lock = FakeFcntl(busy=False)
+    monkeypatch.setattr(bus_module, "fcntl", lock)
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with sdk.bus():
+        assert lock.calls == [(7, FakeFcntl.LOCK_EX | FakeFcntl.LOCK_NB)]
+
+
+def test_open_refuses_a_port_another_process_holds(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    monkeypatch.setattr(bus_module, "fcntl", FakeFcntl(busy=True))
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with pytest.raises(ServoError, match="already in use by another process"), sdk.bus():
+        pass
+    assert sdk.port.closed_count == 1
+
+
+def test_open_without_flock_skips_locking(sdk, monkeypatch):
+    from talos_servo import bus as bus_module
+
+    monkeypatch.setattr(bus_module, "fcntl", None)
+    monkeypatch.setattr(FakePort, "ser", FakeSerial(), raising=False)
+    with sdk.bus() as bus:
+        assert bus.ping(1) == 777
