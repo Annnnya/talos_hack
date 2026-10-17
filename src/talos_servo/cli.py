@@ -1,4 +1,4 @@
-"""`talos-servo` command line tool for bench-testing the servo bus."""
+"""`talos-servo`: the one command line tool for the robot, from bench tests to driving it."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from talos_servo.bus import (
     ServoBus,
     ServoError,
 )
-from talos_servo.defaults import DEFAULT_BRIDGE, DEFAULT_CONFIG, IMU_BUS_ENV_VAR, PORT_ENV_VAR
+from talos_servo.defaults import DEFAULT_CONFIG, IMU_BUS_ENV_VAR, PORT_ENV_VAR
 from talos_servo.imu import (
     ACCEL_RANGES,
     DEFAULT_ACCEL_RANGE,
@@ -44,37 +44,45 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"serial port, e.g. COM5 or /dev/ttyACM0 (default: ${PORT_ENV_VAR})",
     )
     port_opts.add_argument(
-        "--baud", type=int, default=DEFAULT_BAUDRATE, help="baud rate (default: %(default)s)"
+        "--baud",
+        type=int,
+        default=DEFAULT_BAUDRATE,
+        help="baud rate (default: %(default)s)",
     )
 
     bus_opts = argparse.ArgumentParser(add_help=False, parents=[port_opts])
     bus_opts.add_argument(
-        "--ids", type=parse_ids, default=[1], help='servo ids, e.g. "1,2,3" or "1-3" (default: 1)'
+        "--ids",
+        type=parse_ids,
+        default=[1],
+        help='servo ids, e.g. "1,2,3" or "1-3" (default: 1)',
     )
 
     motion_opts = argparse.ArgumentParser(add_help=False)
     motion_opts.add_argument(
-        "--acc", type=int, default=DEFAULT_ACCELERATION, help="acceleration (default: %(default)s)"
+        "--acc",
+        type=int,
+        default=DEFAULT_ACCELERATION,
+        help="acceleration (default: %(default)s)",
     )
 
     ros_opts = argparse.ArgumentParser(add_help=False)
     ros_opts.add_argument(
         "--ros",
         action="store_true",
-        help="go through the running ROS servo bridge instead of the serial port, so this can run "
+        help="go through the running ROS robot node instead of the serial port, so this can run "
         "next to it and the web UI (needs the pixi ros environment; --port is ignored)",
     )
     ros_opts.add_argument(
-        "--bridge",
-        default=DEFAULT_BRIDGE,
-        help="servo bridge namespace for --ros (default: %(default)s)",
-    )
-    ros_opts.add_argument(
-        "--config", default=DEFAULT_CONFIG, help="servo layout file (default: %(default)s)"
+        "--config",
+        default=DEFAULT_CONFIG,
+        help="robot config file (default: %(default)s)",
     )
 
     parser = argparse.ArgumentParser(prog="talos-servo", description=__doc__)
-    parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="debug logging"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("ports", help="list available serial ports")
@@ -92,7 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SPEED,
         help="steps/s, negative reverses (default: %(default)s)",
     )
-    spin.add_argument("--seconds", type=float, default=1.0, help="run time (default: %(default)s)")
+    spin.add_argument(
+        "--seconds",
+        type=float,
+        default=1.0,
+        help="run time (default: %(default)s)",
+    )
 
     monitor = sub.add_parser(
         "monitor",
@@ -100,13 +113,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="print position and speed, optionally while spinning",
     )
     monitor.add_argument(
-        "--speed", type=int, default=0, help="spin at this speed while monitoring (default: 0)"
+        "--speed",
+        type=int,
+        default=0,
+        help="spin at this speed while monitoring (default: 0)",
     )
     monitor.add_argument(
-        "--seconds", type=float, default=None, help="stop after this long (default: until Ctrl+C)"
+        "--seconds",
+        type=float,
+        default=None,
+        help="stop after this long (default: until Ctrl+C)",
     )
     monitor.add_argument(
-        "--interval", type=float, default=1.0, help="seconds between reads (default: %(default)s)"
+        "--interval",
+        type=float,
+        default=1.0,
+        help="seconds between reads (default: %(default)s)",
+    )
+
+    drive = sub.add_parser(
+        "drive",
+        parents=[port_opts, ros_opts],
+        help="drive the mecanum base with the keyboard (W/A/S/D, Q/E, space, X)",
+    )
+    drive.add_argument(
+        "--linear",
+        type=float,
+        default=None,
+        help="m/s (default: base.max_linear_speed)",
+    )
+    drive.add_argument(
+        "--angular",
+        type=float,
+        default=None,
+        help="rad/s (default: base.max_angular_speed)",
     )
 
     set_id = sub.add_parser(
@@ -114,22 +154,38 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[port_opts],
         help="permanently change a servo's id (refuses if the new id is already in use)",
     )
-    set_id.add_argument("--id", type=parse_id, required=True, help="current servo id")
-    set_id.add_argument("--new-id", type=parse_id, required=True, help="id to assign")
+    set_id.add_argument(
+        "--id", type=parse_id, required=True, help="current servo id"
+    )
+    set_id.add_argument(
+        "--new-id", type=parse_id, required=True, help="id to assign"
+    )
 
     web = sub.add_parser(
         "web",
         parents=[port_opts, ros_opts],
         help="serve the browser control UI (needs the web extra)",
     )
-    web.add_argument("--mock", action="store_true", help="simulate the servos, no serial port")
     web.add_argument(
-        "--host", default="0.0.0.0", help="address to listen on (default: %(default)s)"
+        "--host",
+        default="0.0.0.0",
+        help="address to listen on (default: %(default)s)",
     )
-    web.add_argument("--http-port", type=int, default=8000, help="http port (default: %(default)s)")
-    web.add_argument("--ui-dir", default=DEFAULT_UI_DIR, help="built web UI (default: %(default)s)")
+    web.add_argument(
+        "--http-port",
+        type=int,
+        default=8000,
+        help="http port (default: %(default)s)",
+    )
+    web.add_argument(
+        "--ui-dir",
+        default=DEFAULT_UI_DIR,
+        help="built web UI (default: %(default)s)",
+    )
 
-    imu = sub.add_parser("imu", help="stream MPU6050 accel, gyro and temperature over i2c")
+    imu = sub.add_parser(
+        "imu", help="stream MPU6050 accel, gyro and temperature over i2c"
+    )
     imu.add_argument(
         "--i2c-bus",
         type=int,
@@ -157,13 +213,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="gyro full scale in deg/s (default: %(default)s)",
     )
     imu.add_argument(
-        "--interval", type=float, default=0.1, help="seconds between reads (default: %(default)s)"
+        "--interval",
+        type=float,
+        default=0.1,
+        help="seconds between reads (default: %(default)s)",
     )
     imu.add_argument(
-        "--seconds", type=float, default=None, help="stop after this long (default: until Ctrl+C)"
+        "--seconds",
+        type=float,
+        default=None,
+        help="stop after this long (default: until Ctrl+C)",
     )
     imu.add_argument(
-        "--calibrate", action="store_true", help="zero the gyro first (keep the sensor still)"
+        "--calibrate",
+        action="store_true",
+        help="zero the gyro first (keep the sensor still)",
     )
     return parser
 
@@ -199,33 +263,53 @@ def _ros_missing(exc: ImportError, example: str) -> int:
     return 1
 
 
-def _over_ros(args: argparse.Namespace, run: Callable[[Any, Any], None]) -> int:
-    """Run `run(cli_commands, backend)` for a spin or monitor command with --ros."""
+def _over_ros(
+    args: argparse.Namespace, run: Callable[[Any, Any, Any], None]
+) -> int:
+    """Run `run(cli_commands, backend, config)` for a command with --ros."""
     try:
         from talos_servo.config import ConfigError, load_config
-        from talos_servo.controller import CommandError
+        from talos_servo.robot import CommandError
         from talos_servo.ros import cli_commands
     except ImportError as exc:
-        return _ros_missing(exc, f"pixi run -e ros talos-servo {args.command} --ros ...")
+        return _ros_missing(
+            exc, f"pixi run -e ros talos-servo {args.command} --ros ..."
+        )
     try:
         config = load_config(args.config)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    if args.acc != DEFAULT_ACCELERATION:
-        print("note: --acc is ignored with --ros, the servo bridge has no acceleration input")
+    if getattr(args, "acc", DEFAULT_ACCELERATION) != DEFAULT_ACCELERATION:
+        print(
+            "note: --acc is ignored with --ros, the robot node has no acceleration input"
+        )
     try:
-        run(cli_commands, cli_commands.RosBackend(config, bridge=args.bridge))
+        run(cli_commands, cli_commands.RosBackend(config), config)
     except CommandError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
 
 
+def _joints_for(ids: Sequence[int], config: Any) -> list[str]:
+    """Joint names for servo ids, so `--ids` means the same with and without --ros."""
+    names = {j.id: j.name for j in config.enabled_joints}
+    missing = [i for i in ids if i not in names]
+    if missing:
+        raise ServoError(
+            f"servo ids {missing} are not enabled joints in the config"
+        )
+    return [names[i] for i in ids]
+
+
 def cmd_spin(args: argparse.Namespace) -> int:
     if args.ros:
         return _over_ros(
-            args, lambda m, backend: m.spin_over_ros(backend, args.ids, args.speed, args.seconds)
+            args,
+            lambda m, backend, config: m.spin_over_ros(
+                backend, _joints_for(args.ids, config), args.speed, args.seconds
+            ),
         )
     with ServoBus(args.port, args.baud) as bus:
         bus.enable_wheel_mode(args.ids)
@@ -244,8 +328,12 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     if args.ros:
         return _over_ros(
             args,
-            lambda m, backend: m.monitor_over_ros(
-                backend, args.ids, args.speed, args.seconds, args.interval
+            lambda m, backend, config: m.monitor_over_ros(
+                backend,
+                _joints_for(args.ids, config),
+                args.speed,
+                args.seconds,
+                args.interval,
             ),
         )
     with ServoBus(args.port, args.baud) as bus:
@@ -253,12 +341,57 @@ def cmd_monitor(args: argparse.Namespace) -> int:
             bus.enable_wheel_mode(args.ids)
             for servo_id in args.ids:
                 bus.set_speed(servo_id, args.speed, args.acc)
-        deadline = None if args.seconds is None else time.monotonic() + args.seconds
+        deadline = (
+            None if args.seconds is None else time.monotonic() + args.seconds
+        )
         while deadline is None or time.monotonic() < deadline:
             for servo_id in args.ids:
                 position, speed = bus.read_position_speed(servo_id)
                 print(f"servo {servo_id}: position={position} speed={speed}")
             time.sleep(args.interval)
+    return 0
+
+
+def cmd_drive(args: argparse.Namespace) -> int:
+    from talos_servo import teleop
+    from talos_servo.config import load_config
+
+    config = load_config(args.config)
+    if config.base is None:
+        print(
+            "error: the config has no base section, so the robot cannot drive",
+            file=sys.stderr,
+        )
+        return 1
+    linear = (
+        config.base.max_linear_speed if args.linear is None else args.linear
+    )
+    angular = (
+        config.base.max_angular_speed if args.angular is None else args.angular
+    )
+    with teleop.terminal_keys() as read_key:
+        print(teleop.HELP)
+        if args.ros:
+            return _over_ros(
+                args,
+                lambda m, backend, _config: m.drive_over_ros(
+                    backend, read_key, linear=linear, angular=angular
+                ),
+            )
+        from talos_servo.robot import SOURCE_CLI, Robot
+
+        robot = Robot(ServoBus(args.port, args.baud), config)
+        robot.open()
+        try:
+            teleop.run(
+                lambda vx, vy, wz: robot.drive(vx, vy, wz, source=SOURCE_CLI),
+                read_key,
+                linear=linear,
+                angular=angular,
+                tick=robot.tick,
+            )
+        finally:
+            robot.close()
     return 0
 
 
@@ -289,12 +422,10 @@ def cmd_web(args: argparse.Namespace) -> int:
             config_path=args.config,
             port=args.port,
             baudrate=args.baud,
-            mock=args.mock,
             host=args.host,
             http_port=args.http_port,
             ui_dir=args.ui_dir,
             ros=args.ros,
-            bridge=args.bridge,
         )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -313,7 +444,9 @@ def cmd_imu(args: argparse.Namespace) -> int:
             print("calibrating gyro, keep the sensor still...")
             ox, oy, oz = imu.calibrate_gyro()
             print(f"gyro offset [dps] {ox:+.2f} {oy:+.2f} {oz:+.2f}")
-        deadline = None if args.seconds is None else time.monotonic() + args.seconds
+        deadline = (
+            None if args.seconds is None else time.monotonic() + args.seconds
+        )
         while deadline is None or time.monotonic() < deadline:
             sample = imu.read()
             ax, ay, az = sample.accel
@@ -331,6 +464,7 @@ COMMANDS = {
     "ping": cmd_ping,
     "spin": cmd_spin,
     "monitor": cmd_monitor,
+    "drive": cmd_drive,
     "set-id": cmd_set_id,
     "web": cmd_web,
     "imu": cmd_imu,
@@ -344,23 +478,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    without_port = getattr(args, "ros", False) or (args.command == "web" and args.mock)
-    if args.command == "web" and args.mock and args.ros:
-        parser.error(
-            "--mock and --ros do not mix: for simulated servos over ROS, run the bridge "
-            "with `pixi run -e ros servo-node-mock`"
-        )
-    needs_port = args.command not in ("ports", "imu") and not without_port
+    needs_port = args.command not in ("ports", "imu") and not getattr(
+        args, "ros", False
+    )
     if needs_port and not args.port:
-        parser.error(f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)")
+        parser.error(
+            f"no serial port: pass --port or set {PORT_ENV_VAR} (see `talos-servo ports`)"
+        )
     try:
         return COMMANDS[args.command](args)
-    except (ServoError, ImuError) as exc:
+    except (ServoError, ImuError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print(
-            "interrupted" if args.command == "imu" else "interrupted, servos stopped",
+            "interrupted"
+            if args.command == "imu"
+            else "interrupted, servos stopped",
             file=sys.stderr,
         )
         return EXIT_INTERRUPTED
