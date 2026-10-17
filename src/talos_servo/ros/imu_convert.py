@@ -36,8 +36,12 @@ def dps_to_radps(gyro: Vector) -> Vector:
 def diagonal_covariance(variance: float) -> list[float]:
     """Row-major 3x3 covariance with the same variance on every axis and no cross terms."""
     if not math.isfinite(variance) or variance < 0:
-        raise ValueError(f"variance must be a finite number >= 0, got {variance}")
-    return [variance if row == col else 0.0 for row in range(3) for col in range(3)]
+        raise ValueError(
+            f"variance must be a finite number >= 0, got {variance}"
+        )
+    return [
+        variance if row == col else 0.0 for row in range(3) for col in range(3)
+    ]
 
 
 def not_provided_covariance() -> list[float]:

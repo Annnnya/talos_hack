@@ -27,7 +27,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Imu, Temperature
 
-from talos_servo.defaults import IMU_BUS_ENV_VAR
+from talos_servo.defaults import IMU_BUS_ENV_VAR, QUEUE_DEPTH
 from talos_servo.imu import (
     ACCEL_RANGES,
     DEFAULT_ACCEL_RANGE,
@@ -53,7 +53,6 @@ from talos_servo.ros.imu_convert import (
 )
 
 NODE_NAME = "imu"
-QUEUE_DEPTH = 10
 # The sensor is configured for 100 Hz output, so polling faster only repeats samples.
 DEFAULT_RATE_HZ = 100.0
 DEFAULT_TEMPERATURE_HZ = 1.0
@@ -69,48 +68,68 @@ def _vector3(v: Vector) -> Vector3:
 
 
 class ImuNode(Node):
-    def __init__(self, imu: Mpu6050, *, node_name: str = NODE_NAME, **node_kwargs: Any) -> None:
+    def __init__(
+        self, imu: Mpu6050, *, node_name: str = NODE_NAME, **node_kwargs: Any
+    ) -> None:
         super().__init__(node_name, **node_kwargs)
         self.imu = imu
-        rate_hz = float(self.declare_parameter("rate_hz", DEFAULT_RATE_HZ).value)
-        temperature_hz = float(
-            self.declare_parameter("temperature_hz", DEFAULT_TEMPERATURE_HZ).value
+        rate_hz = float(
+            self.declare_parameter("rate_hz", DEFAULT_RATE_HZ).value
         )
-        self.frame_id = str(self.declare_parameter("frame_id", DEFAULT_FRAME_ID).value)
+        temperature_hz = float(
+            self.declare_parameter(
+                "temperature_hz", DEFAULT_TEMPERATURE_HZ
+            ).value
+        )
+        self.frame_id = str(
+            self.declare_parameter("frame_id", DEFAULT_FRAME_ID).value
+        )
         self.max_read_failures = int(
-            self.declare_parameter("max_read_failures", DEFAULT_MAX_READ_FAILURES).value
+            self.declare_parameter(
+                "max_read_failures", DEFAULT_MAX_READ_FAILURES
+            ).value
         )
         self.angular_velocity_covariance = diagonal_covariance(
             float(
                 self.declare_parameter(
-                    "angular_velocity_variance", DEFAULT_ANGULAR_VELOCITY_VARIANCE
+                    "angular_velocity_variance",
+                    DEFAULT_ANGULAR_VELOCITY_VARIANCE,
                 ).value
             )
         )
         self.linear_acceleration_covariance = diagonal_covariance(
             float(
                 self.declare_parameter(
-                    "linear_acceleration_variance", DEFAULT_LINEAR_ACCELERATION_VARIANCE
+                    "linear_acceleration_variance",
+                    DEFAULT_LINEAR_ACCELERATION_VARIANCE,
                 ).value
             )
         )
         if rate_hz <= 0 or temperature_hz <= 0:
             raise ValueError("rate_hz and temperature_hz must be > 0")
         if self.max_read_failures < 1:
-            raise ValueError(f"max_read_failures must be >= 1, got {self.max_read_failures}")
+            raise ValueError(
+                f"max_read_failures must be >= 1, got {self.max_read_failures}"
+            )
 
         if self.declare_parameter("calibrate", True).value:
             self.get_logger().info("calibrating gyro, keep the robot still")
             offset = imu.calibrate_gyro()
-            self.get_logger().info("gyro offset deg/s: " + " ".join(f"{v:+.3f}" for v in offset))
+            self.get_logger().info(
+                "gyro offset deg/s: " + " ".join(f"{v:+.3f}" for v in offset)
+            )
 
         self.consecutive_failures = 0
         self.last_temperature: float | None = None
         self.imu_pub = self.create_publisher(Imu, "imu/data_raw", QUEUE_DEPTH)
-        self.temperature_pub = self.create_publisher(Temperature, "imu/temperature", QUEUE_DEPTH)
+        self.temperature_pub = self.create_publisher(
+            Temperature, "imu/temperature", QUEUE_DEPTH
+        )
         self.create_timer(1.0 / rate_hz, self.tick)
         self.create_timer(1.0 / temperature_hz, self.publish_temperature)
-        self.get_logger().info(f"publishing imu/data_raw at {rate_hz} Hz in frame {self.frame_id}")
+        self.get_logger().info(
+            f"publishing imu/data_raw at {rate_hz} Hz in frame {self.frame_id}"
+        )
 
     def tick(self) -> None:
         """Read one sample and publish it. Raises ImuError after too many failed reads in a row."""
@@ -122,7 +141,9 @@ class ImuNode(Node):
                 raise ImuError(
                     f"{self.consecutive_failures} imu reads failed in a row, last: {exc}"
                 ) from exc
-            self.get_logger().warning(f"imu read failed: {exc}", throttle_duration_sec=1.0)
+            self.get_logger().warning(
+                f"imu read failed: {exc}", throttle_duration_sec=1.0
+            )
             return
         self.consecutive_failures = 0
         self.last_temperature = sample.temperature
@@ -150,7 +171,9 @@ class ImuNode(Node):
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
-    parser = argparse.ArgumentParser(prog="talos-imu-ros", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="talos-imu-ros", description=__doc__.splitlines()[0]
+    )
     parser.add_argument(
         "--i2c-bus",
         type=int,
