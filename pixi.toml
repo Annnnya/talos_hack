@@ -61,6 +61,8 @@ ros-jazzy-diagnostic-msgs = "*"
 [feature.ros.tasks]
 servo-node = "talos-servo-ros"
 servo-node-mock = "talos-servo-ros --mock"
+# Web UI through the running servo bridge, so it can share the robot with other ROS nodes
+web-ros = "talos-servo web --ros"
 
 [environments]
 ros = ["ros"]

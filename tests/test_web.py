@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -252,3 +254,26 @@ def test_web_command_mock_runs_without_port(monkeypatch):
     assert cli.main(["web", "--mock"]) == 0
     assert seen["mock"] is True
     assert seen["port"] is None
+
+
+def test_web_command_ros_runs_without_port(monkeypatch):
+    seen = {}
+    monkeypatch.delenv(cli.PORT_ENV_VAR, raising=False)
+    monkeypatch.setitem(sys.modules, "talos_servo.ros.web_backend", types.ModuleType("stub"))
+    monkeypatch.setattr("talos_servo.web.server.serve", lambda **kw: seen.update(kw))
+    assert cli.main(["web", "--ros", "--bridge", "/arm_bridge"]) == 0
+    assert seen["ros"] is True
+    assert seen["bridge"] == "/arm_bridge"
+
+
+def test_web_command_ros_without_ros_installed_explains(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "talos_servo.ros.web_backend", None)
+    assert cli.main(["web", "--ros"]) == 1
+    assert "pixi run -e ros" in capsys.readouterr().err
+
+
+def test_web_command_rejects_mock_with_ros(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["web", "--ros", "--mock"])
+    assert exc.value.code == 2
+    assert "servo-node-mock" in capsys.readouterr().err
