@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, Limits, ServerMessage, ServoState } from "./protocol";
+import type { ClientMessage, Limits, ServerMessage, ServoSettings, ServoState } from "./protocol";
 
 export type ConnStatus = "connecting" | "connected" | "disconnected";
 
@@ -18,6 +18,9 @@ export function useBridge() {
   const [servos, setServos] = useState<ServoState[]>([]);
   const [limits, setLimits] = useState<Limits>({ pos_max: 4095, speed_max: 3000, acc_max: 254 });
   const [mock, setMock] = useState(false);
+  const [ros, setRos] = useState(false);
+  const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
+  const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -32,10 +35,14 @@ export function useBridge() {
       ws.onopen = () => setStatus("connected");
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as ServerMessage;
-        if (msg.type === "state") {
+        if (msg.type === "hello") {
+          setClientId(msg.client_id);
+        } else if (msg.type === "state") {
           setServos(msg.servos);
           setLimits(msg.limits);
           setMock(msg.mock);
+          setRos(msg.ros);
+          setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
         }
@@ -61,7 +68,18 @@ export function useBridge() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
 
-  return { status, servos, limits, mock, lastError, clearError: () => setLastError(null), send };
+  return {
+    status,
+    servos,
+    limits,
+    mock,
+    ros,
+    settings,
+    clientId,
+    lastError,
+    clearError: () => setLastError(null),
+    send,
+  };
 }
 
 /** Rate-limit a function (leading + trailing call), used while dragging sliders. */

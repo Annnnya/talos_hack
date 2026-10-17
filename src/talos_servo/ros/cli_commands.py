@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 
 from talos_servo.bus import ServoError
 from talos_servo.ros.web_backend import RosBackend
-from talos_servo.web.controller import WHEEL
+from talos_servo.web.controller import SOURCE_CLI, WHEEL
 
 Output = Callable[[str], None]
 # Lets the last stop command leave before the node goes away. If it is lost anyway, the bridge's
@@ -74,7 +74,7 @@ def _start_spinning(backend: RosBackend, ids: Sequence[int], speed: int, out: Ou
         out(f"note: speed limited to {limit} by max_speed in the config")
     for servo_id in ids:
         backend.set_mode(servo_id, WHEEL)
-        backend.spin(servo_id, speed)
+        backend.spin(servo_id, speed, source=SOURCE_CLI)
 
 
 def _hold(
@@ -116,7 +116,7 @@ def _print_states(backend: RosBackend, ids: Sequence[int], out: Output) -> None:
 def _stop_and_release(backend: RosBackend, ids: Sequence[int]) -> None:
     try:
         for servo_id in ids:
-            backend.stop(servo_id)
+            backend.stop(servo_id, source=SOURCE_CLI)
         time.sleep(STOP_FLUSH_TIME)
     finally:
         backend.release()

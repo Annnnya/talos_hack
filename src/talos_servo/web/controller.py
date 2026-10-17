@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -21,6 +23,15 @@ log = logging.getLogger(__name__)
 POSITION = "position"
 WHEEL = "wheel"
 MODES = (POSITION, WHEEL)
+
+# Who sent a servo its last move, spin or stop. Shown in the web UI next to the sliders.
+SOURCE_WEB = "web"  # a browser; the client id tells browsers apart
+SOURCE_CLI = "cli"  # talos-servo spin/monitor --ros
+SOURCE_ROS = "ros"  # any other ROS node
+SOURCE_BRIDGE = "bridge"  # the servo bridge itself, e.g. its command timeout stopping a wheel
+SOURCES = (SOURCE_WEB, SOURCE_CLI, SOURCE_ROS, SOURCE_BRIDGE)
+# Ages are shown to people, so tenths of a second are plenty.
+AGE_DECIMALS = 1
 
 # Load, voltage, temperature and torque change slowly; read them every Nth poll only.
 SLOW_POLL_EVERY = 10
@@ -49,6 +60,10 @@ class ServoState:
     target: int | None = None
     target_speed: int = 0
     error: str | None = None
+    command_source: str | None = None
+    command_client: str | None = None
+    # Monotonic time of the last command, local to this process; never sent as is.
+    command_at: float | None = None
 
     @classmethod
     def from_config(cls, cfg: ServoConfig) -> ServoState:
@@ -59,6 +74,24 @@ def _clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+def public_state(s: ServoState, now: float) -> dict[str, Any]:
+    """Servo state as sent to browsers: `command_*` becomes `last_command` with an age."""
+    data = asdict(s)
+    source = data.pop("command_source")
+    client = data.pop("command_client")
+    at = data.pop("command_at")
+    data["last_command"] = (
+        None
+        if source is None or at is None
+        else {"source": source, "client": client, "age": round(max(0.0, now - at), AGE_DECIMALS)}
+    )
+    return data
+
+
+def record_command(s: ServoState, source: str, client: str | None, now: float) -> None:
+    s.command_source, s.command_client, s.command_at = source, client, now
+
+
 class RobotController:
     """Owns the bus. Every bus access holds one lock because the SDK is not thread-safe.
 
@@ -66,8 +99,15 @@ class RobotController:
     so one unplugged servo never stops telemetry for the others.
     """
 
-    def __init__(self, bus: ServoBus, config: WebConfig) -> None:
+    def __init__(
+        self,
+        bus: ServoBus,
+        config: WebConfig,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.bus = bus
+        self.clock = clock
         self.config = config
         self.servos = {cfg.id: ServoState.from_config(cfg) for cfg in config.servos}
         self._lock = threading.Lock()
@@ -88,7 +128,8 @@ class RobotController:
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [asdict(s) for s in self.servos.values()]
+            now = self.clock()
+            return [public_state(s, now) for s in self.servos.values()]
 
     # --- telemetry -------------------------------------------------------
     def poll(self) -> None:
@@ -147,7 +188,14 @@ class RobotController:
             self._command(s, apply)
 
     def move(
-        self, servo_id: int, position: int, speed: int, acceleration: int = DEFAULT_ACCELERATION
+        self,
+        servo_id: int,
+        position: int,
+        speed: int,
+        acceleration: int = DEFAULT_ACCELERATION,
+        *,
+        source: str = SOURCE_WEB,
+        client: str | None = None,
     ) -> None:
         with self._lock:
             s = self._get(servo_id)
@@ -161,10 +209,19 @@ class RobotController:
                 self.bus.move_to(s.id, target, speed, acceleration)
                 s.target = target
                 s.torque = True  # writing a goal turns torque on
+                record_command(s, source, client, self.clock())
 
             self._command(s, apply)
 
-    def spin(self, servo_id: int, speed: int, acceleration: int = DEFAULT_ACCELERATION) -> None:
+    def spin(
+        self,
+        servo_id: int,
+        speed: int,
+        acceleration: int = DEFAULT_ACCELERATION,
+        *,
+        source: str = SOURCE_WEB,
+        client: str | None = None,
+    ) -> None:
         with self._lock:
             s = self._get(servo_id)
             if s.mode != WHEEL:
@@ -177,10 +234,11 @@ class RobotController:
                 s.target_speed = speed
                 if speed:
                     s.torque = True
+                record_command(s, source, client, self.clock())
 
             self._command(s, apply)
 
-    def stop(self, servo_id: int) -> None:
+    def stop(self, servo_id: int, *, source: str = SOURCE_WEB, client: str | None = None) -> None:
         with self._lock:
             s = self._get(servo_id)
             if s.mode == WHEEL:
@@ -188,15 +246,16 @@ class RobotController:
                 def apply() -> None:
                     self.bus.stop(s.id)
                     s.target_speed = 0
+                    record_command(s, source, client, self.clock())
 
                 self._command(s, apply)
 
-    def stop_all(self) -> None:
+    def stop_all(self, *, source: str = SOURCE_WEB, client: str | None = None) -> None:
         with self._lock:
-            self._stop_wheels()
+            self._stop_wheels(source, client)
 
     # --- helpers ---------------------------------------------------------
-    def _stop_wheels(self) -> None:
+    def _stop_wheels(self, source: str | None = None, client: str | None = None) -> None:
         """Best effort: stop every wheel-mode servo, keep going if one fails."""
         for s in self.servos.values():
             if s.mode != WHEEL:
@@ -204,6 +263,8 @@ class RobotController:
             try:
                 self.bus.stop(s.id)
                 s.target_speed = 0
+                if source is not None:
+                    record_command(s, source, client, self.clock())
             except ServoError as exc:
                 log.warning("could not stop servo %s: %s", s.id, exc)
                 s.error = str(exc)

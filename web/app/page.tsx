@@ -12,7 +12,8 @@ const STATUS_STYLE = {
 };
 
 export default function Home() {
-  const { status, servos, limits, mock, lastError, clearError, send } = useBridge();
+  const { status, servos, limits, mock, ros, settings, clientId, lastError, clearError, send } =
+    useBridge();
   const stopAll = useCallback(() => send({ type: "stop_all" }), [send]);
   const online = servos.filter((s) => s.online).length;
 
@@ -28,6 +29,14 @@ export default function Home() {
             <span className="text-black/60 dark:text-white/60">
               {online}/{servos.length} servos online
             </span>
+            {ros && (
+              <span
+                className="rounded-full bg-teal-500/15 px-2.5 py-0.5 font-medium text-teal-700 dark:text-teal-300"
+                title="Commands go through the ROS servo bridge, shared with the CLI and other ROS nodes"
+              >
+                Via ROS bridge
+              </span>
+            )}
             {mock && (
               <span className="rounded-full bg-purple-500/15 px-2.5 py-0.5 font-medium text-purple-600 dark:text-purple-400">
                 Simulation
@@ -52,7 +61,15 @@ export default function Home() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {servos.map((s) => (
-            <ServoCard key={s.id} servo={s} limits={limits} send={send} />
+            <ServoCard
+              key={s.id}
+              servo={s}
+              limits={limits}
+              settings={settings[String(s.id)]}
+              clientId={clientId}
+              ros={ros}
+              send={send}
+            />
           ))}
         </div>
       )}
