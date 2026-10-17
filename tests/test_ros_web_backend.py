@@ -1,4 +1,4 @@
-"""Web backend talking to a real servo bridge node on the simulated bus, all in one process."""
+"""Web backend and CLI --ros commands against a real servo bridge node on the simulated bus."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.ros import cli_commands  # noqa: E402
 from talos_servo.ros.servo_bridge_node import ServoBridgeNode  # noqa: E402
 from talos_servo.ros.web_backend import STATUS_STALE_AFTER, RosBackend  # noqa: E402
 from talos_servo.web.config import parse_config  # noqa: E402
@@ -203,3 +204,62 @@ def test_silent_bridge_marks_servos_offline():
     s = backend_state(backend, BASE)
     assert not s["online"]
     assert "no status from servo bridge" in s["error"]
+
+
+# --- talos-servo spin --ros / monitor --ros ---------------------------------------------
+
+
+def run_in_thread(fn, *args, **kwargs) -> threading.Thread:
+    thread = threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_cli_spin_over_ros_spins_then_stops(bridge, controller):
+    lines: list[str] = []
+    thread = run_in_thread(
+        cli_commands.spin_over_ros, make_backend(), [WHEEL_ID], 300, 1.0, out=lines.append
+    )
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 300)
+    assert controller.servos[WHEEL_ID].mode == WHEEL
+    thread.join(5.0)
+    assert controller.servos[WHEEL_ID].target_speed == 0
+    assert lines[-1] == "stopped"
+
+
+def test_cli_monitor_over_ros_keeps_spinning_with_slow_prints(bridge, controller):
+    lines: list[str] = []
+    # Print interval of 1 s is twice the bridge's command timeout.
+    thread = run_in_thread(
+        cli_commands.monitor_over_ros,
+        make_backend(),
+        [WHEEL_ID],
+        200,
+        1.5,
+        1.0,
+        out=lines.append,
+    )
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 200)
+    time.sleep(1.0)
+    assert controller.servos[WHEEL_ID].target_speed == 200
+    thread.join(5.0)
+    assert controller.servos[WHEEL_ID].target_speed == 0
+    assert any(line.startswith(f"servo {WHEEL_ID}: position=") for line in lines)
+
+
+def test_cli_spin_over_ros_interrupted_still_stops(bridge, controller, monkeypatch):
+    def interrupt(*_args, **_kwargs):
+        wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 300)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_commands, "_hold", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        cli_commands.spin_over_ros(make_backend(), [WHEEL_ID], 300, 10.0, out=lambda _l: None)
+    wait_for(lambda: controller.servos[WHEEL_ID].target_speed == 0)
+
+
+def test_cli_over_ros_rejects_unconfigured_ids_before_connecting():
+    backend = make_backend()
+    with pytest.raises(ServoError, match=r"servo ids \[7\] are not in the config"):
+        cli_commands.spin_over_ros(backend, [7], 100, 1.0)
+    assert backend._node is None
