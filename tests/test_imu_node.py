@@ -42,7 +42,9 @@ def imu(i2c):
     sensor = Mpu6050(bus_factory=i2c)
     sensor.open()
     # Flat and still: +1 g on z, rotating +1 deg/s about x and -2 deg/s about z.
-    i2c.bus.set_words(ACCEL_XOUT_H, [0, 0, ONE_G, TEMP_RAW_25C, ONE_DPS, 0, -2 * ONE_DPS])
+    i2c.bus.set_words(
+        ACCEL_XOUT_H, [0, 0, ONE_G, TEMP_RAW_25C, ONE_DPS, 0, -2 * ONE_DPS]
+    )
     yield sensor
     sensor.close()
 
@@ -82,9 +84,13 @@ def test_imu_msg_has_no_orientation_and_diagonal_covariances(node, monkeypatch):
     node.tick()
     (msg,) = sent
     assert msg.orientation_covariance[0] == -1.0
-    assert msg.angular_velocity_covariance[0] == DEFAULT_ANGULAR_VELOCITY_VARIANCE
+    assert (
+        msg.angular_velocity_covariance[0] == DEFAULT_ANGULAR_VELOCITY_VARIANCE
+    )
     assert msg.angular_velocity_covariance[1] == 0.0
-    assert msg.angular_velocity_covariance[4] == DEFAULT_ANGULAR_VELOCITY_VARIANCE
+    assert (
+        msg.angular_velocity_covariance[4] == DEFAULT_ANGULAR_VELOCITY_VARIANCE
+    )
 
 
 def test_topics_are_relative(node):
@@ -148,7 +154,9 @@ def test_bad_variance_parameter_is_rejected(imu):
 
 def test_parse_args_passes_ros_args_through(monkeypatch):
     monkeypatch.setenv("TALOS_IMU_BUS", "3")
-    args, ros_args = parse_args(["--address", "0x69", "--ros-args", "-p", "rate_hz:=50.0"])
+    args, ros_args = parse_args(
+        ["--address", "0x69", "--ros-args", "-p", "rate_hz:=50.0"]
+    )
     assert args.i2c_bus == 3
     assert args.address == 0x69
     assert ros_args == ["--ros-args", "-p", "rate_hz:=50.0"]

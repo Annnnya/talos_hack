@@ -86,7 +86,9 @@ def _default_bus_factory(bus_number: int) -> Any:
     try:
         from smbus2 import SMBus
     except ImportError as exc:
-        raise ImuError("the imu needs the imu extra (smbus2 missing): uv sync --extra imu") from exc
+        raise ImuError(
+            "the imu needs the imu extra (smbus2 missing): uv sync --extra imu"
+        ) from exc
     return SMBus(bus_number)
 
 
@@ -117,7 +119,9 @@ class Mpu6050:
                 f"accel range must be one of {sorted(ACCEL_RANGES)}, got {accel_range}"
             )
         if gyro_range not in GYRO_RANGES:
-            raise ValueError(f"gyro range must be one of {sorted(GYRO_RANGES)}, got {gyro_range}")
+            raise ValueError(
+                f"gyro range must be one of {sorted(GYRO_RANGES)}, got {gyro_range}"
+            )
         if not 0 <= dlpf <= MAX_DLPF:
             raise ValueError(f"dlpf must be within 0..{MAX_DLPF}, got {dlpf}")
         self.bus_number = bus_number
@@ -141,8 +145,14 @@ class Mpu6050:
             self._write(PWR_MGMT_1, PWR_CLOCK_PLL_GYRO_X, "wake sensor")
             self._write(CONFIG, self.dlpf, "set low-pass filter")
             self._write(SMPLRT_DIV, DEFAULT_SAMPLE_RATE_DIV, "set sample rate")
-            self._write(GYRO_CONFIG, GYRO_RANGES[self.gyro_range][0], "set gyro range")
-            self._write(ACCEL_CONFIG, ACCEL_RANGES[self.accel_range][0], "set accel range")
+            self._write(
+                GYRO_CONFIG, GYRO_RANGES[self.gyro_range][0], "set gyro range"
+            )
+            self._write(
+                ACCEL_CONFIG,
+                ACCEL_RANGES[self.accel_range][0],
+                "set accel range",
+            )
         except BaseException:
             self._close_bus()
             raise
@@ -178,7 +188,8 @@ class Mpu6050:
                 f"read sample failed: got {len(data)} bytes, expected {SAMPLE_BLOCK_LEN}"
             )
         ax, ay, az, temp, gx, gy, gz = (
-            to_signed16(data[i], data[i + 1]) for i in range(0, SAMPLE_BLOCK_LEN, 2)
+            to_signed16(data[i], data[i + 1])
+            for i in range(0, SAMPLE_BLOCK_LEN, 2)
         )
         return ax, ay, az, temp, gx, gy, gz
 
@@ -189,7 +200,11 @@ class Mpu6050:
         ox, oy, oz = self.gyro_offset
         return ImuSample(
             accel=(ax / accel_scale, ay / accel_scale, az / accel_scale),
-            gyro=(gx / gyro_scale - ox, gy / gyro_scale - oy, gz / gyro_scale - oz),
+            gyro=(
+                gx / gyro_scale - ox,
+                gy / gyro_scale - oy,
+                gz / gyro_scale - oz,
+            ),
             temperature=temp / TEMP_LSB_PER_C + TEMP_OFFSET_C,
         )
 
@@ -221,9 +236,14 @@ class Mpu6050:
         if who == WHO_AM_I_MPU6050:
             return
         if who in WHO_AM_I_COMPATIBLE:
-            log.warning("WHO_AM_I is 0x%02x, not 0x68: treating it as an MPU6050 compatible", who)
+            log.warning(
+                "WHO_AM_I is 0x%02x, not 0x68: treating it as an MPU6050 compatible",
+                who,
+            )
             return
-        raise ImuError(f"device at 0x{self.address:02x} is not an MPU6050 (WHO_AM_I = 0x{who:02x})")
+        raise ImuError(
+            f"device at 0x{self.address:02x} is not an MPU6050 (WHO_AM_I = 0x{who:02x})"
+        )
 
     def _require_open(self) -> Any:
         if self._bus is None:
@@ -235,21 +255,29 @@ class Mpu6050:
         try:
             return bus.read_byte_data(self.address, register)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
-    def _read_block(self, register: int, length: int, operation: str) -> list[int]:
+    def _read_block(
+        self, register: int, length: int, operation: str
+    ) -> list[int]:
         bus = self._require_open()
         try:
             return bus.read_i2c_block_data(self.address, register, length)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
     def _write(self, register: int, value: int, operation: str) -> None:
         bus = self._require_open()
         try:
             bus.write_byte_data(self.address, register, value)
         except OSError as exc:
-            raise ImuError(f"{operation} failed at 0x{self.address:02x}: {exc}") from exc
+            raise ImuError(
+                f"{operation} failed at 0x{self.address:02x}: {exc}"
+            ) from exc
 
     def _close_bus(self) -> None:
         bus, self._bus = self._bus, None
