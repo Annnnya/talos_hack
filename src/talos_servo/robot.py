@@ -174,6 +174,8 @@ class Robot:
         }
         self._ticks = 0
         self._next_read = 0
+        # Last wheel write error, so a stuck fault logs once, not every tick.
+        self._speed_error: str | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -394,9 +396,15 @@ class Robot:
         try:
             self.bus.set_speeds(ids, ramps)
         except ServoError as exc:
-            log.warning("wheel speed write failed: %s", exc)
+            if str(exc) != self._speed_error:
+                log.warning("wheel speed write failed: %s", exc)
+                self._speed_error = str(exc)
             for n in names:
                 self.joints[n].error = str(exc)
+            return
+        if self._speed_error is not None:
+            log.info("wheel speed writes work again")
+            self._speed_error = None
 
     def _read_next(self) -> None:
         """Read one joint, round robin, skipping offline joints except on retry

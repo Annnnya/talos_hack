@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -107,7 +108,7 @@ class ServoBus:
         self.port_name = port
         self.baudrate = baudrate
         self._port = port_factory(port)
-        self._handler = handler_factory(self._port)
+        self._handler = _GuardedSdk(handler_factory(self._port), self._port)
         self._moving: set[int] = set()
         self._is_open = False
 
@@ -122,7 +123,6 @@ class ServoBus:
             ) from exc
         if not opened:
             raise ServoError(f"could not open serial port {self.port_name}")
-        self._lock_port()
         self._is_open = True
         try:
             baud_ok = self._port.setBaudRate(self.baudrate)
@@ -136,6 +136,9 @@ class ServoBus:
             raise ServoError(
                 f"could not set baud rate {self.baudrate} on {self.port_name}"
             )
+        # Only now: the SDK's setBaudRate closes the serial object and opens a
+        # new one, which would drop a lock taken earlier.
+        self._lock_port()
 
     def _lock_port(self) -> None:
         """Refuse to share the bus with another process.
@@ -151,7 +154,9 @@ class ServoBus:
         try:
             fcntl.flock(serial_port.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
+            # Close without stop_all: the bus belongs to the other process.
             self._port.closePort()
+            self._is_open = False
             raise ServoError(
                 f"serial port {self.port_name} is already in use by another "
                 "process "
@@ -485,6 +490,38 @@ class ServoBus:
             raise ServoError(
                 f"{operation} failed: {self._handler.getRxPacketError(error)}"
             )
+
+
+class _GuardedSdk:
+    """Wraps an SDK packet handler so a serial exception does not jam the bus.
+
+    The SDK marks the port busy at the start of every packet and only clears
+    the mark on normal returns. If pyserial raises mid-packet (a USB glitch, or
+    another process on the port), every later call fails with "Port is in
+    use!" until restart. This clears the mark and raises `ServoError`, so the
+    next call gets a fresh try.
+    """
+
+    def __init__(self, target: Any, port: Any) -> None:
+        self._target = target
+        self._port = port
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._target, name)
+        if name == "groupSyncWrite":
+            return _GuardedSdk(attr, self._port)
+        if not callable(attr):
+            return attr
+
+        @functools.wraps(attr)
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return attr(*args, **kwargs)
+            except (SerialException, OSError) as exc:
+                self._port.is_using = False
+                raise ServoError(f"serial port error: {exc}") from exc
+
+        return guarded
 
 
 def _speed_packet(speed: int, acceleration: int) -> list[int]:
