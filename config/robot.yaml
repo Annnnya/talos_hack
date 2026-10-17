@@ -15,19 +15,19 @@ joints:
   # control:  speed = spins continuously, position = goes to an angle (fixed at startup)
   # inverted: true flips direction, so positive is always forward
   # enabled:  false = listed but never used (motor not installed yet)
-  front_left_wheel:  { id: 1, control: speed,    inverted: false }
-  front_right_wheel: { id: 2, control: speed,    inverted: false }
-  rear_left_wheel:   { id: 3, control: speed,    inverted: false }
-  rear_right_wheel:  { id: 4, control: speed,    inverted: false }
+  front_left_wheel:  { id: 6, control: speed,    inverted: true }
+  front_right_wheel: { id: 5, control: speed,    inverted: false }
+  rear_left_wheel:   { id: 4, control: speed,    inverted: true }
+  rear_right_wheel:  { id: 3, control: speed,    inverted: false }
   # min_pos / max_pos clamp position targets (0-4095 is one full turn). Set real limits first.
-  bend:              { id: 5, control: position, inverted: false, enabled: false,
+  bend:              { id: 1, control: position, inverted: false, enabled: false,
                        min_pos: 0, max_pos: 4095 }
 
 base:
   # Speed joints in FL, FR, RL, RR order.
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel, rear_right_wheel]
-  wheelbase_m: 0.3
-  track_width_m: 0.3
+  wheelbase_m: 0.31
+  track_width_m: 0.128
   steps_per_meter: 1000.0
   # m/s and rad/s; /cmd_vel and `talos-servo drive` are clamped to these.
   max_linear_speed: 0.1
