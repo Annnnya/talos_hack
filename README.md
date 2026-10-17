@@ -25,8 +25,8 @@ flowchart TB
         IMUD["imu.py<br/>Mpu6050"]
     end
     subgraph HW["Hardware"]
-        WHEELS[("4 mecanum wheels<br/>ids 1-4")]
-        BEND[("bend<br/>id 5, disabled")]
+        WHEELS[("4 mecanum wheels<br/>ids 6, 5, 4, 3")]
+        BEND[("bend<br/>id 1, disabled")]
         MPU[("MPU6050 IMU")]
     end
 
@@ -122,7 +122,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 
 | Command | What it does |
 | --- | --- |
-| `talos-servo ping --ids 1-5` | Which servos answer, with their model number |
+| `talos-servo ping --ids 1-6` | Which servos answer, with their model number |
 | `talos-servo spin --ids 1 --speed 100` | Spin for 1 s, then stop |
 | `talos-servo monitor --ids 1` | Print position and speed until Ctrl+C |
 | `talos-servo set-id --id 1 --new-id 3` | Change a servo id (EEPROM) |
@@ -151,17 +151,17 @@ Every joint is set here and nowhere else. Changes take effect on restart.
 max_speed: 1000          # steps/s cap for every joint, low on purpose
 command_timeout_s: 0.5   # ROS speed commands stop if not repeated
 joints:
-  front_left_wheel:  { id: 1, control: speed,    inverted: false }
-  front_right_wheel: { id: 2, control: speed,    inverted: false }
-  rear_left_wheel:   { id: 3, control: speed,    inverted: false }
-  rear_right_wheel:  { id: 4, control: speed,    inverted: false }
-  bend:              { id: 5, control: position, inverted: false,
+  front_left_wheel:  { id: 6, control: speed,    inverted: true }
+  front_right_wheel: { id: 5, control: speed,    inverted: false }
+  rear_left_wheel:   { id: 4, control: speed,    inverted: true }
+  rear_right_wheel:  { id: 3, control: speed,    inverted: false }
+  bend:              { id: 1, control: position, inverted: false,
                        enabled: false, min_pos: 0, max_pos: 4095 }
 base:
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel,
            rear_right_wheel]
-  wheelbase_m: 0.3
-  track_width_m: 0.3
+  wheelbase_m: 0.31
+  track_width_m: 0.128
   steps_per_meter: 1000.0
   max_linear_speed: 0.1    # m/s
   max_angular_speed: 0.5   # rad/s
