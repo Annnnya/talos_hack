@@ -22,6 +22,7 @@ from talos_servo.bus import (
     MODE_WHEEL,
     ServoError,
     ServoStatus,
+    ServoTelemetry,
 )
 
 
@@ -271,3 +272,38 @@ def test_set_speeds_rejects_bad_input_without_writing(sdk, speeds, acc):
     with sdk.bus() as bus, pytest.raises(ValueError):
         bus.set_speeds(speeds, acc)
     assert sdk.handler.sync_writes() == []
+
+
+def test_read_telemetry_decodes_one_block_read(sdk):
+    sdk.registers.update(
+        {
+            SMS_STS_PRESENT_LOAD_L: (1 << 10) | 50,
+            SMS_STS_PRESENT_VOLTAGE: 121,
+            SMS_STS_PRESENT_TEMPERATURE: 34,
+            SMS_STS_PRESENT_CURRENT_L: (1 << 15) | 100,
+            SMS_STS_MOVING: 1,
+        }
+    )
+    with sdk.bus() as bus:
+        sdk.handler.position = 3000
+        sdk.handler.speed = -250
+        assert bus.read_telemetry(2) == ServoTelemetry(
+            position=3000,
+            speed=-250,
+            status=ServoStatus(load=-50, voltage=12.1, temperature=34, current=-0.65, moving=True),
+        )
+        reads = [c for c in sdk.handler.calls if c[0].startswith("read")]
+        assert reads == [("read_block", 2, 56, 15)]
+
+
+def test_read_telemetry_failure_raises(sdk):
+    sdk.fail[("read_block", 3)] = (COMM_RX_TIMEOUT, 0)
+    with sdk.bus() as bus, pytest.raises(ServoError, match="read telemetry of servo 3"):
+        bus.read_telemetry(3)
+
+
+def test_read_telemetry_short_reply_raises(sdk, monkeypatch):
+    with sdk.bus() as bus:
+        monkeypatch.setattr(sdk.handler, "readTxRx", lambda *_a: ([0] * 4, COMM_SUCCESS, 0))
+        with pytest.raises(ServoError, match="got 4 bytes"):
+            bus.read_telemetry(1)

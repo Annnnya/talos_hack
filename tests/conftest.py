@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import pytest
-from scservo_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, SMS_STS_ID
+from scservo_sdk import (
+    COMM_RX_TIMEOUT,
+    COMM_SUCCESS,
+    SMS_STS_ID,
+    SMS_STS_PRESENT_POSITION_L,
+    SMS_STS_PRESENT_SPEED_L,
+)
 
 from talos_servo.bus import ServoBus
 from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
@@ -131,6 +137,25 @@ class FakeHandler:
     @staticmethod
     def scs_tohost(value: int, sign_bit: int) -> int:
         return -(value & ~(1 << sign_bit)) if value & (1 << sign_bit) else value
+
+    def readTxRx(self, servo_id: int, address: int, length: int) -> tuple[list[int], int, int]:
+        """Block read over a little-endian memory image built from position, speed, registers."""
+        self.calls.append(("read_block", servo_id, address, length))
+        comm, error = self._result("read_block", servo_id)
+        if comm != COMM_SUCCESS:
+            return [], comm, error
+        memory: dict[int, int] = {}
+        for start, value in self.registers.items():
+            memory[start] = value & 0xFF
+            if value > 0xFF:
+                memory[start + 1] = value >> 8
+        for start, value in (
+            (SMS_STS_PRESENT_POSITION_L, self.position),
+            (SMS_STS_PRESENT_SPEED_L, self.speed),
+        ):
+            raw = abs(value) | (0x8000 if value < 0 else 0)
+            memory[start], memory[start + 1] = raw & 0xFF, raw >> 8
+        return [memory.get(address + i, 0) for i in range(length)], comm, error
 
     def ReadPosSpeed(self, servo_id: int) -> tuple[int, int, int, int]:
         self.calls.append(("read", servo_id))

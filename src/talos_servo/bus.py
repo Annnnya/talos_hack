@@ -13,8 +13,11 @@ from scservo_sdk import (
     SMS_STS_ID,
     SMS_STS_MODE,
     SMS_STS_MOVING,
+    SMS_STS_PRESENT_CURRENT_H,
     SMS_STS_PRESENT_CURRENT_L,
     SMS_STS_PRESENT_LOAD_L,
+    SMS_STS_PRESENT_POSITION_L,
+    SMS_STS_PRESENT_SPEED_L,
     SMS_STS_PRESENT_TEMPERATURE,
     SMS_STS_PRESENT_VOLTAGE,
     SMS_STS_TORQUE_ENABLE,
@@ -51,6 +54,13 @@ VOLTAGE_SCALE = 0.1
 CURRENT_SIGN_BIT = 15
 CURRENT_SCALE_A = 0.0065
 
+# Present position and speed are 15-bit magnitudes plus a sign bit.
+POSITION_SIGN_BIT = 15
+
+# One read covers every present-state register, from position through current.
+TELEMETRY_START = SMS_STS_PRESENT_POSITION_L
+TELEMETRY_LENGTH = SMS_STS_PRESENT_CURRENT_H - SMS_STS_PRESENT_POSITION_L + 1
+
 
 @dataclass(frozen=True)
 class ServoStatus:
@@ -59,6 +69,13 @@ class ServoStatus:
     temperature: int
     current: float
     moving: bool
+
+
+@dataclass(frozen=True)
+class ServoTelemetry:
+    position: int
+    speed: int
+    status: ServoStatus
 
 
 class ServoError(RuntimeError):
@@ -272,6 +289,36 @@ class ServoBus:
         self._check(comm, error, f"read position/speed of servo {servo_id}")
         return position, speed
 
+    def read_telemetry(self, servo_id: int) -> ServoTelemetry:
+        """Read position, speed and status in one request instead of six."""
+        data, comm, error = self._handler.readTxRx(servo_id, TELEMETRY_START, TELEMETRY_LENGTH)
+        self._check(comm, error, f"read telemetry of servo {servo_id}")
+        if len(data) != TELEMETRY_LENGTH:
+            raise ServoError(
+                f"read telemetry of servo {servo_id} failed: got {len(data)} bytes, "
+                f"expected {TELEMETRY_LENGTH}"
+            )
+
+        def byte(address: int) -> int:
+            return data[address - TELEMETRY_START]
+
+        def word(address: int) -> int:
+            return byte(address) | (byte(address + 1) << 8)
+
+        return ServoTelemetry(
+            position=_signed(word(SMS_STS_PRESENT_POSITION_L), POSITION_SIGN_BIT),
+            speed=_signed(word(SMS_STS_PRESENT_SPEED_L), SPEED_SIGN_BIT),
+            status=ServoStatus(
+                load=_signed(word(SMS_STS_PRESENT_LOAD_L), LOAD_SIGN_BIT),
+                voltage=round(byte(SMS_STS_PRESENT_VOLTAGE) * VOLTAGE_SCALE, 1),
+                temperature=byte(SMS_STS_PRESENT_TEMPERATURE),
+                current=round(
+                    _signed(word(SMS_STS_PRESENT_CURRENT_L), CURRENT_SIGN_BIT) * CURRENT_SCALE_A, 4
+                ),
+                moving=bool(byte(SMS_STS_MOVING)),
+            ),
+        )
+
     def is_present(self, servo_id: int) -> bool:
         """Return True if a servo answers a ping at this ID."""
         _model, comm, _error = self._handler.ping(servo_id)
@@ -324,3 +371,9 @@ def _speed_packet(speed: int, acceleration: int) -> list[int]:
     """
     raw = abs(speed) | (1 << SPEED_SIGN_BIT if speed < 0 else 0)
     return [acceleration, 0, 0, 0, 0, raw & 0xFF, raw >> 8]
+
+
+def _signed(value: int, sign_bit: int) -> int:
+    """Decode a Feetech sign-magnitude value."""
+    magnitude = value & ~(1 << sign_bit)
+    return -magnitude if value & (1 << sign_bit) else magnitude
