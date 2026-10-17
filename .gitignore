@@ -31,3 +31,6 @@ worktrees/
 
 # Personal agent instructions
 CLAUDE.local.md
+
+# Local copy of the Feetech SDK for the web bridge, if not installed in the env
+bridge/scservo_sdk/

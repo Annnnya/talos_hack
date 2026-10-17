@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from types import TracebackType
 from typing import Any
 
@@ -11,6 +12,9 @@ from scservo_sdk import (
     COMM_SUCCESS,
     SMS_STS_ID,
     SMS_STS_MODE,
+    SMS_STS_PRESENT_LOAD_L,
+    SMS_STS_PRESENT_TEMPERATURE,
+    SMS_STS_PRESENT_VOLTAGE,
     SMS_STS_TORQUE_ENABLE,
     PortHandler,
     sms_sts,
@@ -31,6 +35,20 @@ MODE_WHEEL = 1
 # Goal speed is a 15-bit magnitude plus a sign bit; acceleration is one byte.
 MAX_SPEED = 32_767
 MAX_ACCELERATION = 254
+
+# 12-bit encoder: 0..4095 is one full turn.
+MAX_POSITION = 4095
+
+# Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1 V.
+LOAD_SIGN_BIT = 10
+VOLTAGE_SCALE = 0.1
+
+
+@dataclass(frozen=True)
+class ServoStatus:
+    load: int
+    voltage: float
+    temperature: int
 
 
 class ServoError(RuntimeError):
@@ -108,6 +126,56 @@ class ServoBus:
         """Switch the servo to continuous rotation (wheel) mode."""
         comm, error = self._handler.write1ByteTxRx(servo_id, SMS_STS_MODE, MODE_WHEEL)
         self._check(comm, error, f"set wheel mode on servo {servo_id}")
+
+    def set_position_mode(self, servo_id: int) -> None:
+        """Switch the servo to position (servo) mode."""
+        comm, error = self._handler.write1ByteTxRx(servo_id, SMS_STS_MODE, MODE_POSITION)
+        self._check(comm, error, f"set position mode on servo {servo_id}")
+
+    def read_mode(self, servo_id: int) -> int:
+        """Return MODE_POSITION or MODE_WHEEL (or another raw mode value)."""
+        mode, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_MODE)
+        self._check(comm, error, f"read mode of servo {servo_id}")
+        return mode
+
+    def read_torque(self, servo_id: int) -> bool:
+        enabled, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE)
+        self._check(comm, error, f"read torque of servo {servo_id}")
+        return bool(enabled)
+
+    def move_to(
+        self,
+        servo_id: int,
+        position: int,
+        speed: int,
+        acceleration: int = DEFAULT_ACCELERATION,
+    ) -> None:
+        """Move to an absolute position (position mode). Speed is in steps/s and must be > 0."""
+        if not 0 <= position <= MAX_POSITION:
+            raise ValueError(f"position must be within 0..{MAX_POSITION}, got {position}")
+        # Speed 0 means "as fast as possible" on the servo, so it is never sent by accident.
+        if not 1 <= speed <= MAX_SPEED:
+            raise ValueError(f"speed must be within 1..{MAX_SPEED}, got {speed}")
+        if not 0 <= acceleration <= MAX_ACCELERATION:
+            raise ValueError(
+                f"acceleration must be within 0..{MAX_ACCELERATION}, got {acceleration}"
+            )
+        comm, error = self._handler.WritePosEx(servo_id, position, speed, acceleration)
+        self._check(comm, error, f"move servo {servo_id} to {position}")
+
+    def read_status(self, servo_id: int) -> ServoStatus:
+        """Read load, voltage (V) and temperature (C)."""
+        raw_load, comm, error = self._handler.read2ByteTxRx(servo_id, SMS_STS_PRESENT_LOAD_L)
+        self._check(comm, error, f"read load of servo {servo_id}")
+        raw_volt, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_PRESENT_VOLTAGE)
+        self._check(comm, error, f"read voltage of servo {servo_id}")
+        temp, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_PRESENT_TEMPERATURE)
+        self._check(comm, error, f"read temperature of servo {servo_id}")
+        return ServoStatus(
+            load=self._handler.scs_tohost(raw_load, LOAD_SIGN_BIT),
+            voltage=round(raw_volt * VOLTAGE_SCALE, 1),
+            temperature=temp,
+        )
 
     def set_torque(self, servo_id: int, enabled: bool) -> None:
         comm, error = self._handler.write1ByteTxRx(servo_id, SMS_STS_TORQUE_ENABLE, int(enabled))

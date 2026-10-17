@@ -1,0 +1,17 @@
+# Servo layout for `talos-servo web`. The serial port and baud rate are not set here:
+# pass --port / --baud or set TALOS_SERVO_PORT, like the other talos-servo commands.
+
+# Highest speed (steps/s) the UI sliders allow. Keep it low until the robot is tested.
+max_speed: 1000
+
+# How often servo state is read and pushed to the browsers.
+telemetry_hz: 20
+
+# min_pos / max_pos clamp position targets (0-4095 is one full turn).
+# Set real joint limits here before running on the robot.
+servos:
+  - { id: 1, name: "Servo 1", min_pos: 0, max_pos: 4095 }
+  - { id: 2, name: "Servo 2", min_pos: 0, max_pos: 4095 }
+  - { id: 3, name: "Servo 3", min_pos: 0, max_pos: 4095 }
+  - { id: 4, name: "Servo 4", min_pos: 0, max_pos: 4095 }
+  - { id: 5, name: "Servo 5", min_pos: 0, max_pos: 4095 }
