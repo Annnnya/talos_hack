@@ -10,7 +10,7 @@ Wants=network-online.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/feetech_servo_test/bridge
-ExecStart=/home/pi/feetech_servo_test/.venv/bin/python main.py
+ExecStart=/home/pi/.local/bin/uv run --with fastapi --with uvicorn[standard] --with pyyaml python main.py
 Restart=on-failure
 RestartSec=2
 

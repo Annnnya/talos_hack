@@ -1,4 +1,36 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# uv / pixi / virtualenv
+.pixi/
 .venv/
+
+# ROS 2 / colcon build output
+install/
+log/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git worktrees (see AGENTS.md)
+worktrees/
+
+# Personal agent instructions
+CLAUDE.local.md
+
+# Local copy of the Feetech SDK for the web bridge, if not installed in the env
 bridge/scservo_sdk/

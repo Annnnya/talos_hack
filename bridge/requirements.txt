@@ -1,6 +1,0 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-pyyaml>=6.0
-pyserial>=3.5
-# Feetech SDK with the sms_sts class (the PyPI "feetech-servo-sdk" package does NOT include it).
-# Install from https://github.com/ftservo/FTServo_Python - see README.
