@@ -163,6 +163,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-ros2run-0.32.13-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-ros2service-0.32.13-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-sensor-msgs-5.3.8-hb0f4dca_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-srvs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-action-msgs-2.0.4-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-ament-cmake-2.5.6-np2py312h1bab3cf_25.conda
@@ -433,6 +434,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-ros2run-0.32.13-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-ros2service-0.32.13-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-sensor-msgs-5.3.8-he8cfe8b_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-srvs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-action-msgs-2.0.4-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-ament-cmake-2.5.6-np2py312h9c6c671_25.conda
@@ -928,6 +930,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-ros2run-0.32.13-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-ros2service-0.32.13-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-sensor-msgs-5.3.8-hb0f4dca_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-srvs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-action-msgs-2.0.4-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-actionlib-msgs-5.3.8-np2py312h1bab3cf_25.conda
@@ -1399,6 +1402,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-ros2run-0.32.13-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-ros2service-0.32.13-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-sensor-msgs-5.3.8-he8cfe8b_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-srvs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-action-msgs-2.0.4-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-actionlib-msgs-5.3.8-np2py312h9c6c671_25.conda
@@ -12226,6 +12230,13 @@ packages:
   - ros2-sensor-msgs ==5.3.8
   size: 2024
   timestamp: 1791434458880
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-msgs-5.3.8-hb0f4dca_25.conda
+  sha256: 243910d9dbf7343d6ca048c974b6f91b89d48bd7991e0ac5436d17f5f7853735
+  md5: bf7f66bbc600707b2bb165312f6c8b63
+  depends:
+  - ros2-std-msgs ==5.3.8
+  size: 2012
+  timestamp: 1791433611635
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-std-srvs-5.3.8-hb0f4dca_25.conda
   sha256: 23ace796d4dab5d943aaa03dfc2026019c788b82e6f3d601ead886986f451213
   md5: f476cad8dd4903e6aa1f7a4d539c9f1a
@@ -16594,6 +16605,13 @@ packages:
   - ros2-sensor-msgs ==5.3.8
   size: 2037
   timestamp: 1791450469966
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-msgs-5.3.8-he8cfe8b_25.conda
+  sha256: 6387a533bd930f5004d2ec4dc30a19a6db465f090a662e766809541692221431
+  md5: c05be667252bfd2e2514428420f79403
+  depends:
+  - ros2-std-msgs ==5.3.8
+  size: 2021
+  timestamp: 1791449781712
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-std-srvs-5.3.8-he8cfe8b_25.conda
   sha256: bad05e840e7449fef959985abb77db20246949219e74c290180bda359f5c1d97
   md5: 57426268c0b635a11d70c57024ef090e
