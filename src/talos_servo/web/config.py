@@ -9,8 +9,8 @@ import yaml
 
 from talos_servo.bus import MAX_POSITION, MAX_SERVO_ID, MAX_SPEED
 
-# Low by default: the UI speed sliders never go past this unless the config raises it.
-DEFAULT_MAX_SPEED = 1000
+# STS3215 rated no-load speed at 12 V: 0.222 s/60 deg = 45 rpm, about 3000 steps/s.
+DEFAULT_MAX_SPEED = 3000
 DEFAULT_TELEMETRY_HZ = 20.0
 
 
