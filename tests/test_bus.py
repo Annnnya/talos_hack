@@ -214,3 +214,60 @@ def test_read_status_failure_raises(sdk):
     sdk.fail[("read2", 1)] = (COMM_RX_TIMEOUT, 0)
     with sdk.bus() as bus, pytest.raises(ServoError, match="read load of servo 1"):
         bus.read_status(1)
+
+
+def test_set_speeds_sends_one_sync_packet(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: -100, 3: 0, 4: 300}, 20)
+        assert sdk.handler.sync_writes() == [
+            {
+                1: [20, 0, 0, 0, 0, 100, 0],
+                2: [20, 0, 0, 0, 0, 100, 0x80],
+                3: [20, 0, 0, 0, 0, 0, 0],
+                4: [20, 0, 0, 0, 0, 300 & 0xFF, 300 >> 8],
+            }
+        ]
+        assert sdk.handler.speed_calls() == []
+
+
+def test_set_speeds_accepts_per_servo_acceleration(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 50}, {1: 20, 2: 10})
+        packet = sdk.handler.sync_writes()[0]
+        assert packet[1][0] == 20
+        assert packet[2][0] == 10
+
+
+def test_set_speeds_tracks_moving_servos_for_exit_stop(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 0})
+    assert sdk.handler.speed_calls() == [("speed", 1, 0, 20)]
+
+
+def test_stop_many_clears_moving_servos(sdk):
+    with sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 100})
+        bus.stop_many([1, 2])
+        assert sdk.handler.sync_writes()[-1] == {
+            1: [20, 0, 0, 0, 0, 0, 0],
+            2: [20, 0, 0, 0, 0, 0, 0],
+        }
+    assert sdk.handler.speed_calls() == []
+
+
+def test_set_speeds_comm_failure_raises_and_still_stops_on_exit(sdk):
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    with pytest.raises(ServoError, match="sync set speeds"), sdk.bus() as bus:
+        bus.set_speeds({1: 100, 2: 100})
+    stops = sdk.handler.speed_calls()
+    assert ("speed", 1, 0, 20) in stops
+    assert ("speed", 2, 0, 20) in stops
+
+
+@pytest.mark.parametrize(
+    ("speeds", "acc"), [({}, 20), ({1: 40_000}, 20), ({1: 100}, 255), ({1: 100}, -1)]
+)
+def test_set_speeds_rejects_bad_input_without_writing(sdk, speeds, acc):
+    with sdk.bus() as bus, pytest.raises(ValueError):
+        bus.set_speeds(speeds, acc)
+    assert sdk.handler.sync_writes() == []

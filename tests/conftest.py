@@ -32,6 +32,30 @@ class FakePort:
         self.closed_count += 1
 
 
+BROADCAST_ID = 254
+
+
+@dataclass
+class FakeGroupSyncWrite:
+    """Mimics the SDK GroupSyncWrite; each sent packet is recorded on the handler."""
+
+    handler: FakeHandler
+    data: dict[int, list[int]] = field(default_factory=dict)
+
+    def clearParam(self) -> None:
+        self.data.clear()
+
+    def addParam(self, servo_id: int, data: list[int]) -> bool:
+        if servo_id in self.data:
+            return False
+        self.data[servo_id] = list(data)
+        return True
+
+    def txPacket(self) -> int:
+        self.handler.calls.append(("sync_write", dict(self.data)))
+        return self.handler._result("sync_write", BROADCAST_ID)[0]
+
+
 @dataclass
 class FakeHandler:
     """Records every call; `fail` maps (method, servo_id) to (comm, error) to inject failures.
@@ -50,6 +74,10 @@ class FakeHandler:
     registers: dict[int, int] = field(default_factory=dict)
     # (servo id, address) -> value from a successful write1ByteTxRx, read back like a real servo
     written: dict[tuple[int, int], int] = field(default_factory=dict)
+    groupSyncWrite: FakeGroupSyncWrite = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.groupSyncWrite = FakeGroupSyncWrite(self)
 
     def _result(self, method: str, servo_id: int) -> tuple[int, int]:
         return self.fail.get((method, servo_id), (COMM_SUCCESS, 0))
@@ -117,6 +145,9 @@ class FakeHandler:
 
     def speed_calls(self) -> list[tuple]:
         return [c for c in self.calls if c[0] == "speed"]
+
+    def sync_writes(self) -> list[dict[int, list[int]]]:
+        return [c[1] for c in self.calls if c[0] == "sync_write"]
 
 
 @dataclass
