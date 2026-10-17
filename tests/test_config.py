@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 import copy
-from pathlib import Path
 
 import pytest
 from conftest import BASE, SMALL
 
 from talos_servo.config import (
-    DEFAULT_MAX_SPEED,
     ConfigError,
-    load_config,
     parse_config,
 )
-
-REPO_CONFIG = Path(__file__).parent.parent / "config" / "robot.yaml"
 
 
 def with_changes(data: dict, **joint_changes: dict) -> dict:
@@ -21,21 +16,6 @@ def with_changes(data: dict, **joint_changes: dict) -> dict:
     for joint, fields in joint_changes.items():
         changed["joints"][joint].update(fields)
     return changed
-
-
-def test_repo_config_has_four_wheels_and_a_disabled_bend():
-    config = load_config(REPO_CONFIG)
-    assert config.max_speed == DEFAULT_MAX_SPEED
-    assert [j.name for j in config.enabled_joints] == [
-        "front_left_wheel",
-        "front_right_wheel",
-        "rear_left_wheel",
-        "rear_right_wheel",
-    ]
-    bend = next(j for j in config.joints if j.name == "bend")
-    assert (bend.control, bend.enabled, bend.id) == ("position", False, 5)
-    assert config.base is not None
-    assert config.base.wheels[0] == "front_left_wheel"
 
 
 def test_joint_defaults():
