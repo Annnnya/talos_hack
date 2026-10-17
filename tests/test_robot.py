@@ -130,6 +130,18 @@ def test_stop_all_never_raises(sdk, robot):
     assert "timeout" in robot.joints["wheel"].error
 
 
+def test_stuck_wheel_write_error_is_logged_once(sdk, robot, caplog):
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    with caplog.at_level("INFO", logger="talos_servo.robot"):
+        for _ in range(5):
+            robot.tick()
+        del sdk.fail[("sync_write", 254)]
+        robot.tick()
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("wheel speed write failed" in m for m in messages) == 1
+    assert "wheel speed writes work again" in messages
+
+
 def test_torque_off_stops_a_speed_joint_first(sdk, robot):
     robot.spin("wheel", 300)
     robot.set_torque("wheel", False)
