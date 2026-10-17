@@ -8,6 +8,7 @@ import tty
 
 import rclpy
 from geometry_msgs.msg import Twist
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_srvs.srv import SetBool, Trigger
 
@@ -102,13 +103,17 @@ def main(args: list[str] | None = None) -> None:
                 break
             node.publish_command()
             rclpy.spin_once(node, timeout_sec=0.0)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node._set_command(0.0, 0.0, 0.0)
-        node.publish_command()
-        if node._enabled:
-            node._toggle_enable()
-        node.destroy_node()
-        rclpy.shutdown()
+        # Restore the terminal first so a failure below cannot leave it in cbreak mode.
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal_state)
+        # On Jazzy, Ctrl+C has already shut the context down; the drive node watchdog then
+        # stops the wheels once /cmd_vel goes quiet.
+        if rclpy.ok():
+            node._set_command(0.0, 0.0, 0.0)
+            node.publish_command()
+            if node._enabled:
+                node._toggle_enable()
+        node.destroy_node()
+        rclpy.try_shutdown()
