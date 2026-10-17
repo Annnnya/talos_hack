@@ -211,6 +211,20 @@ def test_simulated_servo_moves_toward_target():
     controller.close()
 
 
+def test_simulated_spinning_servo_reports_current_and_moving():
+    port_factory, handler_factory = sim_factories([1])
+    with ServoBus("sim", port_factory=port_factory, handler_factory=handler_factory) as bus:
+        idle = bus.read_status(1)
+        assert not idle.moving
+        assert idle.current == 0
+        bus.set_wheel_mode(1)
+        bus.set_speed(1, 1000)
+        time.sleep(0.2)
+        spinning = bus.read_status(1)
+        assert spinning.moving
+        assert spinning.current > 0
+
+
 def test_simulated_unknown_id_is_offline():
     port_factory, handler_factory = sim_factories([1])
     bus = ServoBus("sim", port_factory=port_factory, handler_factory=handler_factory)

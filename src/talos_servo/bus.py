@@ -12,6 +12,8 @@ from scservo_sdk import (
     COMM_SUCCESS,
     SMS_STS_ID,
     SMS_STS_MODE,
+    SMS_STS_MOVING,
+    SMS_STS_PRESENT_CURRENT_L,
     SMS_STS_PRESENT_LOAD_L,
     SMS_STS_PRESENT_TEMPERATURE,
     SMS_STS_PRESENT_VOLTAGE,
@@ -43,12 +45,19 @@ MAX_POSITION = 4095
 LOAD_SIGN_BIT = 10
 VOLTAGE_SCALE = 0.1
 
+# Present current is a 15-bit magnitude plus a sign bit. STS3215 reports 6.5 mA per count
+# (Feetech memory table); verify against a meter before trusting absolute values.
+CURRENT_SIGN_BIT = 15
+CURRENT_SCALE_A = 0.0065
+
 
 @dataclass(frozen=True)
 class ServoStatus:
     load: int
     voltage: float
     temperature: int
+    current: float
+    moving: bool
 
 
 class ServoError(RuntimeError):
@@ -164,17 +173,24 @@ class ServoBus:
         self._check(comm, error, f"move servo {servo_id} to {position}")
 
     def read_status(self, servo_id: int) -> ServoStatus:
-        """Read load, voltage (V) and temperature (C)."""
+        """Read load, voltage (V), temperature (C), current (A) and the moving flag."""
         raw_load, comm, error = self._handler.read2ByteTxRx(servo_id, SMS_STS_PRESENT_LOAD_L)
         self._check(comm, error, f"read load of servo {servo_id}")
         raw_volt, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_PRESENT_VOLTAGE)
         self._check(comm, error, f"read voltage of servo {servo_id}")
         temp, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_PRESENT_TEMPERATURE)
         self._check(comm, error, f"read temperature of servo {servo_id}")
+        raw_current, comm, error = self._handler.read2ByteTxRx(servo_id, SMS_STS_PRESENT_CURRENT_L)
+        self._check(comm, error, f"read current of servo {servo_id}")
+        moving, comm, error = self._handler.read1ByteTxRx(servo_id, SMS_STS_MOVING)
+        self._check(comm, error, f"read moving flag of servo {servo_id}")
+        current_counts = self._handler.scs_tohost(raw_current, CURRENT_SIGN_BIT)
         return ServoStatus(
             load=self._handler.scs_tohost(raw_load, LOAD_SIGN_BIT),
             voltage=round(raw_volt * VOLTAGE_SCALE, 1),
             temperature=temp,
+            current=round(current_counts * CURRENT_SCALE_A, 4),
+            moving=bool(moving),
         )
 
     def set_torque(self, servo_id: int, enabled: bool) -> None:

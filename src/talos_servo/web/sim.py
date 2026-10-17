@@ -15,6 +15,8 @@ from scservo_sdk import (
     COMM_RX_TIMEOUT,
     COMM_SUCCESS,
     SMS_STS_MODE,
+    SMS_STS_MOVING,
+    SMS_STS_PRESENT_CURRENT_L,
     SMS_STS_PRESENT_LOAD_L,
     SMS_STS_PRESENT_TEMPERATURE,
     SMS_STS_PRESENT_VOLTAGE,
@@ -35,6 +37,7 @@ SIM_VOLTAGE_RAW = 120  # 12.0 V
 SIM_TEMPERATURE = 30
 STEPS_PER_TURN = MAX_POSITION + 1
 MAX_SIM_LOAD = 300
+MAX_SIM_CURRENT = 150  # counts, about 1 A at full speed
 
 
 class SimPort:
@@ -115,6 +118,7 @@ class SimHandler:
             SMS_STS_TORQUE_ENABLE: int(s.torque),
             SMS_STS_PRESENT_VOLTAGE: SIM_VOLTAGE_RAW,
             SMS_STS_PRESENT_TEMPERATURE: SIM_TEMPERATURE,
+            SMS_STS_MOVING: int(s.speed != 0),
         }
         return values.get(address, 0), COMM_SUCCESS, 0
 
@@ -126,6 +130,8 @@ class SimHandler:
             load = round(abs(s.speed) / MAX_SPEED * MAX_SIM_LOAD * 10)
             raw = min(load, MAX_SIM_LOAD) | ((1 << LOAD_SIGN_BIT) if s.speed < 0 else 0)
             return raw, COMM_SUCCESS, 0
+        if address == SMS_STS_PRESENT_CURRENT_L:
+            return round(abs(s.speed) / MAX_SPEED * MAX_SIM_CURRENT), COMM_SUCCESS, 0
         return 0, COMM_SUCCESS, 0
 
     def WritePosEx(self, servo_id: int, position: int, speed: int, _acc: int) -> tuple[int, int]:
