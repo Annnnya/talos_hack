@@ -30,18 +30,8 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
-from talos_servo.ros.convert import (
-    command_frame,
-    joint_ids,
-    rad_speed_to_steps,
-    rad_to_steps,
-    step_speed_to_rad,
-    steps_to_rad,
-)
-from talos_servo.ros.web_client_node import WebClientNode
-from talos_servo.web.backend import DEFAULT_BRIDGE
-from talos_servo.web.config import WebConfig
-from talos_servo.web.controller import (
+from talos_servo.config import RobotConfig
+from talos_servo.controller import (
     MODES,
     POSITION,
     SOURCE_WEB,
@@ -52,6 +42,16 @@ from talos_servo.web.controller import (
     public_state,
     record_command,
 )
+from talos_servo.defaults import DEFAULT_BRIDGE
+from talos_servo.ros.convert import (
+    command_frame,
+    joint_ids,
+    rad_speed_to_steps,
+    rad_to_steps,
+    step_speed_to_rad,
+    steps_to_rad,
+)
+from talos_servo.ros.web_client_node import WebClientNode
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class RosBackend:
 
     def __init__(
         self,
-        config: WebConfig,
+        config: RobotConfig,
         *,
         bridge: str = DEFAULT_BRIDGE,
         context: Context | None = None,

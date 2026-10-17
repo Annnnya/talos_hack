@@ -1,4 +1,4 @@
-"""Simulated Feetech SDK objects for `talos-servo web --mock`.
+"""Simulated Feetech SDK objects for `--mock` runs (web UI and ROS servo bridge).
 
 They plug into ServoBus through its port_factory / handler_factory hooks, so simulation runs the
 same bus and controller code as real hardware, without opening a serial port.

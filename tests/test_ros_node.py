@@ -16,12 +16,12 @@ from diagnostic_msgs.msg import DiagnosticStatus  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
+from talos_servo.config import parse_config  # noqa: E402
+from talos_servo.controller import POSITION, WHEEL, RobotController  # noqa: E402
 from talos_servo.ros.convert import CENTER_STEP, step_speed_to_rad  # noqa: E402
 from talos_servo.ros.readouts import JointReadoutPublishers  # noqa: E402
 from talos_servo.ros.servo_bridge_node import DEFAULT_MOVE_SPEED, ServoBridgeNode  # noqa: E402
-from talos_servo.web.config import parse_config  # noqa: E402
-from talos_servo.web.controller import POSITION, WHEEL, RobotController  # noqa: E402
-from talos_servo.web.sim import make_bus  # noqa: E402
+from talos_servo.sim import make_bus  # noqa: E402
 
 CONFIG = parse_config(
     {

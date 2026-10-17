@@ -20,7 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "drive_node = talos_mecanum.drive_node:main",
-            "keyboard_teleop = talos_mecanum.keyboard_teleop:main",
+            "keyboard_teleop = talos_mecanum.keyboard_teleop_node:main",
         ],
     },
 )

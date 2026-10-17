@@ -1,5 +1,5 @@
-# Servo layout for `talos-servo web`. The serial port and baud rate are not set here:
-# pass --port / --baud or set TALOS_SERVO_PORT, like the other talos-servo commands.
+# Servo layout for `talos-servo web` and the ROS servo bridge. The serial port and baud rate
+# are not set here: pass --port / --baud or set TALOS_SERVO_PORT, like the other commands.
 
 # Highest speed (steps/s) the UI sliders allow. 3000 is the STS3215 rated no-load
 # speed at 12 V (45 rpm); the servo cannot go faster.

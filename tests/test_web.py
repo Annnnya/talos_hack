@@ -11,11 +11,11 @@ from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE
 
 from talos_servo import cli
 from talos_servo.bus import MODE_POSITION, MODE_WHEEL, ServoBus
+from talos_servo.config import ConfigError, parse_config
+from talos_servo.controller import CommandError, RobotController
+from talos_servo.sim import sim_factories
 from talos_servo.web import server
-from talos_servo.web.config import ConfigError, parse_config
-from talos_servo.web.controller import CommandError, RobotController
 from talos_servo.web.server import create_app
-from talos_servo.web.sim import sim_factories
 
 CONFIG = parse_config(
     {
@@ -130,7 +130,7 @@ def test_close_stops_spinning_servos_and_closes_port(sdk, controller):
 
 
 def test_full_poll_keeps_wheel_mode_so_stop_all_still_stops(sdk, controller, monkeypatch):
-    monkeypatch.setattr("talos_servo.web.controller.SLOW_POLL_EVERY", 1)
+    monkeypatch.setattr("talos_servo.controller.SLOW_POLL_EVERY", 1)
     controller.open()
     controller.set_mode(2, "wheel")
     controller.spin(2, 300)

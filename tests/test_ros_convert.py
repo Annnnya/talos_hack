@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from talos_servo.config import ServoConfig
 from talos_servo.ros.convert import (
     CENTER_STEP,
     RAD_PER_STEP,
@@ -19,7 +20,6 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
-from talos_servo.web.config import ServoConfig
 
 
 def test_center_step_is_zero_rad():
