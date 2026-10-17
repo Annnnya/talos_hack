@@ -7,11 +7,20 @@ from scservo_sdk import (
     COMM_SUCCESS,
     SMS_STS_ID,
     SMS_STS_MODE,
+    SMS_STS_PRESENT_LOAD_L,
+    SMS_STS_PRESENT_TEMPERATURE,
+    SMS_STS_PRESENT_VOLTAGE,
     SMS_STS_TORQUE_ENABLE,
 )
 from serial import SerialException
 
-from talos_servo.bus import MODE_WHEEL, ServoError
+from talos_servo.bus import (
+    MAX_POSITION,
+    MODE_POSITION,
+    MODE_WHEEL,
+    ServoError,
+    ServoStatus,
+)
 
 
 def test_open_failure_raises(sdk):
@@ -146,3 +155,56 @@ def test_set_id_relocks_old_id_when_write_fails(sdk):
 def test_set_id_rejects_bad_ids(sdk, current, new):
     with sdk.bus() as bus, pytest.raises(ValueError):
         bus.set_id(current, new)
+
+
+def test_set_position_mode_writes_mode_register(sdk):
+    with sdk.bus() as bus:
+        bus.set_position_mode(3)
+    assert sdk.handler.calls == [("write1", 3, SMS_STS_MODE, MODE_POSITION)]
+
+
+def test_read_mode_and_torque(sdk):
+    sdk.registers.update({SMS_STS_MODE: MODE_WHEEL, SMS_STS_TORQUE_ENABLE: 1})
+    with sdk.bus() as bus:
+        assert bus.read_mode(1) == MODE_WHEEL
+        assert bus.read_torque(1) is True
+
+
+def test_move_to_sends_goal(sdk):
+    with sdk.bus() as bus:
+        bus.move_to(2, 3000, 200, 10)
+    assert sdk.handler.calls == [("move", 2, 3000, 200, 10)]
+
+
+@pytest.mark.parametrize(
+    ("position", "speed", "acc"),
+    [(-1, 100, 20), (MAX_POSITION + 1, 100, 20), (100, 0, 20), (100, 100, 255)],
+)
+def test_move_to_rejects_out_of_range(sdk, position, speed, acc):
+    with sdk.bus() as bus, pytest.raises(ValueError):
+        bus.move_to(1, position, speed, acc)
+    assert sdk.handler.calls == []
+
+
+def test_move_to_failure_raises(sdk):
+    sdk.fail[("move", 1)] = (COMM_RX_TIMEOUT, 0)
+    with sdk.bus() as bus, pytest.raises(ServoError, match="move servo 1"):
+        bus.move_to(1, 100, 100)
+
+
+def test_read_status_decodes_registers(sdk):
+    sdk.registers.update(
+        {
+            SMS_STS_PRESENT_LOAD_L: (1 << 10) | 50,  # sign bit set means -50
+            SMS_STS_PRESENT_VOLTAGE: 121,
+            SMS_STS_PRESENT_TEMPERATURE: 34,
+        }
+    )
+    with sdk.bus() as bus:
+        assert bus.read_status(1) == ServoStatus(load=-50, voltage=12.1, temperature=34)
+
+
+def test_read_status_failure_raises(sdk):
+    sdk.fail[("read2", 1)] = (COMM_RX_TIMEOUT, 0)
+    with sdk.bus() as bus, pytest.raises(ServoError, match="read load of servo 1"):
+        bus.read_status(1)
