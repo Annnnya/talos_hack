@@ -57,10 +57,14 @@ teleop = "bash -c 'source install/setup.sh && ros2 run talos_mecanum keyboard_te
 [feature.ros.dependencies]
 ros-jazzy-ros-base = "*"
 ros-jazzy-diagnostic-msgs = "*"
+ros-jazzy-imu-filter-madgwick = "*"
 
 [feature.ros.tasks]
 servo-node = "talos-servo-ros"
 servo-node-mock = "talos-servo-ros --mock"
+imu-node = "talos-imu-ros"
+# Turns /imu/data_raw into /imu/data with an orientation quaternion
+imu-filter = "ros2 run imu_filter_madgwick imu_filter_madgwick_node --ros-args --params-file config/imu_filter.yaml"
 # Web UI through the running servo bridge, so it can share the robot with other ROS nodes
 web-ros = "talos-servo web --ros"
 

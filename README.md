@@ -23,16 +23,19 @@ flowchart LR
   port --> bridge(["servo_bridge node"])
   port --> drive(["drive_node"])
   imu[("MPU6050 IMU")] -->|I2C| cli
+  imu -->|I2C| imunode(["imu node"])
+  imunode --> ros
   web <-->|WebSocket| browser["Browser UI"]
   bridge <--> ros(("ROS 2"))
   drive <--> ros
   web <-.->|"--ros mode"| ros
 ```
 
-All four programs can open the servo port themselves, so run only one of them at a time. The
-exception is `talos-servo web --ros`: it leaves the port to `servo_bridge` and sends its commands
-over ROS 2, so the browser UI and your ROS nodes can drive the robot together (see
-[Web UI over ROS 2](#web-ui-over-ros-2)).
+The four servo programs can open the servo port themselves, so run only one of them at a time.
+The exception is `talos-servo web --ros`: it leaves the port to `servo_bridge` and sends its
+commands over ROS 2, so the browser UI and your ROS nodes can drive the robot together (see
+[Web UI over ROS 2](#web-ui-over-ros-2)). The imu node only uses I2C and can run alongside any of
+them.
 
 | Program | Start it with | Use it for | Details |
 |---|---|---|---|
@@ -40,6 +43,7 @@ over ROS 2, so the browser UI and your ROS nodes can drive the robot together (s
 | `talos-servo web` | `uv run talos-servo web`, or `pixi run -e ros web-ros` next to `servo_bridge` | control servos from a browser | [Web UI](#web-ui) |
 | `servo_bridge` node | `pixi run -e ros servo-node` | any servo from ROS 2, one joint per servo | [ROS 2](#ros-2) |
 | `drive_node` | `pixi run drive` | the four mecanum wheels from `/cmd_vel` | [Mecanum base](#ros-2-jazzy-mecanum-base) |
+| `imu` node | `pixi run -e ros imu-node` | IMU accel and gyro on `/imu/data_raw` | [IMU on ROS 2](#imu-on-ros-2) |
 
 ### Which code does each program use?
 
@@ -109,6 +113,18 @@ flowchart LR
   bridge --> js[/"joint_states"/]
   bridge --> status[/"status"/]
   bridge --> num[/"#lt;joint#gt;/temperature,<br/>voltage, current, load, moving"/]
+```
+
+The IMU, with orientation from the Madgwick filter:
+
+```mermaid
+flowchart LR
+  accTitle: imu topics
+  accDescr: the imu node publishes raw accel and gyro, imu_filter_madgwick turns them into orientation
+  imunode(["imu node"]) --> raw[/"/imu/data_raw"/]
+  imunode --> temp[/"/imu/temperature"/]
+  raw --> madgwick(["imu_filter_madgwick"])
+  madgwick --> data[/"/imu/data<br/>with orientation"/]
 ```
 
 `servo_bridge` topics live under `/servo_bridge/`. Both nodes stop the wheels when commands stop
@@ -211,6 +227,33 @@ with Mpu6050() as imu:
     sample = imu.read()
     print(sample.accel, sample.gyro, sample.temperature)
 ```
+
+### IMU on ROS 2
+
+`talos-imu-ros` (`src/talos_servo/ros/imu_node.py`) publishes the sensor as standard ROS
+messages, and the stock `imu_filter_madgwick` package turns that into an orientation. Run each in
+its own terminal on the Pi:
+
+```
+pixi run -e ros imu-node      # zeroes the gyro first: keep the robot still for a second
+pixi run -e ros imu-filter    # settings in config/imu_filter.yaml
+```
+
+| Topic | Type | What it carries |
+|---|---|---|
+| `/imu/data_raw` | `sensor_msgs/Imu` | accel in m/s^2 (gravity included, about +9.8 on z when flat), gyro in rad/s, no orientation, 100 Hz |
+| `/imu/data` | `sensor_msgs/Imu` | the same plus an orientation quaternion, from the Madgwick filter |
+| `/imu/temperature` | `sensor_msgs/Temperature` | die temperature in deg C, 1 Hz |
+
+The node takes the same `--i2c-bus`, `--address`, `--accel-range` and `--gyro-range` options as
+the CLI, plus `--dlpf`. ROS parameters (`--ros-args -p name:=value`): `rate_hz` (100),
+`frame_id` (`imu_link`), `calibrate` (true), `temperature_hz` (1), `max_read_failures` (25, the
+node exits after that many failed reads in a row), `angular_velocity_variance` and
+`linear_acceleration_variance` (covariances for an EKF downstream).
+
+No Kalman filter is needed for orientation. The MPU6050 has no magnetometer, so roll and pitch
+are corrected by gravity and stay stable, but yaw comes from the gyro alone and drifts slowly. A
+`robot_localization` EKF that fuses the IMU with wheel odometry is tracked in #36.
 
 ## Using the library
 
