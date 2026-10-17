@@ -7,6 +7,7 @@ import time
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import Twist
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
@@ -343,8 +344,9 @@ def main(args: list[str] | None = None) -> None:
     node = MecanumDriveNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # On Jazzy, Ctrl+C shuts the context down itself and spin raises ExternalShutdownException.
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
