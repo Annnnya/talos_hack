@@ -61,6 +61,14 @@ class RobotBackend(Protocol):
         """Hinge opening speed (rad/s, + opens). Stops unless repeated. Over
         ROS only."""
 
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        """Set the hinge current hold setpoint (A) and turn it on or off.
+        Over ROS only."""
+
+    def hold_state(self) -> dict[str, Any] | None:
+        """Hinge current hold state, None without ROS or the expansion
+        node."""
+
     def climb(self, speed: float) -> None:
         """Climb speed (m/s, + up): front wheels one way, rear the other.
         Stops unless repeated. Over ROS only."""

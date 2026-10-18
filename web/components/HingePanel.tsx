@@ -68,6 +68,7 @@ export default function HingePanel({
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className="font-semibold">Hinge</h2>
         <span className="text-xs text-black/60 dark:text-white/60">
+          {hinge.current_a === null ? "" : `${Math.abs(hinge.current_a).toFixed(2)} A · `}
           {fmt(hinge.min_deg)}..{fmt(hinge.max_deg)}°, 180 flat
         </span>
       </div>

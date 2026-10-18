@@ -51,7 +51,7 @@ modes:
     free: [mecanum_drive_controller]
     aligning: [mecanum_drive_controller]
     clamping: [wheel_velocity_controller]
-    climbing: []
+    climbing: [wheel_velocity_controller]
   # Replace the free controllers with these while the expansion node opens
   # or closes the hinge (/robot/hinge_motion), so it also works in free mode.
   hinge_motion: [wheel_velocity_controller]
@@ -91,3 +91,19 @@ expansion:
   max_lead_rad: 0.05
   # Stop when /expansion/rate is not repeated this often.
   command_timeout_s: 0.5
+
+# Holding the hinge at a current setpoint while climbing (#142,
+# `talos_servo.hinge_hold`, run by the expansion node). A PI loop moves the
+# hinge goal past the measured angle until the hinge current matches.
+hinge_hold:
+  # Setpoint cap in A. Keep it below the servo's overload protection current.
+  max_current_a: 1.0
+  # Goal lead change per A of error: ki in rad/s per A, kp in rad per A.
+  ki: 0.3
+  kp: 0.0
+  # Time constant (s) of the current filter.
+  filter_s: 0.1
+  # How far (rad) the goal may lead the measured angle.
+  max_offset_rad: 0.25
+  # Opening (rad) with almost no current that counts as no wall contact.
+  no_contact_rad: 0.3

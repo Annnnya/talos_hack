@@ -16,11 +16,14 @@ export default function ClimbPanel({
   send,
   speed,
   enabled,
+  wheelCurrents,
 }: {
   send: (msg: ClientMessage) => void;
   /** m/s while held. */
   speed: number;
   enabled: boolean;
+  /** Wheel currents (A) by joint name. */
+  wheelCurrents: Record<string, number> | null;
 }) {
   const message = useCallback((sign: Sign | 0): ClientMessage => ({ type: "climb", speed: sign * speed }), [speed]);
   const { held, start, end } = useHold(send, message, enabled, CLIMB_KEYS);
@@ -35,6 +38,30 @@ export default function ClimbPanel({
         <HoldButton label="Down" hint="G" sign={-1} held={held} disabled={!enabled} onStart={start} onEnd={end} />
         <HoldButton label="Up" hint="T" sign={1} held={held} disabled={!enabled} onStart={start} onEnd={end} />
       </div>
+      {wheelCurrents && Object.keys(wheelCurrents).length > 0 && (
+        <dl className="mt-3 grid grid-cols-5 gap-1 text-center text-xs">
+          {Object.entries(wheelCurrents).map(([name, a]) => (
+            <div key={name}>
+              <dt className="text-black/60 dark:text-white/60">
+                {name
+                  .split("_")
+                  .slice(0, 2)
+                  .map((w) => w[0].toUpperCase())
+                  .join("")}
+              </dt>
+              <dd className="font-bold tabular-nums">{Math.abs(a).toFixed(2)}</dd>
+            </div>
+          ))}
+          <div>
+            <dt className="text-black/60 dark:text-white/60">Sum A</dt>
+            <dd className="font-bold tabular-nums">
+              {Object.values(wheelCurrents)
+                .reduce((sum, a) => sum + Math.abs(a), 0)
+                .toFixed(2)}
+            </dd>
+          </div>
+        </dl>
+      )}
       <p className="mt-2 text-xs text-black/60 dark:text-white/60">
         Front wheels one way, rear wheels the other. Clamp with the hinge first.
       </p>

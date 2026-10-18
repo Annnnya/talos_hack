@@ -245,12 +245,13 @@ class Robot:
     # --- control loop ----------------------------------------------------
     def tick(self) -> None:
         """One control step: watchdog, all wheel speeds, all wheel positions
-        and speeds, one full servo read."""
+        and speeds, the hinge in full, one other full servo read."""
         with self._lock:
             self._ticks += 1
             self._expire(self.clock())
             self._write_speeds()
             self._read_wheels()
+            self._read_hinge()
             self._read_next()
             self._update_fault()
 
@@ -420,6 +421,12 @@ class Robot:
     def move_hinge(self, rate: float) -> None:
         raise CommandError("the hinge buttons need `talos-servo web --ros`")
 
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        raise CommandError("the hinge hold needs `talos-servo web --ros`")
+
+    def hold_state(self) -> dict[str, Any] | None:
+        return None
+
     def climb(self, speed: float) -> None:
         raise CommandError("climbing needs `talos-servo web --ros`")
 
@@ -523,12 +530,30 @@ class Robot:
             j.position = self._position_from_bus(j, position)
             j.speed = self._speed_to_bus(j, speed)
 
+    def _fast_hinge(self) -> Joint | None:
+        """The hinge joint while online: read in full every tick, since the
+        hinge current hold (#142) runs on its current."""
+        hinge = self.config.hinge
+        if hinge is None:
+            return None
+        j = self.joints.get(hinge.joint)
+        return j if j is not None and j.online else None
+
+    def _read_hinge(self) -> None:
+        j = self._fast_hinge()
+        if j is not None:
+            self._try(j, lambda: self._read(j))
+
     def _read_next(self) -> None:
         """Read one joint, round robin, skipping offline joints except on retry
-        ticks."""
-        names = list(self.joints)
+        ticks. An online hinge is read every tick instead."""
+        fast = self._fast_hinge()
+        names = [n for n in self.joints if fast is None or n != fast.name]
+        if not names:
+            return
         retry = self._ticks % RETRY_OFFLINE_EVERY == 0
         for _ in names:
+            self._next_read %= len(names)
             j = self.joints[names[self._next_read]]
             self._next_read = (self._next_read + 1) % len(names)
             if j.online:

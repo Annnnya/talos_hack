@@ -147,6 +147,15 @@ def _dispatch(
         if error:
             raise CommandError(error)
         return lambda: controller.move_hinge(rate)
+    if kind == "hinge_hold":
+        if not ros:
+            raise CommandError("the hinge hold needs `talos-servo web --ros`")
+        enabled = bool(msg["enabled"])
+        setpoint = _finite(msg, "setpoint")
+        if setpoint < 0:
+            raise CommandError(f"setpoint must be 0 or more, got {setpoint}")
+        setpoint = min(setpoint, controller.config.hinge_hold.max_current_a)
+        return lambda: controller.hinge_hold(enabled, setpoint)
     if kind == "climb":
         if not ros:
             raise CommandError("climbing needs `talos-servo web --ros`")
@@ -221,6 +230,8 @@ def create_app(
             "active_input": status.active_input,
             # Angle and raw servo step for calibration; None without ROS.
             "hinge": controller.hinge_state(),
+            # Hinge current hold (#142); None without the expansion node.
+            "hinge_hold": controller.hold_state(),
         }
 
     async def control_loop() -> None:

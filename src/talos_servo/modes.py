@@ -44,7 +44,10 @@ HOLDING_MODES = frozenset({Mode.CLAMPING, Mode.CLIMBING})
 HINGE_MODES = frozenset({Mode.FREE, Mode.ALIGNING, Mode.CLAMPING})
 # Modes where the wheels may climb (front pair one way, rear pair the
 # other): only after wall nearby.
-CLIMB_MODES = frozenset({Mode.ALIGNING, Mode.CLAMPING})
+CLIMB_MODES = frozenset({Mode.ALIGNING, Mode.CLAMPING, Mode.CLIMBING})
+# Modes where the hinge may hold a current setpoint (#142): the walls are
+# near.
+HOLD_MODES = CLIMB_MODES
 # Modes whose own controllers do not turn the wheels one by one, so hinge
 # and climb motions swap them in (`modes.hinge_motion`).
 SWAP_MODES = frozenset({Mode.FREE, Mode.ALIGNING})

@@ -169,12 +169,32 @@ class ExpansionConfig:
 
 
 @dataclass(frozen=True)
+class HingeHoldConfig:
+    """Holding the hinge at a current setpoint (`talos_servo.hinge_hold`).
+
+    `max_current_a` caps the setpoint. `ki` (rad/s per A) and `kp` (rad per
+    A) move the goal lead from the current error, `filter_s` smooths the
+    measured current, `max_offset_rad` caps how far the goal may lead the
+    measured angle and `no_contact_rad` is how far the hinge may open with
+    hardly any current before the hold gives up.
+    """
+
+    max_current_a: float = 1.0
+    ki: float = 0.3
+    kp: float = 0.0
+    filter_s: float = 0.1
+    max_offset_rad: float = 0.25
+    no_contact_rad: float = 0.3
+
+
+@dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
     modes: ModesConfig | None = None
     model: ModelConfig | None = None
     expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
+    hinge_hold: HingeHoldConfig = field(default_factory=HingeHoldConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -228,6 +248,9 @@ def parse_config(data: dict) -> RobotConfig:
             ),
         )
         config = _clamp_hinge(config)
+    raw_hold = data.get("hinge_hold")
+    if raw_hold is not None:
+        config = replace(config, hinge_hold=_parse_hinge_hold(raw_hold))
     raw_expansion = data.get("expansion")
     if raw_expansion is not None:
         config = replace(
@@ -411,6 +434,26 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
                 f"speed {servo:.3f} rad/s, got {expansion.max_rate_rad_s}"
             )
     return expansion
+
+
+def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("hinge_hold must be a mapping")
+    d = HingeHoldConfig()
+    try:
+        kp = float(raw.get("kp", d.kp))
+        if not math.isfinite(kp) or kp < 0:
+            raise ConfigError(f"kp must be 0 or more, got {kp}")
+        return HingeHoldConfig(
+            max_current_a=_positive(raw, "max_current_a", d.max_current_a),
+            ki=_positive(raw, "ki", d.ki),
+            kp=kp,
+            filter_s=_positive(raw, "filter_s", d.filter_s),
+            max_offset_rad=_positive(raw, "max_offset_rad", d.max_offset_rad),
+            no_contact_rad=_positive(raw, "no_contact_rad", d.no_contact_rad),
+        )
+    except ConfigError as exc:
+        raise ConfigError(f"hinge_hold: {exc}") from exc
 
 
 def _parse_model(

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ClimbPanel from "@/components/ClimbPanel";
 import HingePanel from "@/components/HingePanel";
+import HoldPanel from "@/components/HoldPanel";
 import Joystick from "@/components/Joystick";
 import ReleaseStopButton from "@/components/ReleaseStopButton";
 import SpeedSlider from "@/components/SpeedSlider";
@@ -63,7 +64,7 @@ function useSpeedPercent() {
 }
 
 export default function Home() {
-  const { status, limits, ros, stopped, mode, modeReason, activeInput, hinge, lastError, clearError, send } =
+  const { status, servos, limits, ros, stopped, mode, modeReason, activeInput, hinge, hold, lastError, clearError, send } =
     useBridge();
   const connected = status === "connected";
   // Same modes as HINGE_MODES in modes.py; an unknown mode is left to the
@@ -71,7 +72,10 @@ export default function Home() {
   const canHinge =
     connected && ros && !stopped && (mode === null || mode === "free" || mode === "aligning" || mode === "clamping");
   // CLIMB_MODES in modes.py: only after wall nearby.
-  const nearWall = mode === "aligning" || mode === "clamping";
+  const nearWall = mode === "aligning" || mode === "clamping" || mode === "climbing";
+  // HOLD_MODES in modes.py; holding keeps going through STOP.
+  const canHold = connected && ros && nearWall;
+  const hingeTemp = servos.find((s) => s.name === hinge?.joint)?.temp ?? null;
   const canClimb = connected && ros && !stopped && nearWall;
   const [speedPercent, setSpeedPercent] = useSpeedPercent();
   const scale = speedPercent / 100;
@@ -179,7 +183,18 @@ export default function Home() {
         />
       )}
 
-      {ros && nearWall && <ClimbPanel send={send} speed={limits.climb_max * scale} enabled={canClimb} />}
+      {ros && hold && (nearWall || hold.active) && (
+        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} />
+      )}
+
+      {ros && nearWall && (
+        <ClimbPanel
+          send={send}
+          speed={limits.climb_max * scale}
+          enabled={canClimb}
+          wheelCurrents={hinge?.wheel_currents ?? null}
+        />
+      )}
 
       {hinge && <HingePanel hinge={hinge} send={send} enabled={canHinge} />}
 

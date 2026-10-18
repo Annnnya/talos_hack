@@ -22,6 +22,7 @@ Differences from driving the bus directly:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import threading
@@ -136,6 +137,10 @@ class RosBackend:
         self._stop_beat: tuple[bool, float] | None = None
         # Hinge opening angle (rad) from /joint_states, None while unknown.
         self._hinge_alpha: float | None = None
+        self._hinge_current: float | None = None
+        # Last /hinge_hold/state from the expansion node, and when it came.
+        self._hold: dict[str, Any] | None = None
+        self._hold_at: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -151,6 +156,7 @@ class RosBackend:
                 on_mode=self._on_mode,
                 on_mode_reason=self._on_mode_reason,
                 on_active_input=self._on_active_input,
+                on_hold_state=self._on_hold_state,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -238,6 +244,8 @@ class RosBackend:
                     alpha = msg.position[i] if i < len(msg.position) else None
                     finite = alpha is not None and math.isfinite(alpha)
                     self._hinge_alpha = alpha if finite else None
+                    if i < len(msg.effort) and math.isfinite(msg.effort[i]):
+                        self._hinge_current = msg.effort[i]
                 j = self.joints.get(name)
                 if j is None:
                     continue
@@ -498,7 +506,47 @@ class RosBackend:
             "min_deg": math.degrees(hinge.min_rad),
             "max_deg": math.degrees(hinge.max_rad),
             "max_rate": self.config.expansion.max_rate_rad_s,
+            "current_a": self._hinge_current,
+            "wheel_currents": self._wheel_currents(),
         }
+
+    def _wheel_currents(self) -> dict[str, float] | None:
+        base = self.config.base
+        if base is None:
+            return None
+        with self._lock:
+            return {
+                w: self.joints[w].current
+                for w in base.wheels
+                if w in self.joints and self.joints[w].online
+            }
+
+    def _on_hold_state(self, msg: String) -> None:
+        try:
+            state = json.loads(msg.data)
+        except ValueError:
+            return
+        with self._lock:
+            self._hold, self._hold_at = state, self._clock()
+
+    def hold_state(self) -> dict[str, Any] | None:
+        """Hinge current hold state from the expansion node, None when it
+        has gone quiet."""
+        with self._lock:
+            if self._hold_at is None:
+                return None
+            if self._clock() - self._hold_at > STATUS_STALE_AFTER:
+                return None
+            return dict(self._hold)
+
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        """Set the hold setpoint (A), then turn the hold on or off."""
+        node = self._require_node()
+        node.hold_setpoint_pub.publish(Float64(data=float(setpoint_a)))
+        client = node.hold_enable_client
+        if not client.service_is_ready():
+            raise CommandError("hinge hold: the expansion node is not running")
+        self._call(client, SetBool.Request(data=enabled), "hinge hold")
 
     def stop(
         self, joint: str, *, source: str = SOURCE_WEB, client: str | None = None

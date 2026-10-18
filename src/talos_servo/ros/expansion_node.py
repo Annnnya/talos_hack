@@ -26,6 +26,7 @@ Run with `pixi run -e ros expansion-node`.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import signal
 import sys
@@ -48,12 +49,22 @@ from talos_servo.defaults import (
     STOP_LOCK_TIMEOUT_S,
 )
 from talos_servo.expansion import STILL, Expansion, Wheels
-from talos_servo.modes import CLIMB_MODES, HINGE_MODES, SWAP_MODES, Mode
+from talos_servo.hinge_hold import HingeHold
+from talos_servo.modes import (
+    CLIMB_MODES,
+    HINGE_MODES,
+    HOLD_MODES,
+    SWAP_MODES,
+    Mode,
+)
 from talos_servo.ros.names import (
     CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
     HINGE_COMMANDS_TOPIC,
     HINGE_MOTION_SERVICE,
+    HOLD_ENABLE_SERVICE,
+    HOLD_SETPOINT_TOPIC,
+    HOLD_STATE_TOPIC,
     LATCHED,
     MODE_TOPIC,
     STOP_LOCK_TOPIC,
@@ -65,6 +76,8 @@ JOINT_STATES_TOPIC = "/joint_states"
 # Wait this long before asking the mode node again after a refusal.
 GRANT_RETRY_S = 1.0
 LOG_THROTTLE_S = 2.0
+# Publish the hold state every this many ticks (10 Hz at 50 Hz).
+HOLD_STATE_EVERY = 5
 
 
 class ExpansionNode(Node):
@@ -94,6 +107,7 @@ class ExpansionNode(Node):
         self.max_climb = self.settings.max_climb_speed_m_s
         self.wheel_radius_m = config.base.wheel_radius_m
         self._alpha = math.nan
+        self._current = math.nan
         self._mode: Mode | None = None
         self._stopped = True
         self._stop_stamp: float | None = None
@@ -103,6 +117,16 @@ class ExpansionNode(Node):
         self._retry_at = 0.0
         self._moving = False
         self._held: str | None = None
+        # Hinge current hold (#142); None without a calibrated hinge.
+        self.hold = (
+            HingeHold(
+                config.hinge_hold, config.hinge, self.settings.max_rate_rad_s
+            )
+            if config.hinge is not None
+            else None
+        )
+        self._hold_note: str | None = None
+        self._ticks = 0
 
         self.hinge_pub = self.create_publisher(
             Float64MultiArray, HINGE_COMMANDS_TOPIC, QUEUE_DEPTH
@@ -126,6 +150,13 @@ class ExpansionNode(Node):
         self.hinge_motion_client = self.create_client(
             SetBool, HINGE_MOTION_SERVICE
         )
+        self.create_subscription(
+            Float64, HOLD_SETPOINT_TOPIC, self.on_hold_setpoint, LATCHED
+        )
+        self.create_service(SetBool, HOLD_ENABLE_SERVICE, self.on_hold_enable)
+        self.hold_state_pub = self.create_publisher(
+            String, HOLD_STATE_TOPIC, QUEUE_DEPTH
+        )
         self.create_timer(self.period_s, self.tick)
 
     @property
@@ -143,6 +174,78 @@ class ExpansionNode(Node):
     def on_rate(self, msg: Float64) -> None:
         self._rate = self.expansion.clamp_rate(float(msg.data))
         self._rate_stamp = self._now()
+        if self._rate and self.hold is not None and self.hold.active:
+            # A manual move and the hold would fight over the hinge goal.
+            self._stop_hold("manual hinge move")
+
+    # --- hinge current hold (#142) ---------------------------------------
+    def on_hold_setpoint(self, msg: Float64) -> None:
+        if self.hold is None:
+            return
+        try:
+            self.hold.set_setpoint(float(msg.data))
+        except ValueError as exc:
+            self.get_logger().warning(f"hold setpoint: {exc}")
+
+    def on_hold_enable(
+        self, request: SetBool.Request, response: SetBool.Response
+    ) -> SetBool.Response:
+        error = None
+        if self.hold is None:
+            error = "no calibrated hinge in the config"
+        elif not request.data:
+            self._stop_hold("turned off")
+        elif self._mode not in HOLD_MODES:
+            error = "press wall nearby first"
+        elif not math.isfinite(self._alpha):
+            error = "the hinge angle is unknown"
+        else:
+            self.hold.start(self._alpha)
+            self._hold_note = None
+            self.get_logger().info(
+                f"hinge hold on at {self.hold.setpoint_a:.2f} A"
+            )
+        response.success = error is None
+        response.message = error or ("hold on" if request.data else "hold off")
+        return response
+
+    def _stop_hold(self, why: str) -> None:
+        if self.hold is not None and self.hold.active:
+            self.hold.stop()
+            self.get_logger().info(f"hinge hold off: {why}")
+        self._hold_note = why
+
+    def hold_tick(self) -> None:
+        """Run the hold loop: through STOP too, since letting go of the walls
+        drops the robot. Only the toggle, a manual move or leaving the wall
+        modes ends it."""
+        hold = self.hold
+        if hold is None:
+            return
+        if hold.active and self._mode not in HOLD_MODES:
+            self._stop_hold(f"mode {self._mode.value if self._mode else '?'}")
+        step = hold.step(self._alpha, self._current, self.period_s)
+        if step.stopped:
+            self._stop_hold(step.stopped)
+            self.get_logger().warning(f"hinge hold: {step.stopped}")
+        if step.goal is not None:
+            self.hinge_pub.publish(Float64MultiArray(data=[step.goal]))
+        self._ticks += 1
+        if self._ticks % HOLD_STATE_EVERY == 0:
+            self.hold_state_pub.publish(
+                String(
+                    data=json.dumps(
+                        {
+                            "active": hold.active,
+                            "setpoint_a": hold.setpoint_a,
+                            "measured_a": round(step.measured_a, 4),
+                            "offset_rad": round(step.offset_rad, 4),
+                            "max_current_a": hold.settings.max_current_a,
+                            "note": self._hold_note,
+                        }
+                    )
+                )
+            )
 
     def on_climb(self, msg: Float64) -> None:
         speed = float(msg.data)
@@ -168,6 +271,8 @@ class ExpansionNode(Node):
         try:
             index = list(msg.name).index(self.hinge)
             self._alpha = float(msg.position[index])
+            if index < len(msg.effort):
+                self._current = float(msg.effort[index])
         except (ValueError, IndexError):
             pass
 
@@ -185,13 +290,14 @@ class ExpansionNode(Node):
         self._stopped = bool(msg.data)
         self._stop_stamp = self._now()
 
-    def blocked(self) -> str | None:
-        """Why the hinge may not move now, or None."""
+    def blocked(self, modes: frozenset[Mode] = HINGE_MODES) -> str | None:
+        """Why the hinge (or with CLIMB_MODES the climb) may not move now, or
+        None."""
         now = self._now()
         if self._mode is None:
             return "no robot mode yet"
-        if self._mode not in HINGE_MODES:
-            return f"the hinge cannot move while {self._mode.value}"
+        if self._mode not in modes:
+            return f"cannot move while {self._mode.value}"
         if (
             self._stop_stamp is None
             or now - self._stop_stamp > STOP_LOCK_TIMEOUT_S
@@ -210,6 +316,7 @@ class ExpansionNode(Node):
         return self._rate
 
     def tick(self) -> None:
+        self.hold_tick()
         rate = self.requested_rate()
         climb = self.requested_climb()
         if climb and not rate:
@@ -233,9 +340,7 @@ class ExpansionNode(Node):
     def climb_tick(self, speed: float) -> None:
         """Turn the front and rear pairs opposite ways; the hinge keeps its
         goal so a clamped robot keeps pressing on the walls."""
-        why = self.blocked()
-        if why is None and self._mode not in CLIMB_MODES:
-            why = f"cannot climb while {self._mode.value}"
+        why = self.blocked(CLIMB_MODES)
         if why is not None:
             self.halt(why)
             return

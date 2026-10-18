@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ClientMessage,
   HingeState,
+  HoldState,
   Limits,
   Mode,
   ServerMessage,
@@ -38,6 +39,7 @@ export function useBridge() {
   const [modeReason, setModeReason] = useState<string | null>(null);
   const [activeInput, setActiveInput] = useState<string | null>(null);
   const [hinge, setHinge] = useState<HingeState | null>(null);
+  const [hold, setHold] = useState<HoldState | null>(null);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export function useBridge() {
           setModeReason(msg.mode_reason);
           setActiveInput(msg.active_input);
           setHinge(msg.hinge ?? null);
+          setHold(msg.hinge_hold ?? null);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -101,6 +104,7 @@ export function useBridge() {
     modeReason,
     activeInput,
     hinge,
+    hold,
     settings,
     clientId,
     lastError,

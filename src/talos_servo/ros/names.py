@@ -25,6 +25,11 @@ EXPANSION_RATE_TOPIC = "/expansion/rate"
 # Climb speed in m/s (std_msgs/Float64, + up): front wheels one way, rear
 # wheels the other. Repeat it like the rate.
 CLIMB_TOPIC = "/expansion/climb"
+# Hinge current hold (#142): setpoint in A (std_msgs/Float64, latched), on
+# and off (std_srvs/SetBool), and its state as JSON (std_msgs/String).
+HOLD_SETPOINT_TOPIC = "/hinge_hold/setpoint"
+HOLD_ENABLE_SERVICE = "/hinge_hold/enable"
+HOLD_STATE_TOPIC = "/hinge_hold/state"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
 
