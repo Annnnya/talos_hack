@@ -3,6 +3,8 @@
 # Changes take effect on restart (`talos.service`, or the command you ran).
 
 # Speed cap in steps/s for every joint. Low on purpose; the STS3215 tops out near 3000.
+# Under ros2_control the base wheels skip it: mecanum_drive_controller limits them
+# to max_linear_speed / max_angular_speed below.
 max_speed: 1000
 # How often joint state goes to the web UI and ROS.
 telemetry_hz: 20

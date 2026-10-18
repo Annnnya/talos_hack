@@ -150,6 +150,26 @@ def test_inverted_wheel_turns_the_servo_the_other_way(sdk, clock):
         robot.close()
 
 
+def test_base_wheels_skip_the_joint_speed_cap(sdk, clock):
+    # The mecanum controller limits the body velocity instead.
+    robot = Robot(sdk.bus(), config(BASE), clock=clock)
+    robot.open()
+    node = HardwareBridgeNode(robot)
+    try:
+        fast = step_speed_to_rad(BASE["max_speed"] * 2)
+        node.on_commands(commands(["fl"], velocity=[fast]))
+        assert robot.joints["fl"].target_speed == BASE["max_speed"] * 2
+    finally:
+        node.destroy_node()
+        robot.close()
+
+
+def test_other_speed_joints_keep_the_cap(node, robot):
+    fast = step_speed_to_rad(SMALL["max_speed"] * 2)
+    node.on_commands(commands(["wheel"], velocity=[fast]))
+    assert robot.joints["wheel"].target_speed == SMALL["max_speed"]
+
+
 def test_same_bend_goal_is_written_once(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))

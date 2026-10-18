@@ -23,6 +23,7 @@ from typing import Any
 from talos_servo.bus import (
     DEFAULT_ACCELERATION,
     MAX_ACCELERATION,
+    MAX_SPEED,
     MODE_POSITION,
     MODE_WHEEL,
     ServoBus,
@@ -251,16 +252,20 @@ class Robot:
         source: str = SOURCE_WEB,
         client: str | None = None,
         expires: bool = False,
+        capped: bool = True,
     ) -> None:
         """Set a speed joint's speed; the next `tick()` sends it.
 
         With `expires`, the joint stops unless the command is repeated within
         `config.command_timeout_s` (streamed commands such as ROS velocity
-        commands).
+        commands). With `capped` false the speed is clamped to the servo's
+        range only, not `config.max_speed`: for callers that enforce their
+        own limits (the base wheels under mecanum_drive_controller).
         """
+        limit = self.config.max_speed if capped else MAX_SPEED
         with self._lock:
             j = self._get(joint)
-            speed = check_spin(j, speed, self.config.max_speed)
+            speed = check_spin(j, speed, limit)
             self._acceleration[joint] = clamp(acceleration, 1, MAX_ACCELERATION)
             self._set_speed(j, speed, expires, source, client)
 

@@ -86,6 +86,13 @@ class HardwareBridgeNode(Node):
             self.declare_parameter("status_hz", DEFAULT_STATUS_HZ).value
         )
         self._controls = {name: j.control for name, j in robot.joints.items()}
+        # mecanum_drive_controller limits the body velocity from the base
+        # limits, so the per-joint max_speed cap does not apply to these.
+        self._uncapped = (
+            frozenset(config.base.wheels)
+            if config.base is not None
+            else frozenset()
+        )
         self._unwrappers = {
             name: Unwrapper()
             for name, control in self._controls.items()
@@ -189,6 +196,7 @@ class HardwareBridgeNode(Node):
                     rad_speed_to_steps(velocity),
                     source=SOURCE_ROS,
                     expires=True,
+                    capped=joint not in self._uncapped,
                 ),
             )
         for joint, position in positions.items():
