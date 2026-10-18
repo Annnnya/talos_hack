@@ -181,7 +181,10 @@ elsewhere (#87) reuse it.
   and logged; stops always work. The latch frees itself once the lost joints
   answer again and wheel writes work for `FAULT_CLEAR_S` (1 s). A servo that
   is missing from the start does not latch, so bench tests with some servos
-  unplugged still work.
+  unplugged still work. A failed wheel sync read (odometry) does not latch
+  either: one lost request packet fails it, and braking for a second on that
+  would be worse. A wheel that really stops answering is caught by the
+  round-robin read within one cycle (one joint per tick, about 0.1 s).
 - **Shutdown:** `Robot.close()` runs in `finally`, also on Ctrl+C.
 
 ## Bench: the whole robot

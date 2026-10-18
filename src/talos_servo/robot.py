@@ -17,7 +17,9 @@ turned off on the way, so nothing goes limp while the robot hangs between two
 walls. A bus fault (a wheel write fails, or a joint that was online stops
 answering) puts the robot in the safe state and latches it: commands that
 would move refuse with `CommandError` until the lost joints answer again and
-wheel writes work for `FAULT_CLEAR_S`. Stops are always accepted.
+wheel writes work for `FAULT_CLEAR_S`. Stops are always accepted. A failed
+wheel sync read does not latch on its own: a wheel that stops answering is
+caught by the round-robin read.
 """
 
 from __future__ import annotations
@@ -486,8 +488,8 @@ class Robot:
     def _read_wheels(self) -> None:
         """Position and speed of every online speed joint in one packet.
 
-        Online state and errors stay with the round robin full read, so a
-        servo missing here is only skipped.
+        Online state, errors and the safe state stay with the round robin
+        full read, so a servo missing here is only skipped.
         """
         wheels = {
             self.joints[n].id: self.joints[n]
