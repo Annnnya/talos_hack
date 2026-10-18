@@ -78,6 +78,7 @@ export default function Home() {
   const hingeServo = servos.find((s) => s.name === hinge?.joint);
   const hingeTemp = hingeServo?.temp ?? null;
   const hingeLoad = hingeServo?.load ?? null;
+  const hingeFault = hingeServo?.fault ?? null;
   const canClimb = connected && ros && !stopped && nearWall;
   const [speedPercent, setSpeedPercent] = useSpeedPercent();
   const scale = speedPercent / 100;
@@ -186,7 +187,7 @@ export default function Home() {
       )}
 
       {ros && hold && (nearWall || hold.active) && (
-        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} load={hingeLoad} />
+        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} fault={hingeFault} load={hingeLoad} />
       )}
 
       {ros && nearWall && (

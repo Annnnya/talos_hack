@@ -41,6 +41,7 @@ export default function HoldPanel({
   send,
   enabled,
   temp,
+  fault,
   load,
 }: {
   hold: HoldState;
@@ -48,10 +49,12 @@ export default function HoldPanel({
   enabled: boolean;
   /** Hinge servo temperature, °C. */
   temp: number | null;
+  /** The hinge servo's protection flag, e.g. "Overload error!". */
+  fault: string | null;
   /** Hinge servo load, raw 0..1000 (0.1 % each). */
   load: number | null;
 }) {
-  const loadPct = load === null ? null : Math.abs(load) / 10;
+  const loadPct = hold.load_pct ?? (load === null ? null : Math.abs(load) / 10);
   const [setpoint, setSetpoint] = useState(Math.min(0.3, hold.max_current_a));
   const [samples, setSamples] = useState<Sample[]>([]);
   const activeRef = useRef(hold.active);
@@ -131,6 +134,16 @@ export default function HoldPanel({
       </button>
       {hold.note && !hold.active && (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Stopped: {hold.note}</p>
+      )}
+      {fault && (
+        <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">
+          Hinge servo reports: {fault} It runs at reduced drive until the load drops.
+        </p>
+      )}
+      {hold.load_limited && (
+        <p className="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+          Load limit: backing off to protect the servo.
+        </p>
       )}
       {loadPct !== null && loadPct >= LOAD_WARN_PCT && (
         <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">

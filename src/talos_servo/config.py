@@ -185,6 +185,9 @@ class HingeHoldConfig:
     filter_s: float = 0.1
     max_offset_rad: float = 0.25
     no_contact_rad: float = 0.3
+    # Back the goal off above this servo load (%); the servo cuts its drive
+    # after 2 s above 50 %.
+    max_load_pct: float = 40.0
 
 
 @dataclass(frozen=True)
@@ -451,6 +454,7 @@ def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
             filter_s=_positive(raw, "filter_s", d.filter_s),
             max_offset_rad=_positive(raw, "max_offset_rad", d.max_offset_rad),
             no_contact_rad=_positive(raw, "no_contact_rad", d.no_contact_rad),
+            max_load_pct=_positive(raw, "max_load_pct", d.max_load_pct),
         )
     except ConfigError as exc:
         raise ConfigError(f"hinge_hold: {exc}") from exc

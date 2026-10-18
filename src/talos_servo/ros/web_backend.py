@@ -327,6 +327,7 @@ class RosBackend:
             float(values["voltage"]),
             float(values["current"]),
         )
+        j.fault = values.get("fault") or None
         self._apply_last_command(j, values, now)
 
     def _apply_last_command(

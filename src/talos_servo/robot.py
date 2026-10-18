@@ -98,6 +98,8 @@ class Joint:
     target: int | None = None
     target_speed: int = 0
     error: str | None = None
+    # The servo's own protection flag (e.g. overload) while it still answers.
+    fault: str | None = None
     command_source: str | None = None
     command_client: str | None = None
     # Monotonic time of the last command, local to this process; never sent as
@@ -584,6 +586,12 @@ class Robot:
         j.load = self._speed_to_bus(j, t.status.load)
         j.voltage, j.temp = t.status.voltage, t.status.temperature
         j.current, j.moving = t.status.current, t.status.moving
+        if t.fault != j.fault:
+            if t.fault:
+                log.warning("%s reports %s", j.name, t.fault)
+            else:
+                log.info("%s fault cleared", j.name)
+        j.fault = t.fault
 
     def _stop_speed_joints(
         self, source: str | None = None, client: str | None = None

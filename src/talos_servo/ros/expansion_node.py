@@ -39,13 +39,14 @@ from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.task import Future
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64, Float64MultiArray, String
+from std_msgs.msg import Bool, Float32, Float64, Float64MultiArray, String
 from std_srvs.srv import SetBool
 
 from talos_servo.config import ConfigError, RobotConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
     QUEUE_DEPTH,
+    ROBOT_NS,
     STOP_LOCK_TIMEOUT_S,
 )
 from talos_servo.expansion import STILL, Expansion, Wheels
@@ -78,6 +79,9 @@ GRANT_RETRY_S = 1.0
 LOG_THROTTLE_S = 2.0
 # Publish the hold state every this many ticks (10 Hz at 50 Hz).
 HOLD_STATE_EVERY = 5
+# Raw servo load counts per percent, and when a load reading is too old.
+LOAD_PER_PCT = 10.0
+LOAD_STALE_S = 1.0
 
 
 class ExpansionNode(Node):
@@ -154,6 +158,16 @@ class ExpansionNode(Node):
             Float64, HOLD_SETPOINT_TOPIC, self.on_hold_setpoint, LATCHED
         )
         self.create_service(SetBool, HOLD_ENABLE_SERVICE, self.on_hold_enable)
+        # Hinge load from the bridge readouts (raw, 0.1 % each), for the
+        # hold's load limit.
+        self._load_pct: float | None = None
+        self._load_at: float | None = None
+        self.create_subscription(
+            Float32,
+            f"{ROBOT_NS}/{self.hinge}/load",
+            self.on_hinge_load,
+            QUEUE_DEPTH,
+        )
         self.hold_state_pub = self.create_publisher(
             String, HOLD_STATE_TOPIC, QUEUE_DEPTH
         )
@@ -209,6 +223,16 @@ class ExpansionNode(Node):
         response.message = error or ("hold on" if request.data else "hold off")
         return response
 
+    def on_hinge_load(self, msg: Float32) -> None:
+        self._load_pct = abs(float(msg.data)) / LOAD_PER_PCT
+        self._load_at = self._now()
+
+    def hinge_load_pct(self) -> float | None:
+        """Last hinge load in %, None once it is stale."""
+        if self._load_at is None or self._now() - self._load_at > LOAD_STALE_S:
+            return None
+        return self._load_pct
+
     def _stop_hold(self, why: str) -> None:
         if self.hold is not None and self.hold.active:
             self.hold.stop()
@@ -224,7 +248,8 @@ class ExpansionNode(Node):
             return
         if hold.active and self._mode not in HOLD_MODES:
             self._stop_hold(f"mode {self._mode.value if self._mode else '?'}")
-        step = hold.step(self._alpha, self._current, self.period_s)
+        load = self.hinge_load_pct()
+        step = hold.step(self._alpha, self._current, self.period_s, load)
         if step.stopped:
             self._stop_hold(step.stopped)
             self.get_logger().warning(f"hinge hold: {step.stopped}")
@@ -242,6 +267,8 @@ class ExpansionNode(Node):
                             "offset_rad": round(step.offset_rad, 4),
                             "max_current_a": hold.settings.max_current_a,
                             "note": self._hold_note,
+                            "load_pct": load,
+                            "load_limited": step.load_limited,
                         }
                     )
                 )

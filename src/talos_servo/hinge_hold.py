@@ -26,6 +26,10 @@ from talos_servo.hinge import Hinge
 
 # Below this share of the setpoint the legs count as not touching a wall.
 NO_CONTACT_SHARE = 0.3
+# Above `max_load_pct` the goal backs off as if the current were this many
+# A over the setpoint: the servo cuts to 20 % drive after 2 s above 50 %
+# load, which would drop a climbing robot.
+LOAD_BACKOFF_A = 0.5
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,8 @@ class HoldStep:
     offset_rad: float
     # Why the hold stopped by itself, once.
     stopped: str | None = None
+    # True while the load limit overrides the current loop.
+    load_limited: bool = False
 
 
 class HingeHold:
@@ -84,7 +90,13 @@ class HingeHold:
             self.measured_a = self._filtered
         return self.measured_a
 
-    def step(self, alpha: float, current_a: float, dt: float) -> HoldStep:
+    def step(
+        self,
+        alpha: float,
+        current_a: float,
+        dt: float,
+        load_pct: float | None = None,
+    ) -> HoldStep:
         measured = self.measure(current_a, dt)
         if not self.active or self._goal is None:
             return HoldStep(None, measured, 0.0)
@@ -93,6 +105,9 @@ class HingeHold:
             return HoldStep(None, measured, 0.0)
         s = self.settings
         error = self.setpoint_a - measured
+        limited = load_pct is not None and load_pct >= s.max_load_pct
+        if limited:
+            error = min(error, -LOAD_BACKOFF_A)
         self._integral = min(
             s.max_offset_rad, max(0.0, self._integral + s.ki * error * dt)
         )
@@ -110,4 +125,4 @@ class HingeHold:
         ):
             self.stop()
             return HoldStep(None, measured, 0.0, stopped="no wall contact")
-        return HoldStep(goal, measured, goal - alpha)
+        return HoldStep(goal, measured, goal - alpha, load_limited=limited)

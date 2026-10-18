@@ -99,6 +99,9 @@ class ServoTelemetry:
     position: int
     speed: int
     status: ServoStatus
+    # The servo's own protection flags (overload, overheat, ...) from the
+    # reply, None when clear. The readings are still valid.
+    fault: str | None = None
 
 
 class ServoError(RuntimeError):
@@ -455,7 +458,11 @@ class ServoBus:
         data, comm, error = self._handler.readTxRx(
             servo_id, TELEMETRY_START, TELEMETRY_LENGTH
         )
-        self._check(comm, error, f"read telemetry of servo {servo_id}")
+        # A protection flag comes with a full, valid reply: report it with
+        # the readings instead of failing, so a servo protecting itself does
+        # not look offline. Only a failed transfer raises.
+        self._check(comm, 0, f"read telemetry of servo {servo_id}")
+        fault = self._handler.getRxPacketError(error) if error else None
         if len(data) != TELEMETRY_LENGTH:
             raise ServoError(
                 f"read telemetry of servo {servo_id} failed: got {len(data)} "
@@ -485,6 +492,7 @@ class ServoBus:
                 ),
                 moving=bool(byte(SMS_STS_MOVING)),
             ),
+            fault=fault,
         )
 
     def is_present(self, servo_id: int) -> bool:

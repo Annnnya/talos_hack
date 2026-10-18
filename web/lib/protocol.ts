@@ -32,6 +32,8 @@ export interface ServoState {
   target: number | null;
   target_speed: number;
   error: string | null;
+  /** The servo's own protection flag (overload, overheat) while it answers. */
+  fault: string | null;
   last_command: LastCommand | null;
 }
 
@@ -79,6 +81,10 @@ export interface HoldState {
   max_current_a: number;
   /** Why it stopped last ("no wall contact", "turned off", ...). */
   note: string | null;
+  /** Hinge servo load in %, null when stale. */
+  load_pct: number | null;
+  /** True while the load limit backs the goal off. */
+  load_limited: boolean;
 }
 
 /** Shared by every browser, kept by the server until it restarts. */
