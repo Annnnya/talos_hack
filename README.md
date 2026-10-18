@@ -377,10 +377,11 @@ uv run talos-servo web                    # or: pixi run -e ros web-ros
 Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
 joint, including wheels the CLI or a ROS node is driving, and over ROS turns
 STOP on (see twist_mux above); **Release STOP** (or Enter) lets the base
-drive again. `/` has both buttons too and keeps its own connection. When the last browser disconnects,
-the server stops only what the web commanded: the joints it spins and its
-twist_mux input. Over ROS, keyboard driving carries on. For UI work with hot
-reload, run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
+drive again. `/` has both buttons too and keeps its own connection. When the
+last browser disconnects, the server stops only what the web commanded: the
+joints it spins and its twist_mux input. Over ROS, keyboard driving carries
+on. For UI work with hot reload, run `npm run dev` in `web/` with
+`NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
