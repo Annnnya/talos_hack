@@ -29,7 +29,23 @@ class RobotBackend(Protocol):
     # `source` and `client` say who sent a command (see SOURCE_* in robot.py);
     # the UI shows it next to the sliders.
     def stop_all(self, *, source: str = ..., client: str | None = None) -> None:
-        """Best effort, never raises: it runs when the last browser leaves."""
+        """Stop every speed joint. Best effort, never raises."""
+
+    def stop_own(self, *, source: str = ..., client: str | None = None) -> None:
+        """Stop only what this backend commanded, so another interface keeps
+        driving. Best effort, never raises: it runs when the last browser
+        leaves."""
+
+    def drive(
+        self,
+        linear_x: float,
+        linear_y: float,
+        angular_z: float,
+        *,
+        source: str = ...,
+        client: str | None = None,
+    ) -> None:
+        """Drive the base (m/s, m/s, rad/s). Stops unless repeated."""
 
     def stop(
         self, joint: str, *, source: str = ..., client: str | None = None

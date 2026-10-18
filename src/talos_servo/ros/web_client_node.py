@@ -34,6 +34,7 @@ class WebClientNode(Node):
         on_status: Callable[[DiagnosticArray], None],
         *,
         node_name: str = NODE_NAME,
+        cmd_vel_topic: str = CMD_VEL_TOPIC,
         context: Context | None = None,
     ) -> None:
         super().__init__(node_name, context=context)
@@ -44,7 +45,7 @@ class WebClientNode(Node):
             JointState, f"{ROBOT_NS}/velocity_cmd", QUEUE_DEPTH
         )
         self.cmd_vel_pub = self.create_publisher(
-            Twist, CMD_VEL_TOPIC, QUEUE_DEPTH
+            Twist, cmd_vel_topic, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH
