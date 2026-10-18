@@ -57,6 +57,8 @@ def test_initial_state_lists_enabled_joints(client):
     assert msg["limits"]["linear_max"] is None
     assert msg["limits"]["angular_max"] is None
     assert msg["ros"] is False
+    # No twist_mux on the direct bus, so no STOP lock to report.
+    assert msg["stopped"] is None
     assert all(s["last_command"] is None for s in msg["servos"])
 
 
@@ -253,6 +255,24 @@ def test_drive_without_ros_is_an_error(client, robot):
         error = receive_until(ws, lambda m: m["type"] == "error")
     assert "--ros" in error["message"]
     assert robot.joints["wheel"].target_speed == 0
+
+
+def test_release_stop_without_ros_is_an_error(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "release_stop"})
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+
+
+def test_release_stop_reaches_the_backend():
+    calls = []
+
+    class Recorder:
+        def release_stop(self, **who):
+            calls.append(who)
+
+    server._dispatch(Recorder(), {"type": "release_stop"}, "abc", ros=True)()
+    assert calls == [{"source": "web", "client": "abc"}]
 
 
 def test_a_held_bad_drive_reports_its_error_once(client):

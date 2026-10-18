@@ -347,6 +347,15 @@ class Robot:
         joint. Never raises."""
         self.stop_all(source=source, client=client)
 
+    def stopped(self) -> bool | None:
+        """No twist_mux on the direct bus, so no STOP lock."""
+        return None
+
+    def release_stop(
+        self, *, source: str = SOURCE_WEB, client: str | None = None
+    ) -> None:
+        raise CommandError("releasing STOP needs `talos-servo web --ros`")
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)
