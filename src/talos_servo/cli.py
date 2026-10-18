@@ -19,7 +19,12 @@ from talos_servo.bus import (
     ServoBus,
     ServoError,
 )
-from talos_servo.defaults import DEFAULT_CONFIG, IMU_BUS_ENV_VAR, PORT_ENV_VAR
+from talos_servo.defaults import (
+    DEFAULT_CONFIG,
+    IMU_BUS_ENV_VAR,
+    KEYBOARD_CMD_VEL_TOPIC,
+    PORT_ENV_VAR,
+)
 from talos_servo.imu import (
     ACCEL_RANGES,
     DEFAULT_ACCEL_RANGE,
@@ -138,7 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     drive = sub.add_parser(
         "drive",
         parents=[port_opts, ros_opts],
-        help="drive the mecanum base with the keyboard (W/A/S/D, Q/E, X)",
+        help=(
+            "drive the mecanum base with the keyboard (W/A/S/D, Q/E, X; "
+            "with --ros also N wall nearby, L release)"
+        ),
     )
     drive.add_argument(
         "--linear",
@@ -278,9 +286,14 @@ def _ros_missing(exc: ImportError, example: str) -> int:
 
 
 def _over_ros(
-    args: argparse.Namespace, run: Callable[[Any, Any, Any], None]
+    args: argparse.Namespace,
+    run: Callable[[Any, Any, Any], None],
+    **backend_options: Any,
 ) -> int:
-    """Run `run(cli_commands, backend, config)` for a command with --ros."""
+    """Run `run(cli_commands, backend, config)` for a command with --ros.
+
+    `backend_options` go to the `RosBackend`.
+    """
     try:
         from talos_servo.config import ConfigError, load_config
         from talos_servo.robot import CommandError
@@ -300,7 +313,11 @@ def _over_ros(
             "acceleration input"
         )
     try:
-        run(cli_commands, cli_commands.RosBackend(config), config)
+        run(
+            cli_commands,
+            cli_commands.RosBackend(config, **backend_options),
+            config,
+        )
     except CommandError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -387,13 +404,14 @@ def cmd_drive(args: argparse.Namespace) -> int:
         config.base.max_angular_speed if args.angular is None else args.angular
     )
     with teleop.terminal_keys() as read_key:
-        print(teleop.HELP)
+        print(teleop.ROS_HELP if args.ros else teleop.HELP)
         if args.ros:
             return _over_ros(
                 args,
                 lambda m, backend, _config: m.drive_over_ros(
                     backend, read_key, linear=linear, angular=angular
                 ),
+                cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC,
             )
         from talos_servo.robot import SOURCE_CLI, Robot
 

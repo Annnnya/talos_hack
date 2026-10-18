@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 
 from talos_servo import teleop
 from talos_servo.bus import ServoError
-from talos_servo.robot import SOURCE_CLI
+from talos_servo.robot import SOURCE_CLI, CommandError
 from talos_servo.ros.web_backend import RosBackend
 
 Output = Callable[[str], None]
@@ -76,14 +76,49 @@ def drive_over_ros(
     *,
     linear: float,
     angular: float,
+    out: Output = print,
 ) -> None:
-    """Keyboard driving that publishes /cmd_vel; the robot node does the
-    rest."""
+    """Keyboard driving on the keyboard input of twist_mux.
+
+    N and L ask the mode node for wall nearby and release. The mode decides
+    which drive keys work, and a status line shows the mode, why it changed
+    and which input drives. Quitting stops only this input, so the web keeps
+    driving.
+    """
     backend.open()
     try:
-        teleop.run(backend.drive, read_key, linear=linear, angular=angular)
+        if not backend.has_cmd_vel_listener():
+            out(
+                f"note: nothing reads {backend.cmd_vel_topic}, start "
+                "`pixi run -e ros twist-mux` or the keys will not move the "
+                "robot"
+            )
+        teleop.run(
+            backend.drive,
+            read_key,
+            linear=linear,
+            angular=angular,
+            tick=teleop.StatusPrinter(backend.robot_status, out),
+            actions={
+                teleop.WALL_NEARBY_KEY: _reporting(backend.wall_nearby, out),
+                teleop.RELEASE_KEY: _reporting(backend.release_walls, out),
+            },
+            allowed=lambda: teleop.allowed_keys(backend.robot_status().mode),
+        )
     finally:
         backend.release()
+
+
+def _reporting(action: Callable[[], None], out: Output) -> Callable[[], None]:
+    """Run `action`, printing a failure instead of ending the drive loop."""
+
+    def run() -> None:
+        try:
+            action()
+        except (CommandError, ServoError) as exc:
+            out(f"error: {exc}")
+
+    return run
 
 
 def _check_joints(backend: RosBackend, joints: Sequence[str]) -> None:

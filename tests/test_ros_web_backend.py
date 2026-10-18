@@ -29,12 +29,26 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import Twist  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
+from std_msgs.msg import String  # noqa: E402
+from std_srvs.srv import Trigger  # noqa: E402
 
+from talos_servo import teleop  # noqa: E402
 from talos_servo.bus import ServoError  # noqa: E402
-from talos_servo.defaults import WEB_CMD_VEL_TOPIC  # noqa: E402
+from talos_servo.defaults import (  # noqa: E402
+    KEYBOARD_CMD_VEL_TOPIC,
+    WEB_CMD_VEL_TOPIC,
+)
 from talos_servo.robot import SOURCE_CLI, CommandError, Robot  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
 from talos_servo.ros.mode_node import ModeNode  # noqa: E402
+from talos_servo.ros.names import (  # noqa: E402
+    ACTIVE_INPUT_TOPIC,
+    LATCHED,
+    MODE_REASON_TOPIC,
+    MODE_TOPIC,
+    RELEASE_SERVICE,
+    WALL_NEARBY_SERVICE,
+)
 from talos_servo.ros.robot_node import RobotNode  # noqa: E402
 from talos_servo.ros.web_backend import (  # noqa: E402
     STATUS_STALE_AFTER,
@@ -358,10 +372,8 @@ def test_cli_over_ros_rejects_unknown_joints_before_connecting():
     assert backend._node is None
 
 
-def test_drive_over_ros_publishes_cmd_vel_and_stops(base_node):
-    keys = ["w"] * 5 + ["x"]
-    sent = []
-    backend = RosBackend(BASE_CONFIG, context=rclpy.get_default_context())
+def recording_backend(sent: list, **kwargs) -> RosBackend:
+    backend = make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC, **kwargs)
     real_drive = backend.drive
 
     def record(*v):
@@ -369,14 +381,206 @@ def test_drive_over_ros_publishes_cmd_vel_and_stops(base_node):
         real_drive(*v)
 
     backend.drive = record
+    return backend
+
+
+def scripted_keys(steps: list) -> teleop.ReadKey:
+    """Key reader for the drive loop. A callable step runs first (to wait
+    for or change robot state) and returns the key."""
+
+    def read_key(_timeout: float) -> str | None:
+        if not steps:
+            return "x"
+        step = steps.pop(0)
+        return step() if callable(step) else step
+
+    return read_key
+
+
+@pytest.fixture
+def listener():
+    """A plain node that records Twists on a topic."""
+    node = rclpy.create_node("twist_listener")
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+    received: list[Twist] = []
+
+    def listen(topic: str) -> list[Twist]:
+        node.create_subscription(Twist, topic, received.append, 10)
+        return received
+
+    yield listen
+    executor.shutdown()
+    thread.join(2.0)
+    node.destroy_node()
+
+
+def test_drive_over_ros_warns_without_twist_mux(robot_node):
+    lines: list[str] = []
     cli_commands.drive_over_ros(
-        backend,
-        lambda _t: keys.pop(0) if keys else "x",
+        make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC),
+        scripted_keys([]),
         linear=0.1,
         angular=0.5,
+        out=lines.append,
+    )
+    assert any("twist-mux" in line for line in lines)
+
+
+def test_drive_over_ros_publishes_on_the_keyboard_input(
+    robot_node, robot, listener
+):
+    received = listener(KEYBOARD_CMD_VEL_TOPIC)
+    sent: list = []
+    backend = recording_backend(sent)
+    lines: list[str] = []
+    cli_commands.drive_over_ros(
+        backend,
+        scripted_keys(
+            [lambda: wait_for(backend.has_cmd_vel_listener, WAIT)] + ["w"] * 5
+        ),
+        linear=0.1,
+        angular=0.5,
+        out=lines.append,
     )
     assert sent[0] == (0.1, 0.0, 0.0)
     assert sent[-1] == (0.0, 0.0, 0.0)
+    wait_for(lambda: any(m.linear.x == 0.1 for m in received), WAIT)
+    # The robot node only listens on /cmd_vel, which twist_mux feeds.
+    assert robot.joints["wheel"].target_speed == 0
+
+
+class FakeModeNode:
+    """Latched mode, reason and active input topics plus the wall nearby and
+    release services, like the mode node and mux_status."""
+
+    def __init__(self, *, release_ok: bool = True) -> None:
+        self.node = rclpy.create_node("fake_mode")
+        self.calls: list[str] = []
+        self.release_ok = release_ok
+        self.mode_pub = self.node.create_publisher(String, MODE_TOPIC, LATCHED)
+        self.reason_pub = self.node.create_publisher(
+            String, MODE_REASON_TOPIC, LATCHED
+        )
+        self.active_pub = self.node.create_publisher(
+            String, ACTIVE_INPUT_TOPIC, LATCHED
+        )
+        self.node.create_service(
+            Trigger, WALL_NEARBY_SERVICE, self._on_wall_nearby
+        )
+        self.node.create_service(Trigger, RELEASE_SERVICE, self._on_release)
+        self.publish("free", "", "none")
+
+    def publish(self, mode: str, reason: str, active: str) -> None:
+        self.mode_pub.publish(String(data=mode))
+        self.reason_pub.publish(String(data=reason))
+        self.active_pub.publish(String(data=active))
+
+    def _on_wall_nearby(self, _request, response):
+        self.calls.append("wall_nearby")
+        self.publish("aligning", "wall nearby", "none")
+        response.success, response.message = True, "mode aligning"
+        return response
+
+    def _on_release(self, _request, response):
+        self.calls.append("release")
+        response.success = self.release_ok
+        response.message = "mode free" if self.release_ok else "not now"
+        return response
+
+
+@pytest.fixture
+def mode_node():
+    def start(**kwargs) -> FakeModeNode:
+        fake = FakeModeNode(**kwargs)
+        executor.add_node(fake.node)
+        thread.start()
+        started.append(fake)
+        return fake
+
+    executor = SingleThreadedExecutor()
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    started: list[FakeModeNode] = []
+    yield start
+    executor.shutdown()
+    if started:
+        thread.join(2.0)
+        started[0].node.destroy_node()
+
+
+def wait_for_status(
+    backend: RosBackend, mode: str, reason: str, active: str
+) -> None:
+    """Wait until all three latched topics arrived; they come in any order."""
+    wait_for(lambda: backend.robot_status() == (mode, reason, active), WAIT)
+
+
+def test_keyboard_follows_the_mode_from_any_interface(robot_node, mode_node):
+    fake = mode_node()
+    sent: list = []
+    backend = recording_backend(sent)
+    lines: list[str] = []
+
+    def climb_from_the_web() -> None:
+        wait_for_status(backend, "aligning", "wall nearby", "none")
+        fake.publish("climbing", "wall contact", "web")
+        wait_for_status(backend, "climbing", "wall contact", "web")
+
+    cli_commands.drive_over_ros(
+        backend,
+        scripted_keys(
+            [
+                lambda: wait_for_status(backend, "free", "", "none"),
+                "n",
+                climb_from_the_web,
+                None,
+                "q",  # turning is off while climbing
+                "w",
+            ]
+        ),
+        linear=0.1,
+        angular=0.5,
+        out=lines.append,
+    )
+    assert fake.calls == ["wall_nearby"]
+    assert sent == [(0.1, 0.0, 0.0), (0.0, 0.0, 0.0)]
+    assert "mode: free | driving: none" in lines
+    assert "mode: aligning (wall nearby) | driving: none" in lines
+    assert "mode: climbing (wall contact) | driving: web" in lines
+
+
+def test_rejected_release_is_printed_and_driving_goes_on(robot_node, mode_node):
+    fake = mode_node(release_ok=False)
+    sent: list = []
+    backend = recording_backend(sent)
+    lines: list[str] = []
+    cli_commands.drive_over_ros(
+        backend,
+        scripted_keys(
+            [lambda: wait_for_status(backend, "free", "", "none"), "l", "w"]
+        ),
+        linear=0.1,
+        angular=0.5,
+        out=lines.append,
+    )
+    assert fake.calls == ["release"]
+    assert "error: release: not now" in lines
+    assert sent[0] == (0.1, 0.0, 0.0)
+
+
+def test_wall_nearby_without_mode_node_says_so(robot_node):
+    lines: list[str] = []
+    cli_commands.drive_over_ros(
+        make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC),
+        scripted_keys(["n"]),
+        linear=0.1,
+        angular=0.5,
+        out=lines.append,
+    )
+    assert any("mode node is not running" in line for line in lines)
+    assert "mode: ? | driving: ?" in lines
 
 
 # --- last command: who moved a joint
