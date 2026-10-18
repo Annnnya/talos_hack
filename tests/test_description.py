@@ -87,13 +87,26 @@ def test_no_transmission(robot):
     assert robot.find("ros2_control/transmission") is None
 
 
+# Defined for bench use but never spawned: it claims the same wheels as the
+# mecanum controller.
+BENCH_ONLY = {"wheel_velocity_controller"}
+
+
+def claimed_joints(params: dict) -> list[str]:
+    """Joints a controller commands: its `joints` list, or the mecanum
+    controller's `*_wheel_command_joint_name` entries."""
+    if "joints" in params:
+        return list(params["joints"])
+    return [v for k, v in params.items() if k.endswith("_command_joint_name")]
+
+
 def test_controllers_cover_every_hardware_joint(robot):
     params = yaml.safe_load(CONTROLLERS.read_text(encoding="utf-8"))
     claimed = [
         joint
         for name, section in params.items()
-        if name != "controller_manager"
-        for joint in section["ros__parameters"]["joints"]
+        if name != "controller_manager" and name not in BENCH_ONLY
+        for joint in claimed_joints(section["ros__parameters"])
     ]
     assert sorted(claimed) == sorted(hardware_joints(robot))
 
@@ -131,6 +144,9 @@ def test_launch_spawns_the_hinge_controller_only_when_enabled(tmp_path):
     assert launch.HINGE_CONTROLLER in repo
     disabled = launch.spawned(str(disabled_hinge_config(tmp_path)))
     assert launch.HINGE_CONTROLLER not in disabled
+    # The base drives either way, through the mecanum controller.
+    assert launch.BASE_CONTROLLER in repo
+    assert launch.BASE_CONTROLLER in disabled
 
 
 def _leg_angle(joint: ET.Element, alpha: float) -> float:

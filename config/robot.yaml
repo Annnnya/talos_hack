@@ -39,13 +39,15 @@ base:
 
 modes:
   # ros2_control controllers active in each robot mode. The mode node switches
-  # them through controller_manager. Placeholders until the controllers exist
-  # (#65, #76, #92); with no controller_manager running the switch is skipped.
+  # them through controller_manager; with no controller_manager running the
+  # switch is skipped. List only controllers in config/ros2_control.yaml: a
+  # missing one fails the switch, and so the mode change. Clamping and
+  # climbing stay empty (base stopped) until #76 and #92 add theirs.
   controllers:
     free: [mecanum_drive_controller]
     aligning: [mecanum_drive_controller]
-    clamping: [expansion_controller]
-    climbing: [wall_drive_controller]
+    clamping: []
+    climbing: []
   # Seconds to wait for controller_manager to answer a switch.
   switch_timeout_s: 2.0
 

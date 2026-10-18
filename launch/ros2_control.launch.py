@@ -1,10 +1,10 @@
-"""The whole robot through ros2_control (#85).
+"""The whole robot through ros2_control (#85), without the teleop nodes.
 
 Starts robot_state_publisher with description/talos.urdf.xacro, the
 controller_manager with the topic based hardware plugin, a joint state
-broadcaster, forward command controllers for the wheels and the hinge, and
-our hardware bridge node on the servo port. Stop talos-robot (the robot node)
-first: only one program may own the port.
+broadcaster, mecanum_drive_controller for the base (#65), a forward command
+controller for the hinge, and our hardware bridge node on the servo port.
+Stop talos-robot (the robot node) first: only one program may own the port.
 
     pixi run -e ros ros2-control port:=/dev/ttyACM0
 
@@ -35,7 +35,10 @@ XACRO = ROOT / "description" / "talos.urdf.xacro"
 CONTROLLERS = ROOT / "config" / "ros2_control.yaml"
 ROBOT_CONFIG = ROOT / "config" / "robot.yaml"
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
-SPAWNED = ("joint_state_broadcaster", "wheel_velocity_controller")
+BASE_CONTROLLER = "mecanum_drive_controller"
+SPAWNED = ("joint_state_broadcaster", BASE_CONTROLLER)
+# The base controller's odometry, for the EKF.
+ODOM_REMAP = (f"/{BASE_CONTROLLER}/odometry", "/odom")
 # Only spawned while the hinge is enabled: it claims the hinge joint.
 HINGE_CONTROLLER = "bend_position_controller"
 
@@ -77,7 +80,10 @@ def _robot(context: LaunchContext) -> list:
             package="controller_manager",
             executable="ros2_control_node",
             parameters=[str(CONTROLLERS)],
-            remappings=[("~/robot_description", "/robot_description")],
+            remappings=[
+                ("~/robot_description", "/robot_description"),
+                ODOM_REMAP,
+            ],
             output="screen",
         ),
         *(

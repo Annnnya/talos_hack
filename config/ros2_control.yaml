@@ -1,7 +1,11 @@
 # Controllers for the whole robot (description/talos.urdf.xacro), started by
-# launch/ros2_control.launch.py. Plain forward command controllers to drive
-# every joint by hand on the bench (#85); the mecanum (#65) and expansion
-# (#76) controllers replace them. See docs/ros2_control.md.
+# launch/robot.launch.py and launch/ros2_control.launch.py. The base drives
+# through mecanum_drive_controller (#65), the hinge through a forward command
+# controller until the expansion controller (#76) exists. See
+# docs/ros2_control.md.
+#
+# The mecanum geometry and limits copy the base section of config/robot.yaml;
+# tests/test_ros2_control_config.py checks that they match.
 controller_manager:
   ros__parameters:
     update_rate: 50  # Hz, matches control_hz in config/robot.yaml
@@ -9,11 +13,61 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
+    mecanum_drive_controller:
+      type: mecanum_drive_controller/MecanumDriveController
+
+    # Bench only, not spawned: it claims the wheels like the mecanum one.
+    # Load it by hand after deactivating mecanum_drive_controller.
     wheel_velocity_controller:
       type: velocity_controllers/JointGroupVelocityController
 
     bend_position_controller:
       type: position_controllers/JointGroupPositionController
+
+# Body velocity in (geometry_msgs/TwistStamped on ~/reference, fed by
+# twist_mux), wheel speeds out. Every wheel is "positive rolls the robot
+# forward"; the hardware bridge applies `inverted` from config/robot.yaml.
+mecanum_drive_controller:
+  ros__parameters:
+    front_left_wheel_command_joint_name: front_left_wheel
+    front_right_wheel_command_joint_name: front_right_wheel
+    rear_left_wheel_command_joint_name: rear_left_wheel
+    rear_right_wheel_command_joint_name: rear_right_wheel
+
+    kinematics:
+      wheels_radius: 0.03  # base.wheel_radius_m
+      # (wheelbase_m + track_width_m) / 2 with the hinge flat. Driving with
+      # the hinge folded is out of scope (#65).
+      sum_of_robot_center_projection_on_X_Y_axis: 0.219
+
+    # Stop when no reference came for this long (command_timeout_s). The
+    # controller would otherwise keep its last command forever.
+    reference_timeout: 0.5
+
+    # base.max_linear_speed and base.max_angular_speed. These are the only
+    # speed limits on this path: the bridge does not cap base wheels.
+    linear:
+      x:
+        max_velocity: 0.1
+        min_velocity: -0.1
+      y:
+        max_velocity: 0.1
+        min_velocity: -0.1
+    angular:
+      z:
+        max_velocity: 0.5
+        min_velocity: -0.5
+
+    # Odometry goes to /odom (remapped in the launch) for the EKF, which
+    # alone publishes odom -> base_link.
+    enable_odom_tf: false
+    tf_frame_prefix_enable: false
+    odom_frame_id: odom
+    base_frame_id: base_link
+    # x, y, z, roll, pitch, yaw. Wheel odometry is a rough guess on mecanum
+    # wheels, which slip; the EKF weighs it against the IMU.
+    pose_covariance_diagonal: [0.01, 0.01, 0.0, 0.0, 0.0, 0.01]
+    twist_covariance_diagonal: [0.01, 0.01, 0.0, 0.0, 0.0, 0.01]
 
 # rad/s per wheel. Keeps the last value forever: send zeros to stop.
 wheel_velocity_controller:
