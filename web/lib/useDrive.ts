@@ -14,11 +14,14 @@ export const DRIVE_RESEND_MS = 100;
  * Hold-to-drive for the base. `hold(vx, vy, wz)` sends at once and keeps
  * re-sending; `release()` stops re-sending and sends one stop. Unmounting,
  * hiding the tab, losing window focus and leaving the page release too.
+ * `onReleased` runs whenever a hold ends, whoever ended it.
  */
-export function useDrive(send: (msg: ClientMessage) => void) {
+export function useDrive(send: (msg: ClientMessage) => void, onReleased?: () => void) {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendRef = useRef(send);
   sendRef.current = send;
+  const onReleasedRef = useRef(onReleased);
+  onReleasedRef.current = onReleased;
 
   const clear = () => {
     if (timer.current !== null) {
@@ -37,7 +40,10 @@ export function useDrive(send: (msg: ClientMessage) => void) {
   const release = useCallback(() => {
     const wasHeld = timer.current !== null;
     clear();
-    if (wasHeld) sendRef.current({ type: "drive", vx: 0, vy: 0, wz: 0 });
+    if (wasHeld) {
+      sendRef.current({ type: "drive", vx: 0, vy: 0, wz: 0 });
+      onReleasedRef.current?.();
+    }
   }, []);
 
   // A held button may never see its release: the tab is hidden, the window
