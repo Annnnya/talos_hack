@@ -55,6 +55,15 @@ ros-jazzy-ros-base = "*"
 ros-jazzy-diagnostic-msgs = "*"
 ros-jazzy-imu-filter-madgwick = "*"
 ros-jazzy-robot-localization = "*"
+# ros2_control (see docs/ros2_control.md). topic_based_ros2_control is the
+# ready-made C++ hardware plugin that hands joint commands and states to our
+# Python hardware bridge node over topics.
+ros-jazzy-controller-manager = "*"
+ros-jazzy-ros2-controllers = "*"
+ros-jazzy-ros2controlcli = "*"
+ros-jazzy-topic-based-ros2-control = "*"
+ros-jazzy-robot-state-publisher = "*"
+ros-jazzy-xacro = "*"
 
 [feature.ros.tasks]
 # The only program on the servo port; everything else goes through it
