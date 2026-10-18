@@ -15,7 +15,7 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("std_srvs")
 pytest.importorskip("controller_manager_msgs")
 
-from conftest import wait_for  # noqa: E402
+from conftest import MUX_CONFIG, flatten, wait_for  # noqa: E402
 from controller_manager_msgs.msg import ControllerState  # noqa: E402
 from controller_manager_msgs.srv import (  # noqa: E402
     ListControllers,
@@ -33,22 +33,15 @@ from rclpy.qos import (  # noqa: E402
 )
 from std_msgs.msg import Bool, String  # noqa: E402
 from std_srvs.srv import SetBool, Trigger  # noqa: E402
-from test_twist_mux_config import (  # noqa: E402
-    MUX_CONFIG,
-    flatten,
-)
-from test_twist_mux_config import (  # noqa: E402
-    STOP_LOCK_PERIOD_S as CONFIG_TEST_PERIOD_S,
-)
 
 from talos_servo.config import ModesConfig  # noqa: E402
+from talos_servo.defaults import STOP_LOCK_PERIOD_S  # noqa: E402
 from talos_servo.modes import Event, Mode  # noqa: E402
 from talos_servo.ros.mode_node import (  # noqa: E402
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
     RECONCILE_PERIOD_S,
-    STOP_LOCK_PERIOD_S,
     STOP_LOCK_TOPIC,
     ModeNode,
 )
@@ -392,10 +385,6 @@ def real_mux() -> MuxState:
         parse_entries(params, TOPICS_PREFIX),
         parse_entries(params, LOCKS_PREFIX),
     )
-
-
-def test_stop_lock_period_matches_the_config_test():
-    assert STOP_LOCK_PERIOD_S == CONFIG_TEST_PERIOD_S
 
 
 def test_stop_starts_on(lonely_node, listener):

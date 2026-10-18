@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 
 import pytest
 from scservo_sdk import (
@@ -86,6 +87,22 @@ class FakeClock:
 
     def __call__(self) -> float:
         return self.now
+
+
+# The twist_mux params file the robot runs with.
+MUX_CONFIG = Path(__file__).resolve().parents[1] / "config" / "twist_mux.yaml"
+
+
+def flatten(data: dict, prefix: str = "") -> dict:
+    """Nested ROS params as `a.b.c` keys, like `get_parameters` sees them."""
+    flat = {}
+    for key, value in data.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            flat.update(flatten(value, f"{name}."))
+        else:
+            flat[name] = value
+    return flat
 
 
 def wait_for(predicate: Callable[[], object], timeout: float = 3.0) -> None:

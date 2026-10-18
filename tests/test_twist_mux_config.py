@@ -6,12 +6,12 @@ silently never drives, or STOP does not mask it.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from conftest import MUX_CONFIG, flatten
 
 yaml = pytest.importorskip("yaml")
 
+from talos_servo.defaults import STOP_LOCK_PERIOD_S  # noqa: E402
 from talos_servo.ros.mux_status import (  # noqa: E402
     LOCKS_PREFIX,
     TOPICS_PREFIX,
@@ -19,25 +19,10 @@ from talos_servo.ros.mux_status import (  # noqa: E402
     parse_entries,
 )
 
-MUX_CONFIG = Path(__file__).resolve().parents[1] / "config" / "twist_mux.yaml"
-# The mode node's beat period, kept here so this test runs without ROS.
-# test_mode_node.py checks it matches the node.
-STOP_LOCK_PERIOD_S = 0.1
 MIN_BEATS_PER_TIMEOUT = 3
 # Long enough to ride out jitter between key repeats or web messages, short
 # enough that a quiet input hands over to the other one quickly.
 MAX_INPUT_TIMEOUT_S = 1.0
-
-
-def flatten(data: dict, prefix: str = "") -> dict:
-    flat = {}
-    for key, value in data.items():
-        name = f"{prefix}{key}"
-        if isinstance(value, dict):
-            flat.update(flatten(value, f"{name}."))
-        else:
-            flat[name] = value
-    return flat
 
 
 @pytest.fixture(scope="module")

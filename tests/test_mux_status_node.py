@@ -5,21 +5,18 @@ Skipped where ROS messages are missing.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("geometry_msgs")
 pytest.importorskip("std_msgs")
 
+from conftest import MUX_CONFIG  # noqa: E402
 from geometry_msgs.msg import Twist  # noqa: E402
 from std_msgs.msg import Bool  # noqa: E402
 
 from talos_servo.ros.mux_status import LOCKED, NONE  # noqa: E402
 from talos_servo.ros.mux_status_node import MuxStatusNode  # noqa: E402
-
-MUX_CONFIG = Path(__file__).resolve().parents[1] / "config" / "twist_mux.yaml"
 
 
 @pytest.fixture(scope="module", autouse=True)

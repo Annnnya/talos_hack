@@ -48,7 +48,12 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.config import ModesConfig, load_config
-from talos_servo.defaults import DEFAULT_CONFIG, QUEUE_DEPTH, ROBOT_NS
+from talos_servo.defaults import (
+    DEFAULT_CONFIG,
+    QUEUE_DEPTH,
+    ROBOT_NS,
+    STOP_LOCK_PERIOD_S,
+)
 from talos_servo.modes import (
     Event,
     InvalidTransition,
@@ -69,9 +74,6 @@ WALL_NEARBY_SERVICE = f"{ROBOT_NS}/wall_nearby"
 RELEASE_SERVICE = f"{ROBOT_NS}/release"
 SET_STOP_SERVICE = f"{ROBOT_NS}/set_stop"
 STOP_LOCK_TOPIC = f"{ROBOT_NS}/stop_lock"
-# Well below the stop lock timeout in config/twist_mux.yaml, so a few late
-# beats never lock the base by mistake.
-STOP_LOCK_PERIOD_S = 0.1
 DEFAULT_CONTROLLER_MANAGER = "/controller_manager"
 SWITCH_POLL_INTERVAL = 0.05
 RECONCILE_PERIOD_S = 1.0

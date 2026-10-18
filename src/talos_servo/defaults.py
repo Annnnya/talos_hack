@@ -15,3 +15,7 @@ QUEUE_DEPTH = 10
 # Move speed (steps/s) when a position command does not say. Low, like every
 # default here.
 DEFAULT_MOVE_SPEED = 200
+# How often the mode node repeats the STOP state on /robot/stop_lock. Well
+# below the stop lock timeout in config/twist_mux.yaml, so a few late beats
+# never lock the base by mistake.
+STOP_LOCK_PERIOD_S = 0.1
