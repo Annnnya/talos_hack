@@ -59,12 +59,52 @@ def test_releasing_the_key_stops_after_the_timeout():
     quiet = round(teleop.KEY_TIMEOUT_S / teleop.LOOP_PERIOD_S) + 1
     sent = drive_with(["w", *([None] * quiet), "x"])
     assert sent[1] == (0.1, 0.0, 0.0)
-    assert sent[-2] == teleop.STOPPED
+    assert sent[-1] == teleop.STOPPED
+    assert sent.count(teleop.STOPPED) == 1
+
+
+def test_idle_loop_sends_nothing():
+    assert drive_with([None] * 20 + ["x"]) == []
+
+
+def test_release_sends_one_stop_then_nothing():
+    quiet = round(teleop.KEY_TIMEOUT_S / teleop.LOOP_PERIOD_S) + 20
+    sent = drive_with(["w", *([None] * quiet)])
+    assert sent[-1] == teleop.STOPPED
+    assert sent.count(teleop.STOPPED) == 1
+
+
+def test_quit_while_idle_sends_no_stop():
+    assert drive_with(["w", " ", None, "x"]) == [
+        (0.1, 0.0, 0.0),
+        teleop.STOPPED,
+    ]
+
+
+def test_space_while_idle_still_stops():
+    assert drive_with([None, " ", None, "x"]) == [teleop.STOPPED]
 
 
 def test_ctrl_c_still_sends_a_stop():
     sent = drive_with(["w"])
     assert sent[-1] == teleop.STOPPED
+
+
+def test_drive_that_fails_partway_still_gets_a_stop():
+    # A drive() that raises may already have set some wheel speeds.
+    clock = FakeClock()
+    sent: list[tuple[float, float, float]] = []
+
+    def drive(*v: float) -> None:
+        sent.append(v)
+        if len(sent) == 1:
+            raise OSError("serial write failed")
+
+    with pytest.raises(OSError):
+        teleop.run(
+            drive, Keys(["w"], clock), linear=0.1, angular=0.5, clock=clock
+        )
+    assert sent == [(0.1, 0.0, 0.0), teleop.STOPPED]
 
 
 def test_terminal_keys_need_a_terminal(monkeypatch):

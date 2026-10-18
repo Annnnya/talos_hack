@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import math
 
-from talos_servo.bus import MAX_POSITION
+from talos_servo.bus import STEPS_PER_TURN
 from talos_servo.robot import SOURCE_ROBOT, SOURCE_ROS, SOURCES
 
-STEPS_PER_TURN = MAX_POSITION + 1
 # Step 2048 (half a turn) is joint angle 0, so the usable range is about
 # -pi..pi.
 CENTER_STEP = STEPS_PER_TURN // 2

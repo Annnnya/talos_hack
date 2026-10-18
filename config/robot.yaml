@@ -26,9 +26,11 @@ joints:
 base:
   # Speed joints in FL, FR, RL, RR order.
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel, rear_right_wheel]
+  # Front to rear axle when flat. Each leg (hinge to axle) is half of it.
   wheelbase_m: 0.31
   track_width_m: 0.128
-  steps_per_meter: 1000.0
+  # Steps per metre of wheel travel are 4096 / (2 * pi * wheel_radius_m).
+  wheel_radius_m: 0.03
   # m/s and rad/s; /cmd_vel and `talos-servo drive` are clamped to these.
   max_linear_speed: 0.1
   max_angular_speed: 0.5
@@ -44,3 +46,18 @@ modes:
     climbing: [wall_drive_controller]
   # Seconds to wait for controller_manager to answer a switch.
   switch_timeout_s: 2.0
+
+# Body geometry, read by the Python core and description/talos.urdf.xacro.
+# The robot is an inverted V: the bend hinge on top, a leg down to each wheel
+# pair. bend is the opening angle between the legs: 180 flat, smaller folded.
+model:
+  # The position joint that opens and closes the hinge.
+  hinge_joint: bend
+  # Each leg gear turns this many times the servo. Both legs move, so the
+  # opening angle changes 2 * 0.5 = 1 times the servo angle.
+  leg_gear_ratio: 0.5
+  # Max fold. Placeholder until measured on the robot (#84). These are the
+  # model limits only: the servo clamp is joints.bend min_pos/max_pos, still
+  # a full turn, and #84 tightens it to match once the hinge is measured.
+  bend_min_deg: 90
+  bend_max_deg: 180

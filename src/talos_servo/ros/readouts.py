@@ -103,3 +103,23 @@ class JointReadoutPublishers:
         )
         for field, msg in messages.items():
             self._publishers[joint][field].publish(msg)
+
+    def publish_snapshot(
+        self, snapshot: Iterable[dict[str, Any]], stamp: Time
+    ) -> None:
+        """Readouts for every online joint of a `Robot.snapshot()`.
+
+        Offline joints are skipped: their values are stale.
+        """
+        for j in snapshot:
+            if not j["online"]:
+                continue
+            self.publish(
+                j["name"],
+                stamp,
+                temperature=j["temp"],
+                voltage=j["voltage"],
+                current=j["current"],
+                load=j["load"],
+                moving=j["moving"],
+            )
