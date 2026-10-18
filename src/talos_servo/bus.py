@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import TracebackType
@@ -52,6 +53,14 @@ MAX_ACCELERATION = 254
 MAX_POSITION = 4095
 # One full turn of a servo in position steps.
 STEPS_PER_TURN = MAX_POSITION + 1
+RAD_PER_STEP = 2 * math.pi / STEPS_PER_TURN
+
+
+def joint_position(raw: int, inverted: bool) -> int:
+    """Joint steps for a raw servo position, or the other way round: an
+    inverted joint is mirrored over the turn, its own inverse."""
+    return MAX_POSITION - raw if inverted else raw
+
 
 # Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1
 # V.

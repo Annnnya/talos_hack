@@ -1,0 +1,31 @@
+# Controllers for the whole robot (description/talos.urdf.xacro), started by
+# launch/ros2_control.launch.py. Plain forward command controllers to drive
+# every joint by hand on the bench (#85); the mecanum (#65) and expansion
+# (#76) controllers replace them. See docs/ros2_control.md.
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz, matches control_hz in config/robot.yaml
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    wheel_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+    bend_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+# rad/s per wheel. Keeps the last value forever: send zeros to stop.
+wheel_velocity_controller:
+  ros__parameters:
+    joints:
+      - front_left_wheel
+      - front_right_wheel
+      - rear_left_wheel
+      - rear_right_wheel
+
+# Hinge opening alpha in rad: pi flat, clamped to the model limits.
+bend_position_controller:
+  ros__parameters:
+    joints:
+      - bend

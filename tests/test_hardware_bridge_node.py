@@ -5,13 +5,15 @@ Skipped where ROS is missing.
 
 from __future__ import annotations
 
+import copy
+import math
+
 import pytest
 
 rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("sensor_msgs")
 
-from conftest import SMALL, FakeClock, config  # noqa: E402
-from rclpy.parameter import Parameter  # noqa: E402
+from conftest import BASE, SMALL, FakeClock, config  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
@@ -22,7 +24,9 @@ from talos_servo.ros.convert import (  # noqa: E402
     RAD_PER_STEP,
     step_speed_to_rad,
 )
-from talos_servo.ros.hardware_bridge_node import HardwareBridgeNode  # noqa: E402
+from talos_servo.ros.hardware_bridge_node import (  # noqa: E402
+    HardwareBridgeNode,
+)
 
 INVERTED = {
     **SMALL,
@@ -60,20 +64,15 @@ def node(robot):
     n.destroy_node()
 
 
-@pytest.fixture
-def position_node(robot):
-    n = HardwareBridgeNode(
-        robot,
-        parameter_overrides=[Parameter("accept_position_goals", value=True)],
-    )
-    yield n
-    n.destroy_node()
-
-
 def commands(names, position=(), velocity=()) -> JointState:
     return JointState(
         name=list(names), position=list(position), velocity=list(velocity)
     )
+
+
+def hold(node, position: float = 0.0) -> None:
+    """The plugin's first goal for bend, which the bridge ignores."""
+    node.on_commands(commands(["bend"], position=[position]))
 
 
 def test_states_carry_position_velocity_and_current(node, robot):
@@ -99,22 +98,42 @@ def test_bend_position_is_an_angle(node, robot):
     assert node.states_msg().position[0] == pytest.approx(100 * RAD_PER_STEP)
 
 
-def test_position_goals_are_ignored_by_default(node, robot):
-    # The plugin sends 0.0 for a position joint no controller claims.
-    node.on_commands(commands(["bend"], position=[0.0]))
+def test_first_goal_is_ignored_until_a_different_goal(node, robot):
+    # The plugin sends 0.0 for a position joint without an initial_value
+    # until a controller writes a goal.
+    for _ in range(3):
+        node.on_commands(commands(["bend"], position=[0.0]))
     assert robot.joints["bend"].target is None
+    node.on_commands(commands(["bend"], position=[0.1]))
+    node.on_commands(commands(["bend"], position=[0.0]))
+    assert robot.joints["bend"].target == CENTER_STEP
 
 
-def test_packed_commands_spin_the_wheel_and_move_bend(position_node, robot):
-    position_node.on_commands(
+def test_packed_commands_spin_the_wheel_and_move_bend(node, robot):
+    hold(node)
+    node.on_commands(
         commands(
             ["bend", "wheel"],
-            position=[0.0],
+            position=[0.1],
             velocity=[step_speed_to_rad(200)],
         )
     )
     assert robot.joints["wheel"].target_speed == 200
-    assert robot.joints["bend"].target == CENTER_STEP
+    assert robot.joints["bend"].target == CENTER_STEP + round(
+        0.1 / RAD_PER_STEP
+    )
+
+
+def test_nan_bend_goal_still_spins_the_wheel(node, robot):
+    node.on_commands(
+        commands(
+            ["bend", "wheel"],
+            position=[float("nan")],
+            velocity=[step_speed_to_rad(200)],
+        )
+    )
+    assert robot.joints["wheel"].target_speed == 200
+    assert robot.joints["bend"].target is None
 
 
 def test_inverted_wheel_turns_the_servo_the_other_way(sdk, clock):
@@ -131,21 +150,20 @@ def test_inverted_wheel_turns_the_servo_the_other_way(sdk, clock):
         robot.close()
 
 
-def test_same_bend_goal_is_written_once(position_node, robot, monkeypatch):
+def test_same_bend_goal_is_written_once(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))
+    hold(node)
     for _ in range(3):
-        position_node.on_commands(commands(["bend"], position=[0.1]))
-    position_node.on_commands(commands(["bend"], position=[0.2]))
+        node.on_commands(commands(["bend"], position=[0.1]))
+    node.on_commands(commands(["bend"], position=[0.2]))
     assert [m[1] for m in moves] == [
         CENTER_STEP + round(0.1 / RAD_PER_STEP),
         CENTER_STEP + round(0.2 / RAD_PER_STEP),
     ]
 
 
-def test_failed_move_is_retried_with_the_same_goal(
-    position_node, robot, monkeypatch
-):
+def test_failed_move_is_retried_with_the_same_goal(node, robot, monkeypatch):
     moves = []
 
     def move(*a, **_k):
@@ -154,17 +172,19 @@ def test_failed_move_is_retried_with_the_same_goal(
             raise ServoError("no answer")
 
     monkeypatch.setattr(robot, "move", move)
+    hold(node)
     for _ in range(3):
-        position_node.on_commands(commands(["bend"], position=[0.1]))
+        node.on_commands(commands(["bend"], position=[0.1]))
     assert len(moves) == 2
 
 
-def test_stop_all_resends_the_same_goal(position_node, robot, monkeypatch):
+def test_stop_all_resends_the_same_goal(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))
-    position_node.on_commands(commands(["bend"], position=[0.1]))
-    position_node.on_stop_all(Trigger.Request(), Trigger.Response())
-    position_node.on_commands(commands(["bend"], position=[0.1]))
+    hold(node)
+    node.on_commands(commands(["bend"], position=[0.1]))
+    node.on_stop_all(Trigger.Request(), Trigger.Response())
+    node.on_commands(commands(["bend"], position=[0.1]))
     assert len(moves) == 2
 
 
@@ -193,3 +213,147 @@ def test_stop_all_service(node, robot):
 
 def test_readout_topics_live_under_the_node(node):
     assert "/hardware_bridge/wheel/current" in node.readouts.topic_names
+
+
+# --- hinge (#63, #85) ------------------------------------------------------
+# Flat at joint step 3000; the fake servo reads 2048, inside the hinge range.
+FLAT = 3000
+START_STEPS = 2048
+# 90 deg of fold: the opening changes 1:1 with the servo.
+QUARTER_TURN = 1024
+MODEL = {
+    "hinge_joint": "bend",
+    "leg_gear_ratio": 0.5,
+    "bend_min_deg": 90,
+    "bend_max_deg": 180,
+    "bend_flat_steps": FLAT,
+}
+
+
+def hinge_config() -> dict:
+    data = copy.deepcopy(BASE)
+    data["joints"]["bend"]["enabled"] = True
+    return {**data, "model": MODEL}
+
+
+@pytest.fixture
+def hinge_robot(sdk, clock):
+    r = Robot(sdk.bus(), config(hinge_config()), clock=clock)
+    r.open()
+    yield r
+    r.close()
+
+
+@pytest.fixture
+def hinge_node(hinge_robot):
+    n = HardwareBridgeNode(hinge_robot)
+    yield n
+    n.destroy_node()
+
+
+def bend_state(node) -> tuple[float, float]:
+    msg = node.states_msg()
+    i = msg.name.index("bend")
+    return msg.position[i], msg.velocity[i]
+
+
+def test_hinge_angle_comes_from_the_fixed_flat(hinge_node, hinge_robot):
+    assert bend_state(hinge_node)[0] == pytest.approx(
+        math.pi - (FLAT - START_STEPS) * RAD_PER_STEP
+    )
+    hinge_robot.joints["bend"].position = FLAT - QUARTER_TURN
+    hinge_robot.joints["bend"].speed = -100
+    alpha, rate = bend_state(hinge_node)
+    assert alpha == pytest.approx(math.pi / 2)
+    assert rate == pytest.approx(-100 * RAD_PER_STEP)
+
+
+def test_hinge_ignores_the_initial_value_until_a_new_goal(
+    hinge_node, hinge_robot
+):
+    # The URDF initial_value: what the plugin sends before any controller.
+    for _ in range(3):
+        hold(hinge_node, math.pi)
+    assert hinge_robot.joints["bend"].target is None
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+    hinge_node.on_commands(commands(["bend"], position=[math.pi]))
+    assert hinge_robot.joints["bend"].target == FLAT
+
+
+def test_restarted_bridge_ignores_the_last_goal(hinge_node, hinge_robot):
+    # Only the bridge restarted: the plugin repeats the controller's goal.
+    for _ in range(3):
+        hold(hinge_node, 2.8)
+    assert hinge_robot.joints["bend"].target is None
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_plain_position_joint_ignores_a_repeated_pi(node, robot):
+    # No model: bend is a plain joint, and pi is not its initial value.
+    for _ in range(3):
+        hold(node, math.pi)
+    assert robot.joints["bend"].target is None
+
+
+def test_hinge_goals_clamp_to_the_model_limits(hinge_node, hinge_robot):
+    hold(hinge_node, math.pi)
+    hinge_node.on_commands(commands(["bend"], position=[math.radians(30)]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_offline_hinge_angle_is_unknown(sdk, clock):
+    sdk.present = {1, 2, 3, 4}  # the bend servo (5) does not answer
+    robot = Robot(sdk.bus(), config(hinge_config()), clock=clock)
+    robot.open()
+    node = HardwareBridgeNode(robot)
+    try:
+        alpha, rate = bend_state(node)
+        assert math.isnan(alpha)
+        assert math.isnan(rate)
+    finally:
+        node.destroy_node()
+        robot.close()
+
+
+def test_hinge_reading_far_outside_its_range_is_unknown(
+    hinge_node, hinge_robot
+):
+    # A wrap past flat reads near 0, not a real fold.
+    hinge_robot.joints["bend"].position = 3
+    assert math.isnan(bend_state(hinge_node)[0])
+
+
+def test_hinge_goals_are_dropped_while_the_reading_is_wrapped(
+    hinge_node, hinge_robot
+):
+    # From step 3 the servo would turn the long way round to any goal.
+    hold(hinge_node, math.pi)
+    hinge_robot.joints["bend"].position = 3
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target is None
+    hinge_robot.joints["bend"].position = START_STEPS
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_quiet_commands_disarm_position_joints(hinge_node, hinge_robot, clock):
+    hold(hinge_node, math.pi)
+    hinge_node.on_commands(commands(["bend"], position=[2.0]))
+    target = hinge_robot.joints["bend"].target
+    # controller_manager restarts: quiet, then its initial value again.
+    clock.now += hinge_robot.config.command_timeout_s + 0.1
+    for _ in range(3):
+        hold(hinge_node, math.pi)
+    assert hinge_robot.joints["bend"].target == target
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_steady_commands_stay_armed(hinge_node, hinge_robot, clock):
+    hold(hinge_node, math.pi)
+    hinge_node.on_commands(commands(["bend"], position=[2.0]))
+    clock.now += hinge_robot.config.command_timeout_s / 2
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN

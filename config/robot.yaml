@@ -19,8 +19,10 @@ joints:
   front_right_wheel: { id: 5, control: speed,    inverted: false }
   rear_left_wheel:   { id: 4, control: speed,    inverted: true }
   rear_right_wheel:  { id: 3, control: speed,    inverted: false }
-  # min_pos / max_pos clamp position targets (0-4095 is one full turn). Set real limits first.
-  bend:              { id: 1, control: position, inverted: false, enabled: false,
+  # min_pos / max_pos clamp position targets (0-4095 is one full turn). For
+  # the hinge they are narrowed on load to the model bend range below.
+  # Folding the hinge must lower its position: flip inverted if it rises.
+  bend:              { id: 1, control: position, inverted: false,
                        min_pos: 0, max_pos: 4095 }
 
 base:
@@ -56,8 +58,13 @@ model:
   # Each leg gear turns this many times the servo. Both legs move, so the
   # opening angle changes 2 * 0.5 = 1 times the servo angle.
   leg_gear_ratio: 0.5
-  # Max fold. Placeholder until measured on the robot (#84). These are the
-  # model limits only: the servo clamp is joints.bend min_pos/max_pos, still
-  # a full turn, and #84 tightens it to match once the hinge is measured.
+  # Max fold. Placeholder until measured on the robot (#84). The bend
+  # min_pos/max_pos clamp is narrowed to this range on load.
   bend_min_deg: 90
   bend_max_deg: 180
+  # Raw bend servo position (0-4095, as `talos-servo monitor` shows it) when
+  # the robot lies flat, fixed by aligning the servo horn to the leg.
+  # Required while bend is enabled. The range down to max fold must fit in
+  # one servo turn from here. 4000 leaves about 8 deg past flat before the
+  # reading wraps to 0.
+  bend_flat_steps: 4000

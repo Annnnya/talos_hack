@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import math
 
-from talos_servo.bus import STEPS_PER_TURN
+from talos_servo.bus import RAD_PER_STEP, STEPS_PER_TURN
 from talos_servo.robot import SOURCE_ROBOT, SOURCE_ROS, SOURCES
 
 # Step 2048 (half a turn) is joint angle 0, so the usable range is about
 # -pi..pi.
 CENTER_STEP = STEPS_PER_TURN // 2
-RAD_PER_STEP = 2 * math.pi / STEPS_PER_TURN
 
 _FRAME_SEPARATOR = ":"
 

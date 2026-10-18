@@ -57,6 +57,20 @@ def test_non_finite_commands_are_rejected(bad):
         unpack_commands(["front_left_wheel"], [], [bad], CONTROLS)
 
 
+def test_nan_position_is_no_goal_and_keeps_the_velocities():
+    positions, velocities = unpack_commands(
+        ALL, [math.nan], [1.0, -2.0], CONTROLS
+    )
+    assert positions == {}
+    assert velocities == {"front_left_wheel": 1.0, "front_right_wheel": -2.0}
+
+
+@pytest.mark.parametrize("bad", [math.inf, -math.inf])
+def test_infinite_position_is_rejected(bad):
+    with pytest.raises(ValueError, match="position must be finite"):
+        unpack_commands(ALL, [bad], [1.0, -2.0], CONTROLS)
+
+
 def test_unwrapper_starts_at_zero():
     assert Unwrapper().update(3000) == 0.0
 

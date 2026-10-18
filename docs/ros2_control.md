@@ -88,32 +88,73 @@ Checked in the plugin source (0.3.0):
 - Wheel positions keep counting past a full turn (the bridge unwraps the
   0..4095 servo reading), so odometry does not jump.
 
-## Open points for #85
+## The hinge (#85, #63)
 
-- **Unclaimed position joints:** when no controller claims a position
-  interface, the plugin still sends its initial command (`initial_value`, or
-  0.0). For `bend` that would be a move to 0 rad at startup. Until #85 the
-  bridge drops every position goal unless its `accept_position_goals`
-  parameter is true. #85 must replace that guard, for example by ignoring
-  position goals until the first one that differs from the plugin's initial
-  value, or by always starting a position controller that holds the measured
-  angle.
-- **Adding the hinge:** the robot model (#64) leaves `bend` out of
-  `<ros2_control>` until this issue. To add it: enable it in
-  `config/robot.yaml` (the bridge drops a whole command that names a
-  disabled joint), give its interfaces an `initial_value` (pi, flat), and
-  convert the opening angle to servo steps with
-  `talos_servo.model.alpha_per_servo_rad` plus the flat offset measured in
-  #84. Without that, alpha = pi/2 lands on step 1024 wherever the real zero
-  is.
+- **Interfaces:** `bend` takes a position command and reports position,
+  velocity and effort, all in the opening angle alpha: rad and rad/s, pi
+  flat. `talos_servo.hinge.Hinge` converts it to servo steps with
+  `talos_servo.model.alpha_per_servo_rad` (1:1 today) and clamps goals to
+  `model.bend_min_deg`..`bend_max_deg`. There is no `<transmission>`: the
+  plugin ignores them.
+- **Flat position:** `model.bend_flat_steps` in `config/robot.yaml`, the
+  raw servo position when the robot lies flat (4000, a margin before the
+  wrap at 4095). It is fixed by aligning the servo horn to the leg, so the
+  servo's absolute position is the hinge angle and nothing is measured at
+  startup. It is required while
+  `bend` is enabled, and `joints.bend` `min_pos`/`max_pos` are narrowed on
+  load to the `bend_min_deg`..`bend_max_deg` range, so every move is
+  clamped to it (robot node, `/debug` and the bridge alike).
+- **Unknown angle:** while the servo is offline, or reads more than 64
+  steps outside the hinge range (a wrap past flat), `bend` reports NaN
+  position and velocity, logs an error and drops its goals: from a wrapped
+  reading the servo would take the long way round.
+- **No wrap:** position mode covers one servo turn and never crosses
+  4095 -> 0, so there are no turns to count. The range from flat down to max
+  fold must fit inside 0..4095; the config check and the bridge refuse a
+  flat position where it does not. Fix that by turning the servo horn, not
+  with an EEPROM offset.
+- **Startup:** the plugin repeats the last goal of a position joint: the
+  position state `initial_value` (pi) until a controller writes one, even
+  when no controller claims `bend`, or the controller's last goal when only
+  the bridge restarts. The bridge ignores the first goal each position
+  joint gets and every repeat of it, then follows every goal from the first
+  different one. It starts over when the commands go quiet for
+  `command_timeout_s` (controller_manager restarted). So starting or
+  restarting either side never moves the hinge; send a new goal to move it.
+  A disabled hinge stays out of `<ros2_control>` and its controller is not
+  spawned, so the wheels still run without it. A NaN position means no
+  goal and never blocks the wheel velocities in the same message.
+- **Current and load:** `/dynamic_joint_states` shows position, velocity
+  and effort only. Effort is the present current (A). Load stays on
+  `/hardware_bridge/<joint>/load`.
+
+## Bench: the whole robot
+
+`config/ros2_control.yaml` and `launch/ros2_control.launch.py` run every
+wheel through a `JointGroupVelocityController` and the hinge through a
+`JointGroupPositionController`, on `description/talos.urdf.xacro` built from
+the same robot config as the bridge. Stop the robot node first.
+
+```
+pixi run -e ros ros2-control port:=/dev/ttyACM0
+ros2 control list_hardware_interfaces
+ros2 topic pub --once /bend_position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [2.8]}"
+ros2 topic pub -r 10 /wheel_velocity_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [0.5, 0.5, 0.5, 0.5]}"
+ros2 topic echo /dynamic_joint_states
+```
+
+The wheel controller keeps its last command: publish zeros to stop.
+
+## Open points
+
 - **State rate:** the bridge publishes states at `telemetry_hz` (20 Hz by
   default), and `Robot.tick` reads one servo per tick round robin, so with 5
   joints each one is refreshed at about 10 Hz. controller_manager runs at
-  50 Hz, so controllers see repeated samples. Fine for the bench check; the
+  50 Hz, so controllers see repeated samples. Fine for the bench; the
   odometry in #65 needs fresher wheel states (for example a sync read of the
   wheels every tick).
-- `/dynamic_joint_states` will only show position, velocity and effort.
-  #85 should say current is in `effort` and load is on the readout topic.
 
 ## Fallback
 
@@ -122,7 +163,7 @@ load through ros2_control), write a small C++ hardware interface on the
 Feetech C++ SDK. That is the only C++ in the repo and it needs a C++ build
 and test job in CI.
 
-## Bench check
+## Bench check: one wheel (#88)
 
 `description/ros2_control_check.urdf`, `config/ros2_control_check.yaml` and
 `launch/ros2_control_check.launch.py` run one wheel (`front_left_wheel`)

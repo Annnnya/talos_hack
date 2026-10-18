@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -17,7 +17,9 @@ from talos_servo.bus import (
     MAX_SERVO_ID,
     MAX_SPEED,
     STEPS_PER_TURN,
+    joint_position,
 )
+from talos_servo.hinge import Hinge, HingeRangeError
 
 SPEED = "speed"
 POSITION = "position"
@@ -86,6 +88,9 @@ class ModelConfig:
     legs: 180 deg flat, smaller when folded. Each leg gear turns
     `leg_gear_ratio` times the servo.
     `leg_length_m` (hinge to wheel axle) is half the flat `base.wheelbase_m`.
+    `bend_flat_steps` is the raw bend servo position when flat, fixed by
+    aligning the servo horn to the leg. It is required while the hinge joint
+    is enabled.
     """
 
     hinge_joint: str
@@ -93,6 +98,7 @@ class ModelConfig:
     leg_gear_ratio: float
     bend_min_deg: float
     bend_max_deg: float = FLAT_DEG
+    bend_flat_steps: int | None = None
 
     @property
     def bend_min_rad(self) -> float:
@@ -141,6 +147,9 @@ class RobotConfig:
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
+    # The hinge angle converter, built on load from model.bend_flat_steps;
+    # None without one.
+    hinge: Hinge | None = field(default=None, compare=False)
 
     @property
     def enabled_joints(self) -> tuple[JointConfig, ...]:
@@ -186,7 +195,41 @@ def parse_config(data: dict) -> RobotConfig:
                 raw_model, config.base, {j.name: j for j in joints}
             ),
         )
+        config = _clamp_hinge(config)
     return config
+
+
+def _clamp_hinge(config: RobotConfig) -> RobotConfig:
+    """Build the hinge and narrow its joint's min_pos/max_pos to the model
+    bend range, so every move is clamped to it, whoever sends it."""
+    model = config.model
+    assert model is not None
+    joint = next(j for j in config.joints if j.name == model.hinge_joint)
+    if model.bend_flat_steps is None:
+        if joint.enabled:
+            raise ConfigError(
+                f"model.bend_flat_steps is required while {joint.name} is "
+                "enabled: the raw servo position when the robot lies flat"
+            )
+        return config
+    flat = joint_position(model.bend_flat_steps, joint.inverted)
+    try:
+        hinge = Hinge(model, flat)
+    except HingeRangeError as exc:
+        raise ConfigError(f"model.bend_flat_steps: {exc}") from exc
+    low, high = hinge.step_range
+    min_pos, max_pos = max(joint.min_pos, low), min(joint.max_pos, high)
+    if min_pos > max_pos:
+        raise ConfigError(
+            f"joints.{joint.name}: min_pos..max_pos {joint.min_pos}.."
+            f"{joint.max_pos} does not overlap the hinge range {low}..{high}"
+        )
+    clamped = replace(joint, min_pos=min_pos, max_pos=max_pos)
+    return replace(
+        config,
+        joints=tuple(clamped if j is joint else j for j in config.joints),
+        hinge=hinge,
+    )
 
 
 def load_config(path: str | Path) -> RobotConfig:
@@ -315,6 +358,18 @@ def _parse_model(
             "model: need 0 < bend_min_deg < bend_max_deg <= "
             f"{FLAT_DEG:g}, got {model.bend_min_deg}..{model.bend_max_deg}"
         )
+    flat = raw.get("bend_flat_steps")
+    if flat is not None:
+        if isinstance(flat, bool) or not isinstance(flat, int):
+            raise ConfigError(
+                f"model.bend_flat_steps must be a whole step, got {flat!r}"
+            )
+        if not 0 <= flat <= MAX_POSITION:
+            raise ConfigError(
+                f"model.bend_flat_steps must be in 0..{MAX_POSITION}, "
+                f"got {flat}"
+            )
+        model = replace(model, bend_flat_steps=flat)
     return model
 
 
