@@ -7,6 +7,7 @@ from talos_servo.modes import (
     InvalidTransition,
     Mode,
     ModeMachine,
+    drive_error,
     next_mode,
     stop_keeps_hinge,
 )
@@ -90,3 +91,42 @@ def test_stop_keeps_hinge_only_on_the_walls(mode, keeps):
 
 def test_next_mode_values_are_plain_strings():
     assert next_mode(Mode.FREE, Event.WALL_NEARBY).value == "aligning"
+
+
+# --- drive rule ----------------------------------------------------------
+
+FORWARD, SIDEWAYS, TURN, STILL = (
+    (0.1, 0.0, 0.0),
+    (0.0, -0.1, 0.0),
+    (0.0, 0.0, 0.5),
+    (0.0, 0.0, 0.0),
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "twist", "error"),
+    [
+        ("free", FORWARD, None),
+        ("free", SIDEWAYS, None),
+        ("free", TURN, None),
+        ("climbing", FORWARD, None),
+        ("climbing", SIDEWAYS, None),
+        ("climbing", TURN, "cannot rotate while climbing"),
+        ("aligning", FORWARD, "cannot drive while aligning"),
+        ("aligning", TURN, "cannot drive while aligning"),
+        ("clamping", SIDEWAYS, "cannot drive while clamping"),
+        ("clamping", TURN, "cannot drive while clamping"),
+    ],
+)
+def test_drive_rule_per_mode(mode, twist, error):
+    assert drive_error(mode, *twist) == error
+
+
+@pytest.mark.parametrize("mode", [*(m.value for m in Mode), None])
+def test_a_zero_twist_is_allowed_in_every_mode(mode):
+    assert drive_error(mode, *STILL) is None
+
+
+@pytest.mark.parametrize("mode", [None, "flying"])
+def test_unknown_mode_allows_every_axis(mode):
+    assert drive_error(mode, 0.1, 0.1, 0.5) is None

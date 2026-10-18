@@ -266,8 +266,26 @@ def test_rotating_while_climbing_is_rejected():
     assert backend.calls == []
 
 
+@pytest.mark.parametrize("mode", ["aligning", "clamping"])
+@pytest.mark.parametrize("axis", ["vx", "vy", "wz"])
+def test_driving_while_aligning_or_clamping_is_rejected(mode, axis):
+    # Like the keyboard: these modes move the robot by themselves.
+    backend = DriveRecorder(mode=mode)
+    with pytest.raises(CommandError, match=f"cannot drive while {mode}"):
+        server._dispatch(backend, drive(**{axis: 0.1}), ros=True)
+    assert backend.calls == []
+
+
+@pytest.mark.parametrize("mode", ["free", "aligning", "clamping", "climbing"])
+def test_a_zero_drive_passes_in_every_mode(mode):
+    # The page sends one when a button is let go; it must always stop.
+    backend = DriveRecorder(mode=mode)
+    server._dispatch(backend, drive(), ros=True)()
+    assert [velocity for velocity, _ in backend.calls] == [(0.0, 0.0, 0.0)]
+
+
 @pytest.mark.parametrize("mode", ["climbing", "free", None])
-def test_straight_drive_is_allowed_in_every_mode(mode):
+def test_straight_drive_is_allowed_in_free_and_climbing(mode):
     backend = DriveRecorder(mode=mode)
     server._dispatch(backend, drive(vx=0.1, vy=0.1), ros=True)()
     assert [velocity for velocity, _ in backend.calls] == [(0.1, 0.1, 0.0)]

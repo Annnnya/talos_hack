@@ -14,7 +14,14 @@ import time
 from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 
-from talos_servo.modes import Mode
+from talos_servo.modes import (
+    ANGULAR_Z,
+    DRIVE_AXES_BY_MODE,
+    LINEAR_X,
+    LINEAR_Y,
+    Mode,
+    allowed_axes,
+)
 
 # A held key repeats faster than this, so letting go stops the robot within this
 # time.
@@ -47,15 +54,23 @@ KEYS: dict[str, tuple[float, float, float]] = {
     "e": (0.0, 0.0, -1.0),
 }
 STOPPED = (0.0, 0.0, 0.0)
-TURN_KEYS = frozenset({"q", "e"})
-ALL_DRIVE_KEYS = frozenset(KEYS)
-# Drive keys each mode allows. Climbing cannot turn on the walls, and aligning
-# and clamping move the robot by themselves.
+# Same order as the fractions in KEYS.
+KEY_AXES = (LINEAR_X, LINEAR_Y, ANGULAR_Z)
+
+
+def _keys_within(axes: Collection[str]) -> frozenset[str]:
+    """Drive keys that only use `axes`."""
+    return frozenset(
+        key
+        for key, fractions in KEYS.items()
+        if all(a in axes for a, f in zip(KEY_AXES, fractions, strict=True) if f)
+    )
+
+
+# Drive keys each mode allows, from the per-mode drive rule in modes.py that
+# the web server enforces too.
 DRIVE_KEYS_BY_MODE: dict[Mode, frozenset[str]] = {
-    Mode.FREE: ALL_DRIVE_KEYS,
-    Mode.CLIMBING: ALL_DRIVE_KEYS - TURN_KEYS,
-    Mode.ALIGNING: frozenset(),
-    Mode.CLAMPING: frozenset(),
+    mode: _keys_within(axes) for mode, axes in DRIVE_AXES_BY_MODE.items()
 }
 
 Drive = Callable[[float, float, float], None]
@@ -75,16 +90,9 @@ def velocity_for(
 
 
 def allowed_keys(mode: str | None) -> frozenset[str]:
-    """Drive keys allowed in `mode`.
-
-    An unknown mode (no mode node running) allows every key, like free.
-    That fails open on purpose: without the mode node its stop lock goes
-    quiet, so twist_mux is locked and no key moves the robot anyway.
-    """
-    try:
-        return DRIVE_KEYS_BY_MODE[Mode(mode)]
-    except ValueError:
-        return ALL_DRIVE_KEYS
+    """Drive keys allowed in `mode`. An unknown mode allows every key, see
+    `modes.allowed_axes`."""
+    return _keys_within(allowed_axes(mode))
 
 
 def run(
