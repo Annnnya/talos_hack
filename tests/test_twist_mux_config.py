@@ -50,8 +50,8 @@ def locks(params) -> dict[str, MuxEntry]:
     return {e.name: e for e in parse_entries(params, LOCKS_PREFIX)}
 
 
-def test_plain_twist_like_the_robot_node(params):
-    assert params["use_stamped"] is False
+def test_stamped_like_the_mecanum_controller(params):
+    assert params["use_stamped"] is True
 
 
 def test_web_and_keyboard_inputs(inputs):

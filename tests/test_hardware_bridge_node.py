@@ -18,6 +18,7 @@ from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.defaults import ROBOT_NODE_NAME  # noqa: E402
 from talos_servo.robot import Robot  # noqa: E402
 from talos_servo.ros.convert import (  # noqa: E402
     CENTER_STEP,
@@ -26,6 +27,10 @@ from talos_servo.ros.convert import (  # noqa: E402
 )
 from talos_servo.ros.hardware_bridge_node import (  # noqa: E402
     HardwareBridgeNode,
+)
+from talos_servo.ros.web_backend import (  # noqa: E402
+    STATUS_PREFIX,
+    RosBackend,
 )
 
 INVERTED = {
@@ -150,6 +155,26 @@ def test_inverted_wheel_turns_the_servo_the_other_way(sdk, clock):
         robot.close()
 
 
+def test_base_wheels_skip_the_joint_speed_cap(sdk, clock):
+    # The mecanum controller limits the body velocity instead.
+    robot = Robot(sdk.bus(), config(BASE), clock=clock)
+    robot.open()
+    node = HardwareBridgeNode(robot)
+    try:
+        fast = step_speed_to_rad(BASE["max_speed"] * 2)
+        node.on_commands(commands(["fl"], velocity=[fast]))
+        assert robot.joints["fl"].target_speed == BASE["max_speed"] * 2
+    finally:
+        node.destroy_node()
+        robot.close()
+
+
+def test_other_speed_joints_keep_the_cap(node, robot):
+    fast = step_speed_to_rad(SMALL["max_speed"] * 2)
+    node.on_commands(commands(["wheel"], velocity=[fast]))
+    assert robot.joints["wheel"].target_speed == SMALL["max_speed"]
+
+
 def test_same_bend_goal_is_written_once(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))
@@ -209,6 +234,38 @@ def test_stop_all_service(node, robot):
     response = node.on_stop_all(Trigger.Request(), Trigger.Response())
     assert response.success
     assert robot.joints["wheel"].target_speed == 0
+
+
+def test_status_as_robot_is_read_by_the_web_backend(robot, monkeypatch):
+    # launch/robot.launch.py runs the bridge as node "robot", so the web
+    # server takes it for the robot node.
+    node = HardwareBridgeNode(robot, node_name=ROBOT_NODE_NAME)
+    sent = []
+    monkeypatch.setattr(node.status_pub, "publish", sent.append)
+    try:
+        robot.tick()
+        node.publish_readouts()
+        (msg,) = sent
+        assert sorted(s.name for s in msg.status) == sorted(
+            f"{STATUS_PREFIX}{joint}" for joint in robot.joints
+        )
+        backend = RosBackend(robot.config)
+        backend._on_status(msg)
+        assert backend._first_status.is_set()
+        assert all(j.online for j in backend.joints.values())
+    finally:
+        node.destroy_node()
+
+
+def test_every_tick_sends_fresh_states(node, sdk, monkeypatch):
+    sent = []
+    monkeypatch.setattr(node.states_pub, "publish", sent.append)
+    sdk.handler.speed = 300
+    node.tick()
+    node.tick()
+    assert len(sent) == 2
+    i = sent[-1].name.index("wheel")
+    assert sent[-1].velocity[i] == pytest.approx(step_speed_to_rad(300))
 
 
 def test_readout_topics_live_under_the_node(node):

@@ -6,7 +6,7 @@ import pytest
 from conftest import BASE, SMALL, FakeClock, config
 from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE
 
-from talos_servo.bus import MAX_POSITION, MODE_WHEEL, _speed_packet
+from talos_servo.bus import MAX_POSITION, MAX_SPEED, MODE_WHEEL, _speed_packet
 from talos_servo.robot import (
     RETRY_OFFLINE_EVERY,
     SOURCE_ROBOT,
@@ -99,6 +99,14 @@ def test_spin_is_sent_on_the_next_tick_and_clamped(sdk, robot):
     robot.spin("wheel", 9999)
     robot.tick()
     assert speed_of(last_speeds(sdk)[2]) == 500
+
+
+def test_uncapped_spin_is_clamped_to_the_servo_range_only(sdk, robot):
+    robot.spin("wheel", 9999, capped=False)
+    robot.tick()
+    assert speed_of(last_speeds(sdk)[2]) == 9999
+    robot.spin("wheel", MAX_SPEED + 1, capped=False)
+    assert robot.joints["wheel"].target_speed == MAX_SPEED
 
 
 def test_control_mode_is_fixed(robot):
@@ -267,3 +275,30 @@ def test_last_command_age_grows(robot, clock):
         "client": None,
         "age": 12.3,
     }
+
+
+def test_tick_reads_every_wheel_in_one_packet(sdk, base):
+    sdk.handler.calls.clear()
+    base.tick()
+    ids = sorted(base.joints[w].id for w in ("fl", "fr", "rl", "rr"))
+    assert [sorted(r) for r in sdk.handler.sync_reads()] == [ids]
+
+
+def test_tick_updates_wheel_position_and_speed(sdk, base):
+    sdk.handler.position = 1000
+    sdk.handler.speed = 300
+    base.tick()
+    # rr is inverted: its speed reads the other way round.
+    assert base.joints["fl"].speed == 300
+    assert base.joints["rr"].speed == -300
+    assert base.joints["fl"].position == 1000
+
+
+def test_failed_wheel_read_keeps_ticking(sdk, base, caplog):
+    for servo_id in (1, 2, 3, 4):
+        sdk.fail[("sync_read", servo_id)] = (COMM_RX_TIMEOUT, 0)
+    base.tick()
+    base.tick()
+    assert caplog.text.count("wheel sync read failed") == 1
+    # Speeds are still written.
+    assert last_speeds(sdk)

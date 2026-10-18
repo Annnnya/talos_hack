@@ -7,7 +7,9 @@ and the CLI all drive the robot through it, so limits, motor direction, the
 command watchdog and stopping live in exactly one place.
 
 Speed joints are written from `tick()`: one sync-write packet with every wheel
-speed, then one servo read, round robin. Call it at `config.control_hz`.
+speed, one sync-read packet with every wheel's position and speed (fresh wheel
+odometry each tick), then one full servo read, round robin. Call it at
+`config.control_hz`.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from typing import Any
 from talos_servo.bus import (
     DEFAULT_ACCELERATION,
     MAX_ACCELERATION,
+    MAX_SPEED,
     MODE_POSITION,
     MODE_WHEEL,
     ServoBus,
@@ -175,8 +178,10 @@ class Robot:
         }
         self._ticks = 0
         self._next_read = 0
-        # Last wheel write error, so a stuck fault logs once, not every tick.
+        # Last wheel write and read errors, so a stuck fault logs once, not
+        # every tick.
         self._speed_error: str | None = None
+        self._wheel_read_error: str | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -207,11 +212,13 @@ class Robot:
 
     # --- control loop ----------------------------------------------------
     def tick(self) -> None:
-        """One control step: watchdog, all wheel speeds, one servo read."""
+        """One control step: watchdog, all wheel speeds, all wheel positions
+        and speeds, one full servo read."""
         with self._lock:
             self._ticks += 1
             self._expire(self.clock())
             self._write_speeds()
+            self._read_wheels()
             self._read_next()
 
     # --- commands --------------------------------------------------------
@@ -251,16 +258,20 @@ class Robot:
         source: str = SOURCE_WEB,
         client: str | None = None,
         expires: bool = False,
+        capped: bool = True,
     ) -> None:
         """Set a speed joint's speed; the next `tick()` sends it.
 
         With `expires`, the joint stops unless the command is repeated within
         `config.command_timeout_s` (streamed commands such as ROS velocity
-        commands).
+        commands). With `capped` false the speed is clamped to the servo's
+        range only, not `config.max_speed`: for callers that enforce their
+        own limits (the base wheels under mecanum_drive_controller).
         """
+        limit = self.config.max_speed if capped else MAX_SPEED
         with self._lock:
             j = self._get(joint)
-            speed = check_spin(j, speed, self.config.max_speed)
+            speed = check_spin(j, speed, limit)
             self._acceleration[joint] = clamp(acceleration, 1, MAX_ACCELERATION)
             self._set_speed(j, speed, expires, source, client)
 
@@ -433,6 +444,34 @@ class Robot:
         if self._speed_error is not None:
             log.info("wheel speed writes work again")
             self._speed_error = None
+
+    def _read_wheels(self) -> None:
+        """Position and speed of every online speed joint in one packet.
+
+        Online state and errors stay with the round robin full read, so a
+        servo missing here is only skipped.
+        """
+        wheels = {
+            self.joints[n].id: self.joints[n]
+            for n in self._speed_joints()
+            if self.joints[n].online
+        }
+        if not wheels:
+            return
+        try:
+            readings = self.bus.read_positions_speeds(list(wheels))
+        except ServoError as exc:
+            if str(exc) != self._wheel_read_error:
+                log.warning("wheel sync read failed: %s", exc)
+                self._wheel_read_error = str(exc)
+            return
+        if self._wheel_read_error is not None:
+            log.info("wheel sync reads work again")
+            self._wheel_read_error = None
+        for servo_id, (position, speed) in readings.items():
+            j = wheels[servo_id]
+            j.position = self._position_from_bus(j, position)
+            j.speed = self._speed_to_bus(j, speed)
 
     def _read_next(self) -> None:
         """Read one joint, round robin, skipping offline joints except on retry

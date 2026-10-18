@@ -7,8 +7,9 @@
 # priorities it does not pick the latest one, so every input gets its own.
 /**:
   ros__parameters:
-    # The robot node takes geometry_msgs/Twist, not TwistStamped.
-    use_stamped: false
+    # geometry_msgs/TwistStamped in and out: mecanum_drive_controller only
+    # takes stamped twists (the robot node takes them too).
+    use_stamped: true
     topics:
       # Keyboard at the laptop overrides the web page while a key is held.
       keyboard:

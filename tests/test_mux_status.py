@@ -116,7 +116,7 @@ def test_input_without_timeout_never_expires():
 
 def test_parse_entries_from_flat_params():
     params = {
-        "use_stamped": False,
+        "use_stamped": True,
         "topics.web.topic": "/web/cmd_vel",
         "topics.web.timeout": 0.5,
         "topics.web.priority": 10,

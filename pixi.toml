@@ -69,9 +69,11 @@ ros-jazzy-robot-state-publisher = "*"
 ros-jazzy-xacro = "*"
 
 [feature.ros.tasks]
-# The whole robot in one command: robot node, mode node, twist_mux,
-# mux_status and the web UI. Opt in to more with camera:=true imu:=true, and
-# pass port:=/dev/ttyACM0 without $TALOS_SERVO_PORT. See launch/robot.launch.py
+# The whole robot in one command: ros2_control (mecanum_drive_controller and
+# the hardware bridge), mode node, twist_mux, mux_status and the web UI. Opt
+# in to more with camera:=true imu:=true, pass port:=/dev/ttyACM0 without
+# $TALOS_SERVO_PORT, and ros2_control:=false for the old robot node (needed by
+# the /debug page). See launch/robot.launch.py
 robot = "ros2 launch launch/robot.launch.py"
 # The only program on the servo port; everything else goes through it
 robot-node = "talos-robot-ros"
@@ -94,8 +96,9 @@ ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.
 # not run at the same time. See docs/ros2_control.md
 hardware-bridge = "talos-hardware-bridge-ros"
 ros2-control-check = "ros2 launch launch/ros2_control_check.launch.py"
-# The whole robot through ros2_control (#85): every wheel and the hinge with
-# forward command controllers. Also replaces robot-node
+# ros2_control without teleop (#85, #65): mecanum_drive_controller for the
+# base and a forward command controller for the hinge. Also replaces
+# robot-node
 ros2-control = "ros2 launch launch/ros2_control.launch.py"
 # Robot model (#64): print the URDF, or check it with check_urdf
 model-urdf = "xacro description/talos.urdf.xacro"
@@ -103,8 +106,11 @@ check-model = "xacro description/talos.urdf.xacro -o .pixi/talos.urdf && check_u
 # Web UI through the running robot node, so it can share the robot
 # with other ROS nodes
 web-ros = "talos-servo web --ros"
-# Web and keyboard share /cmd_vel through one mux, with a STOP lock
+# Web and keyboard share the base through one mux, with a STOP lock.
+# twist-mux feeds robot-node on /cmd_vel; twist-mux-control feeds
+# mecanum_drive_controller from ros2-control. `robot` starts the right one
 twist-mux = "ros2 run twist_mux twist_mux --ros-args --params-file config/twist_mux.yaml -r cmd_vel_out:=/cmd_vel"
+twist-mux-control = "ros2 run twist_mux twist_mux --ros-args --params-file config/twist_mux.yaml -r cmd_vel_out:=/mecanum_drive_controller/reference"
 # Publishes which mux input drives the base on /robot/active_input
 mux-status = "talos-mux-status-ros --ros-args --params-file config/twist_mux.yaml"
 

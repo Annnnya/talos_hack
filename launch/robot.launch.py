@@ -1,11 +1,16 @@
 """The whole robot in one command (#122).
 
-Starts what driving needs: the robot node on the servo port, the mode node
-(STOP lock), twist_mux, mux_status and the web server. The camera and the
-IMU chain (IMU node, Madgwick filter, IMU transform, EKF) are opt-in.
+Starts what driving needs: the ros2_control stack (robot_state_publisher,
+controller_manager, mecanum_drive_controller for the base, #65) with the
+hardware bridge on the servo port, the mode node (STOP lock), twist_mux,
+mux_status and the web server. The camera and the IMU chain (IMU node,
+Madgwick filter, IMU transform, EKF) are opt-in.
 
     pixi run -e ros robot
     pixi run -e ros robot camera:=true imu:=true port:=/dev/ttyACM0
+
+`ros2_control:=false` drives with the old robot node instead (needed for the
+per-motor `/debug` page: under ros2_control the controllers own the joints).
 
 Port defaults to $TALOS_SERVO_PORT. STOP is on at start: press Release STOP
 on the web page (or Enter in `pixi run -e ros drive`) to drive. Ctrl+C stops
@@ -27,12 +32,18 @@ from launch.actions import (
 )
 from launch.substitutions import LaunchConfiguration
 
+from talos_servo.defaults import ROBOT_NODE_NAME
+from talos_servo.ros.control_launch import BASE_REFERENCE_TOPIC, control_nodes
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 ROBOT_CONFIG = CONFIG_DIR / "robot.yaml"
 UI_DIR = ROOT / "web" / "out"
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
 ROBOT_NODE = "robot_node"
+# Runs under the robot node's name (ROBOT_NODE_NAME), so the web server finds
+# its status and /robot/stop_all like the robot node's.
+HARDWARE_BRIDGE = "hardware_bridge"
 WEB = "web"
 # The web server gives up when the robot node does not answer within a few
 # seconds, so it is restarted until the robot node is up.
@@ -47,15 +58,31 @@ def processes(
     web: bool = True,
     camera: bool = False,
     imu: bool = False,
+    ros2_control: bool = True,
 ) -> dict[str, list[str]]:
-    """Name and command of every process to start, in start order."""
+    """Name and command of every process to start, in start order.
+
+    With `ros2_control` the controller_manager nodes from `control_nodes`
+    start too; they are launch_ros nodes, not commands, so not listed here.
+    """
     twist_mux = str(CONFIG_DIR / "twist_mux.yaml")
-    cmds: dict[str, list[str]] = {
-        ROBOT_NODE: ["talos-robot-ros", "--port", port, "--config", config],
+    cmds: dict[str, list[str]] = {}
+    if ros2_control:
+        cmds[HARDWARE_BRIDGE] = [
+            *("talos-hardware-bridge-ros", "--port", port, "--config", config),
+            *("--ros-args", "-r", f"__node:={ROBOT_NODE_NAME}"),
+        ]
+        mux_out = BASE_REFERENCE_TOPIC
+    else:
+        cmds[ROBOT_NODE] = [
+            *("talos-robot-ros", "--port", port, "--config", config)
+        ]
+        mux_out = "/cmd_vel"
+    cmds |= {
         "mode_node": ["talos-mode-ros", "--config", config],
         "twist_mux": [
             *("ros2", "run", "twist_mux", "twist_mux", "--ros-args"),
-            *("--params-file", twist_mux, "-r", "cmd_vel_out:=/cmd_vel"),
+            *("--params-file", twist_mux, "-r", f"cmd_vel_out:={mux_out}"),
         ],
         "mux_status": [
             *("talos-mux-status-ros", "--ros-args"),
@@ -100,6 +127,7 @@ def _robot(context: LaunchContext) -> list:
     port = LaunchConfiguration("port").perform(context)
     config = str(Path(LaunchConfiguration("config").perform(context)).resolve())
     web = _flag(context, "web")
+    ros2_control = _flag(context, "ros2_control")
     # Fail before anything starts, not with half a robot running.
     if not port:
         raise RuntimeError(
@@ -116,13 +144,14 @@ def _robot(context: LaunchContext) -> list:
         web=web,
         camera=_flag(context, "camera"),
         imu=_flag(context, "imu"),
+        ros2_control=ros2_control,
     )
-    actions = []
+    actions: list = control_nodes(ROOT, config) if ros2_control else []
     for name, cmd in cmds.items():
         options: dict = {}
-        if name == ROBOT_NODE:
-            # Nothing drives without the robot node: end the launch.
-            options["on_exit"] = Shutdown(reason="robot node exited")
+        if name in (ROBOT_NODE, HARDWARE_BRIDGE):
+            # Nothing drives without the port owner: end the launch.
+            options["on_exit"] = Shutdown(reason=f"{name} exited")
         elif name == WEB:
             options["respawn"] = True
             options["respawn_delay"] = WEB_RESPAWN_DELAY_S
@@ -154,6 +183,11 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "web", default_value="true", description="web UI on :8000"
+            ),
+            DeclareLaunchArgument(
+                "ros2_control",
+                default_value="true",
+                description="drive through ros2_control (false: robot node)",
             ),
             DeclareLaunchArgument(
                 "camera", default_value="false", description="camera node"

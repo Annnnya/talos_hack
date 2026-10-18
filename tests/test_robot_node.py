@@ -16,7 +16,7 @@ pytest.importorskip("nav_msgs")
 
 from conftest import BASE, SMALL, FakeClock, config  # noqa: E402
 from diagnostic_msgs.msg import DiagnosticStatus  # noqa: E402
-from geometry_msgs.msg import Twist  # noqa: E402
+from geometry_msgs.msg import TwistStamped  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
@@ -122,8 +122,8 @@ def test_velocity_cmd_spins_clamps_and_expires(node, robot, clock):
 
 
 def test_cmd_vel_drives_the_base(base_node):
-    msg = Twist()
-    msg.linear.x = 0.1
+    msg = TwistStamped()
+    msg.twist.linear.x = 0.1
     base_node.on_cmd_vel(msg)
     wheels = base_node.robot.joints
     assert [wheels[w].target_speed for w in ("fl", "fr", "rl", "rr")] == [
@@ -135,7 +135,7 @@ def test_cmd_vel_drives_the_base(base_node):
 
 
 def test_cmd_vel_without_base_is_only_logged(node, robot):
-    node.on_cmd_vel(Twist())
+    node.on_cmd_vel(TwistStamped())
     assert robot.joints["wheel"].target_speed == 0
 
 

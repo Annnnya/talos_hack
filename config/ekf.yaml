@@ -14,7 +14,8 @@
     base_link_frame: base_link
     world_frame: odom
 
-    # Wheel odometry from the robot node. Only velocities: wheel slip then
+    # Wheel odometry from mecanum_drive_controller (or the robot node when
+    # launched with ros2_control:=false). Only velocities: wheel slip then
     # shows up as a velocity error instead of a jump in absolute pose.
     odom0: /odom
     odom0_config: [false, false, false,

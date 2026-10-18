@@ -260,6 +260,42 @@ class FakeHandler:
         comm, error = self._result("read_block", servo_id)
         if comm != COMM_SUCCESS:
             return [], comm, error
+        return self._read_memory(address, length), comm, error
+
+    def syncReadTx(
+        self, address: int, length: int, ids: list[int], count: int
+    ) -> int:
+        """Start of the SDK GroupSyncRead; syncReadRx sends the replies."""
+        self.calls.append(("sync_read", list(ids[:count])))
+        self._sync_read = (address, length, list(ids[:count]))
+        return self._result("sync_read", BROADCAST_ID)[0]
+
+    def syncReadRx(self, length: int, count: int) -> tuple[int, list[int]]:
+        """One status packet per answering servo, as on the wire. `fail`
+        with ("sync_read", id) drops that servo (comm) or flags it (error)."""
+        address, length, ids = self._sync_read
+        packet: list[int] = []
+        for servo_id in ids:
+            comm, error = self._result("sync_read", servo_id)
+            if comm != COMM_SUCCESS or (
+                self.present is not None and servo_id not in self.present
+            ):
+                continue
+            data = self._read_memory(address, length)
+            body = [servo_id, length + 2, error, *data]
+            packet += [0xFF, 0xFF, *body, ~sum(body) & 0xFF]
+        if not packet:
+            return COMM_RX_TIMEOUT, []
+        return COMM_SUCCESS, packet
+
+    @staticmethod
+    def scs_makeword(low: int, high: int) -> int:
+        return (low & 0xFF) | ((high & 0xFF) << 8)
+
+    def sync_reads(self) -> list[list[int]]:
+        return [c[1] for c in self.calls if c[0] == "sync_read"]
+
+    def _read_memory(self, address: int, length: int) -> list[int]:
         memory: dict[int, int] = {}
         for start, value in self.registers.items():
             memory[start] = value & 0xFF
@@ -271,7 +307,7 @@ class FakeHandler:
         ):
             raw = abs(value) | (0x8000 if value < 0 else 0)
             memory[start], memory[start + 1] = raw & 0xFF, raw >> 8
-        return [memory.get(address + i, 0) for i in range(length)], comm, error
+        return [memory.get(address + i, 0) for i in range(length)]
 
     def ReadPosSpeed(self, servo_id: int) -> tuple[int, int, int, int]:
         self.calls.append(("read", servo_id))
