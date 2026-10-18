@@ -43,7 +43,6 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
@@ -51,7 +50,6 @@ from talos_servo.config import ModesConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
     QUEUE_DEPTH,
-    ROBOT_NS,
     STOP_LOCK_PERIOD_S,
 )
 from talos_servo.modes import (
@@ -61,6 +59,15 @@ from talos_servo.modes import (
     ModeMachine,
     Transition,
 )
+from talos_servo.ros.names import (
+    LATCHED,
+    MODE_REASON_TOPIC,
+    MODE_TOPIC,
+    RELEASE_SERVICE,
+    SET_STOP_SERVICE,
+    STOP_LOCK_TOPIC,
+    WALL_NEARBY_SERVICE,
+)
 
 try:
     from controller_manager_msgs.srv import ListControllers, SwitchController
@@ -68,22 +75,10 @@ except ImportError:  # not in every environment yet; switching is skipped
     ListControllers = SwitchController = None
 
 MODE_NODE_NAME = "mode"
-MODE_TOPIC = f"{ROBOT_NS}/mode"
-MODE_REASON_TOPIC = f"{ROBOT_NS}/mode_reason"
-WALL_NEARBY_SERVICE = f"{ROBOT_NS}/wall_nearby"
-RELEASE_SERVICE = f"{ROBOT_NS}/release"
-SET_STOP_SERVICE = f"{ROBOT_NS}/set_stop"
-STOP_LOCK_TOPIC = f"{ROBOT_NS}/stop_lock"
 DEFAULT_CONTROLLER_MANAGER = "/controller_manager"
 SWITCH_POLL_INTERVAL = 0.05
 RECONCILE_PERIOD_S = 1.0
 ACTIVE = "active"
-# Late subscribers (a UI that starts after us) still get the current mode.
-LATCHED = QoSProfile(
-    depth=1,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    reliability=ReliabilityPolicy.RELIABLE,
-)
 
 
 class SwitchError(RuntimeError):
