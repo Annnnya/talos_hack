@@ -4,6 +4,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
+  // Write each page as `<route>/index.html`: the Python static server only
+  // finds `/debug` as a folder, not as `debug.html`.
+  trailingSlash: true,
 };
 
 export default nextConfig;
