@@ -11,6 +11,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CompressedImage
 from std_srvs.srv import SetBool, Trigger
 
+from talos_servo.ros.names import CAMERA_IMAGE_TOPIC
+
 DEFAULT_CAMERA_INDEX = 0
 DEFAULT_SNAPSHOT_WIDTH = 4608
 DEFAULT_SNAPSHOT_HEIGHT = 2592
@@ -80,7 +82,7 @@ class CameraNode(Node):
             )
 
         self._publisher = self.create_publisher(
-            CompressedImage, "/camera/image/compressed", 2
+            CompressedImage, CAMERA_IMAGE_TOPIC, 2
         )
         self._snapshot_publisher = self.create_publisher(
             CompressedImage,

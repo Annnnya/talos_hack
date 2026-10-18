@@ -85,6 +85,10 @@ class RobotBackend(Protocol):
         """Platform roll and pitch in degrees from the IMU (`roll_deg`,
         `pitch_deg`); None without ROS or while the IMU is quiet."""
 
+    def camera_frame(self) -> bytes | None:
+        """Latest JPEG from the camera; None without ROS or while the
+        camera is quiet."""
+
     def drive(
         self,
         linear_x: float,

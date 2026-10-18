@@ -14,13 +14,14 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.context import Context
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Imu, JointState
+from sensor_msgs.msg import CompressedImage, Imu, JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.defaults import QUEUE_DEPTH, ROBOT_NS
 from talos_servo.ros.names import (
     ACTIVE_INPUT_TOPIC,
+    CAMERA_IMAGE_TOPIC,
     CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
     HOLD_ENABLE_SERVICE,
@@ -62,6 +63,7 @@ class WebClientNode(Node):
         on_active_input: Callable[[String], None] = _ignore,
         on_hold_state: Callable[[String], None] = _ignore,
         on_imu: Callable[[Imu], None] = _ignore,
+        on_camera: Callable[[CompressedImage], None] = _ignore,
         node_name: str = NODE_NAME,
         cmd_vel_topic: str = CMD_VEL_TOPIC,
         context: Context | None = None,
@@ -126,6 +128,13 @@ class WebClientNode(Node):
         # Filtered IMU with orientation, for the platform tilt (#91).
         self.create_subscription(
             Imu, IMU_DATA_TOPIC, on_imu, qos_profile_sensor_data
+        )
+        # Camera frames for the page (#147); only the latest one matters.
+        self.create_subscription(
+            CompressedImage,
+            CAMERA_IMAGE_TOPIC,
+            on_camera,
+            qos_profile_sensor_data,
         )
         self.torque_clients = {
             joint: self.create_client(SetBool, f"{ROBOT_NS}/{joint}/set_torque")

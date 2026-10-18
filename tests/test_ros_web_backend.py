@@ -29,7 +29,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
-from sensor_msgs.msg import Imu, JointState  # noqa: E402
+from sensor_msgs.msg import CompressedImage, Imu, JointState  # noqa: E402
 from std_msgs.msg import Float64, String  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
@@ -48,6 +48,7 @@ from talos_servo.ros.imu_convert import (  # noqa: E402
 from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.names import (  # noqa: E402
     ACTIVE_INPUT_TOPIC,
+    CAMERA_IMAGE_TOPIC,
     EXPANSION_RATE_TOPIC,
     IMU_DATA_TOPIC,
     LATCHED,
@@ -58,6 +59,7 @@ from talos_servo.ros.names import (  # noqa: E402
 )
 from talos_servo.ros.robot_node import RobotNode  # noqa: E402
 from talos_servo.ros.web_backend import (  # noqa: E402
+    CAMERA_STALE_AFTER,
     STATUS_STALE_AFTER,
     TILT_STALE_AFTER,
     RosBackend,
@@ -379,6 +381,55 @@ def test_tilt_arrives_over_the_imu_topic(backend):
             pub.publish(imu_msg(0.0, math.radians(3.0)))
             time.sleep(0.05)
         assert backend.tilt()["pitch_deg"] == pytest.approx(3.0)
+    finally:
+        node.destroy_node()
+
+
+# --- camera frame for the page (#147) --------------------------------------
+
+JPEG = b"\xff\xd8 fake jpeg \xff\xd9"
+
+
+def camera_msg(data: bytes = JPEG, fmt: str = "jpeg") -> CompressedImage:
+    msg = CompressedImage()
+    msg.format = fmt
+    msg.data = data
+    return msg
+
+
+def test_camera_frame_is_the_latest_jpeg():
+    backend = make_backend()
+    assert backend.camera_frame() is None
+    backend._on_camera(camera_msg(b"\xff\xd8 old \xff\xd9"))
+    backend._on_camera(camera_msg())
+    assert backend.camera_frame() == JPEG
+
+
+def test_camera_frame_that_is_not_jpeg_is_ignored():
+    backend = make_backend()
+    backend._on_camera(camera_msg(b"\x89PNG", fmt="png"))
+    assert backend.camera_frame() is None
+
+
+def test_camera_frame_goes_stale_when_the_camera_stops():
+    clock = FakeClock()
+    backend = make_backend(clock=clock)
+    backend._on_camera(camera_msg())
+    assert backend.camera_frame() == JPEG
+    clock.now += CAMERA_STALE_AFTER + 0.1
+    assert backend.camera_frame() is None
+
+
+def test_camera_frame_arrives_over_the_camera_topic(backend):
+    node = rclpy.create_node("camera_for_web_backend")
+    pub = node.create_publisher(CompressedImage, CAMERA_IMAGE_TOPIC, 2)
+    try:
+        wait_for(lambda: pub.get_subscription_count() > 0, WAIT)
+        deadline = time.monotonic() + WAIT
+        while backend.camera_frame() is None and time.monotonic() < deadline:
+            pub.publish(camera_msg())
+            time.sleep(0.05)
+        assert backend.camera_frame() == JPEG
     finally:
         node.destroy_node()
 

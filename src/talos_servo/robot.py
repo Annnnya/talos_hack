@@ -444,6 +444,10 @@ class Robot:
         """The platform tilt comes from the IMU chain, over ROS."""
         return None
 
+    def camera_frame(self) -> bytes | None:
+        """Camera frames come from the camera node, over ROS."""
+        return None
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)

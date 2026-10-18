@@ -36,7 +36,7 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
-from sensor_msgs.msg import Imu, JointState
+from sensor_msgs.msg import CompressedImage, Imu, JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
@@ -96,6 +96,10 @@ EXECUTOR_JOIN_TIMEOUT = 2.0
 # The Madgwick filter publishes at the IMU rate (100 Hz); this much silence
 # means the IMU chain is gone and the tilt is unknown.
 TILT_STALE_AFTER = 0.5
+# The camera node streams at several frames a second; this much silence means
+# the stream is off or the node is gone.
+CAMERA_STALE_AFTER = 2.0
+JPEG_FORMAT = "jpeg"
 
 
 class RosBackend:
@@ -151,6 +155,9 @@ class RosBackend:
         # Platform roll and pitch (rad) from the IMU, and when they came.
         self._tilt: tuple[float, float] | None = None
         self._tilt_at: float | None = None
+        # Latest JPEG from the camera node, and when it came.
+        self._frame: bytes | None = None
+        self._frame_at: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -168,6 +175,7 @@ class RosBackend:
                 on_active_input=self._on_active_input,
                 on_hold_state=self._on_hold_state,
                 on_imu=self._on_imu,
+                on_camera=self._on_camera,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -582,6 +590,23 @@ class RosBackend:
             "roll_deg": math.degrees(roll),
             "pitch_deg": math.degrees(pitch),
         }
+
+    def _on_camera(self, msg: CompressedImage) -> None:
+        # The page shows the frame as is, so only JPEG works.
+        if JPEG_FORMAT not in msg.format.lower():
+            return
+        frame = bytes(msg.data)
+        with self._lock:
+            self._frame, self._frame_at = frame, self._clock()
+
+    def camera_frame(self) -> bytes | None:
+        """Latest JPEG from the camera node, None while it is quiet."""
+        with self._lock:
+            if self._frame_at is None:
+                return None
+            if self._clock() - self._frame_at > CAMERA_STALE_AFTER:
+                return None
+            return self._frame
 
     def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
         """Set the hold setpoint (A), then turn the hold on or off."""
