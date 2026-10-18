@@ -11,8 +11,14 @@ import pytest
 pytest.importorskip("launch_ros")
 
 ROOT = Path(__file__).resolve().parent.parent
-DRIVE = ["hardware_bridge", "mode_node", "twist_mux", "mux_status"]
-ROBOT_NODE_DRIVE = ["robot_node", *DRIVE[1:]]
+DRIVE = [
+    "hardware_bridge",
+    "mode_node",
+    "expansion_node",
+    "twist_mux",
+    "mux_status",
+]
+ROBOT_NODE_DRIVE = ["robot_node", "mode_node", "twist_mux", "mux_status"]
 IMU = ["imu_node", "imu_filter", "imu_tf", "ekf"]
 CONTROLLER_REFERENCE = "/mecanum_drive_controller/reference"
 
@@ -111,8 +117,13 @@ def test_controller_odometry_feeds_the_ekf():
 
 
 def test_control_nodes_build_from_the_robot_config():
-    from talos_servo.ros.control_launch import control_nodes, spawned
+    from talos_servo.ros.control_launch import (
+        INACTIVE,
+        control_nodes,
+        spawned,
+    )
 
     config = str(ROOT / "config" / "robot.yaml")
     # robot_state_publisher, controller_manager and one spawner each.
-    assert len(control_nodes(ROOT, config)) == 2 + len(spawned(config))
+    expected = 2 + len(spawned(config)) + len(INACTIVE)
+    assert len(control_nodes(ROOT, config)) == expected

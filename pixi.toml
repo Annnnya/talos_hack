@@ -84,6 +84,9 @@ camera-node = "talos-camera-ros --ros-args --params-file config/camera.yaml"
 imu-node = "talos-imu-ros"
 # Robot mode (free, aligning, clamping, climbing); switches controllers
 mode-node = "talos-mode-ros"
+# Opens and closes the hinge with the wheels rolling along (#76): publish a
+# rate in rad/s on /expansion/rate. Needs ros2-control or robot running
+expansion-node = "talos-expansion-ros"
 # Turns /imu/data_raw into /imu/data with an orientation quaternion
 imu-filter = "ros2 run imu_filter_madgwick imu_filter_madgwick_node --ros-args --params-file config/imu_filter.yaml"
 # Where the IMU sits on the robot. All zeros until the board is mounted: then measure it and
