@@ -26,7 +26,7 @@ flowchart TB
     end
     subgraph HW["Hardware"]
         WHEELS[("4 mecanum wheels<br/>ids 6, 5, 4, 3")]
-        BEND[("bend<br/>id 1, disabled")]
+        BEND[("bend hinge<br/>id 1")]
         MPU[("MPU6050 IMU")]
     end
 
@@ -36,9 +36,8 @@ flowchart TB
     ROBOT --> BUS
     IMUN --> IMUD
     BUS --> WHEELS
-    BUS -. "enabled: false" .-> BEND
+    BUS --> BEND
     IMUD --> MPU
-    style BEND stroke-dasharray: 5 5
 ```
 
 | Layer | Job | Rule |
@@ -105,9 +104,18 @@ flowchart TB
 ### ros2_control (in progress, #62)
 
 Control is moving to ros2_control. How it works with our Python code (the
-topic based hardware plugin plus `hardware_bridge_node`) and the bench check
-`pixi run -e ros ros2-control-check` are in
-[docs/ros2_control.md](docs/ros2_control.md).
+topic based hardware plugin plus `hardware_bridge_node`) is in
+[docs/ros2_control.md](docs/ros2_control.md). Drive every wheel and the
+hinge by hand on the bench (stop the robot node first):
+
+```
+pixi run -e ros ros2-control port:=/dev/ttyACM0
+ros2 topic pub --once /bend_position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [2.8]}"      # alpha in rad
+ros2 topic echo /dynamic_joint_states                 # effort = current
+```
+
+Start it with the hinge flat unless `model.bend_flat_steps` is calibrated.
 
 ### Robot model (#64)
 
@@ -125,10 +133,10 @@ The legs follow it through mimic joints, each tilting by half the fold, so
 the platform stays level. The wheelbase is `2 * l * sin(bend / 2)`
 (`talos_servo.model.wheelbase_m`).
 
-The `<ros2_control>` block drives only the four wheels for now. The hinge
-joins it in #85, together with the conversion from opening angle to servo
-angle (`talos_servo.model.alpha_per_servo_rad`) and the flat offset from the
-calibration in #84.
+The `<ros2_control>` block drives the four wheels and the hinge. The
+hardware bridge turns the opening angle into servo steps
+(`talos_servo.hinge`) from the flat servo position: `model.bend_flat_steps`
+once calibrated (#84), otherwise where the hinge was at startup.
 
 View it in RViz2 (needs a display; installs RViz only in the `viz`
 environment, not on the Pi; works on Linux and Windows):
@@ -202,7 +210,7 @@ joints:
   rear_left_wheel:   { id: 4, control: speed,    inverted: true }
   rear_right_wheel:  { id: 3, control: speed,    inverted: false }
   bend:              { id: 1, control: position, inverted: false,
-                       enabled: false, min_pos: 0, max_pos: 4095 }
+                       min_pos: 0, max_pos: 4095 }
 base:
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel,
            rear_right_wheel]
@@ -221,8 +229,9 @@ base:
 
 - **Find the `inverted` values:** lift the wheels, run `talos-servo drive`,
   press W, and set `inverted: true` on any wheel that turns backwards.
-- **Enable bend once it is installed:** set `enabled: true` and real
-  `min_pos`/`max_pos`, then restart. Its topics appear under `/robot/bend/`.
+- **bend:** folding must lower its position; set `inverted: true` if it
+  folds the other way. Its topics appear under `/robot/bend/`. Real
+  `min_pos`/`max_pos` come with the calibration (#84).
 
 ## ROS topics
 
