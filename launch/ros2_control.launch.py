@@ -28,16 +28,26 @@ from launch.actions import (
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+from talos_servo.config import load_config
+
 ROOT = Path(__file__).resolve().parent.parent
 XACRO = ROOT / "description" / "talos.urdf.xacro"
 CONTROLLERS = ROOT / "config" / "ros2_control.yaml"
 ROBOT_CONFIG = ROOT / "config" / "robot.yaml"
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
-SPAWNED = (
-    "joint_state_broadcaster",
-    "wheel_velocity_controller",
-    "bend_position_controller",
-)
+SPAWNED = ("joint_state_broadcaster", "wheel_velocity_controller")
+# Only spawned while the hinge is enabled: it claims the hinge joint.
+HINGE_CONTROLLER = "bend_position_controller"
+
+
+def spawned(config_path: str) -> tuple[str, ...]:
+    """Controllers to spawn for this robot config."""
+    config = load_config(config_path)
+    model = config.model
+    enabled = {j.name for j in config.enabled_joints}
+    if model is not None and model.hinge_joint in enabled:
+        return (*SPAWNED, HINGE_CONTROLLER)
+    return SPAWNED
 
 
 def _robot(context: LaunchContext) -> list:
@@ -76,7 +86,7 @@ def _robot(context: LaunchContext) -> list:
                 executable="spawner",
                 arguments=[name],
             )
-            for name in SPAWNED
+            for name in spawned(config)
         ),
         ExecuteProcess(
             cmd=[

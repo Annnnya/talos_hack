@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -95,6 +96,41 @@ def test_controllers_cover_every_hardware_joint(robot):
         for joint in section["ros__parameters"]["joints"]
     ]
     assert sorted(claimed) == sorted(hardware_joints(robot))
+
+
+def disabled_hinge_config(tmp_path: Path) -> Path:
+    data = yaml.safe_load(
+        (ROOT / "config" / "robot.yaml").read_text(encoding="utf-8")
+    )
+    data["joints"][HINGE]["enabled"] = False
+    path = tmp_path / "robot.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return path
+
+
+def test_disabled_hinge_stays_out_of_ros2_control(tmp_path):
+    config = disabled_hinge_config(tmp_path)
+    robot = ET.fromstring(
+        xacro.process_file(
+            str(XACRO), mappings={"robot_config": config.as_posix()}
+        ).toxml()
+    )
+    assert HINGE not in hardware_joints(robot)
+    # The model joint stays: the legs still mimic it.
+    assert HINGE in joints(robot)
+
+
+def test_launch_spawns_the_hinge_controller_only_when_enabled(tmp_path):
+    pytest.importorskip("launch_ros")
+    spec = importlib.util.spec_from_file_location(
+        "ros2_control_launch", ROOT / "launch" / "ros2_control.launch.py"
+    )
+    launch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launch)
+    repo = launch.spawned(str(ROOT / "config" / "robot.yaml"))
+    assert launch.HINGE_CONTROLLER in repo
+    disabled = launch.spawned(str(disabled_hinge_config(tmp_path)))
+    assert launch.HINGE_CONTROLLER not in disabled
 
 
 def _leg_angle(joint: ET.Element, alpha: float) -> float:

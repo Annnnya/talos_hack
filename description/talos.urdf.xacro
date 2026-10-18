@@ -27,6 +27,10 @@
   <!-- bend is the hinge opening angle alpha: pi flat, bend_min at max
        fold. -->
   <xacro:property name="hinge" value="${model['hinge_joint']}"/>
+  <!-- A disabled hinge stays out of <ros2_control>: the bridge rejects a
+       whole command that names a joint it does not drive. -->
+  <xacro:property name="hinge_enabled"
+                  value="${cfg['joints'][hinge].get('enabled', True)}"/>
   <xacro:property name="bend_min" value="${radians(model['bend_min_deg'])}"/>
   <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
   <!-- Rough STS3215 figures: 2.9 N m stall, about 4.6 rad/s. -->
@@ -185,16 +189,18 @@
          goal and its repeats, so starting never moves the hinge. No
          <transmission>: the plugin ignores them, so the bridge converts
          alpha to servo steps (talos_servo.hinge). -->
-    <joint name="${hinge}">
-      <command_interface name="position">
-        <param name="initial_value">${pi}</param>
-      </command_interface>
-      <state_interface name="position">
-        <param name="initial_value">${pi}</param>
-      </state_interface>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
+    <xacro:if value="${hinge_enabled}">
+      <joint name="${hinge}">
+        <command_interface name="position">
+          <param name="initial_value">${pi}</param>
+        </command_interface>
+        <state_interface name="position">
+          <param name="initial_value">${pi}</param>
+        </state_interface>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </xacro:if>
   </ros2_control>
 
 </robot>
