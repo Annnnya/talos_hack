@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo } from "react";
 import Joystick from "@/components/Joystick";
+import ModeDiagram from "@/components/ModeDiagram";
 import ReleaseStopButton from "@/components/ReleaseStopButton";
 import { useStopKey } from "@/components/StopAllButton";
 import { useJoystick } from "@/lib/joystick";
@@ -112,6 +113,16 @@ export default function Home() {
           {modeReason && <span className="text-black/60 dark:text-white/60">{modeReason}</span>}
           <span className="ml-auto text-black/60 dark:text-white/60">Driving: {describeInput(activeInput)}</span>
         </div>
+      )}
+      {ros && (
+        <details open className="rounded-xl border border-black/10 px-3 py-2 dark:border-white/15">
+          <summary className="cursor-pointer text-sm font-medium text-black/70 select-none dark:text-white/70">
+            State machine
+          </summary>
+          <div className="mt-2">
+            <ModeDiagram mode={mode} />
+          </div>
+        </details>
       )}
       {ros && mode === null && connected && (
         <p className="text-sm text-black/60 dark:text-white/60">
