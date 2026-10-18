@@ -14,7 +14,7 @@ goes through PRs.
 flowchart TB
     subgraph EDGE["Layer 1: ROS edge (no logic, no hardware)"]
         CLI["talos-servo CLI<br/>drive · spin · monitor · ping · web"]
-        UI["Web UI"]
+        UI["Web UI<br/>joystick · /debug"]
         NODE["robot_node<br/>/cmd_vel · /odom · /robot/*"]
         IMUN["imu_node<br/>/imu/data_raw -> EKF"]
     end
@@ -210,13 +210,13 @@ The single pixi tasks below still start one piece each, for debugging.
 | `talos-servo spin --ids 1 --speed 100` | Spin for 1 s, then stop |
 | `talos-servo monitor --ids 1` | Print position and speed until Ctrl+C |
 | `talos-servo set-id --id 1 --new-id 3` | Change a servo id (EEPROM) |
-| `talos-servo drive` | Drive with the keyboard: W/S, A/D, Q/E, X |
-| `talos-servo web` | Browser UI on port 8000 |
+| `talos-servo drive` | Drive with the keyboard: W/S, A/D, Q/E, Space stop, X quit |
+| `talos-servo web` | Browser UI on port 8000: joystick at `/`, per-motor page at `/debug` |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
 | `pixi run -e ros robot` | The whole robot, see "Run the robot" |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
 | `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP |
-| `pixi run -e ros web-ros` | `talos-servo web --ros` |
+| `pixi run -e ros web-ros` | `talos-servo web --ros`, needed to drive from the joystick |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
 | `pixi run -e ros ekf` | Pose estimate from wheels and gyro |
@@ -325,11 +325,11 @@ and sends one stop on release, so a closed tab drops out of the mux within
 0.5 s.
 
 `drive --ros` sends the keys on `/keyboard/cmd_vel`. STOP from anywhere wins
-over every input: the web **STOP ALL** button (or Space on the page) and
-Space in `drive --ros` turn it on through `/robot/set_stop`, so an input
-that is still sending cannot drive again. Release it with **Release STOP**
-on the web pages (shown while STOP is on), Enter on either, or
-`/robot/set_stop` `false`.
+over every input: the web **STOP** button (**STOP ALL** on `/debug`, Space
+on both pages) and Space in `drive --ros` turn it on through
+`/robot/set_stop`, so an input that is still sending cannot drive again.
+Release it with **Release STOP** on the web pages (shown while STOP is on),
+Enter on either, or `/robot/set_stop` `false`.
 
 ```
 pixi run -e ros mode-node
@@ -419,24 +419,65 @@ ros2 service call /robot/release std_srvs/srv/Trigger
 
 ## Web UI
 
-The per-motor page lives at `/debug` for bench tests; `/` is kept for the
-joystick. On `/debug` each joint gets a card: a position slider for position
-joints, a speed slider for speed joints, plus torque, live state and who sent
-the last command. Several browsers can connect at once.
+Two pages: the joystick at `/` to drive the robot, on a phone or a laptop,
+and the per-motor page at `/debug` for bench tests. Each links to the other.
+Several browsers can connect at once.
 
 ```
 cd web && npm install && npm run build    # once, Node 20+
-uv run talos-servo web                    # or: pixi run -e ros web-ros
+pixi run -e ros robot                     # or: pixi run -e ros web-ros
+uv run talos-servo web                    # without ROS: /debug only
 ```
 
-Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
-joint, including wheels the CLI or a ROS node is driving, and over ROS turns
-STOP on (see twist_mux above); **Release STOP** (or Enter) lets the base
-drive again. `/` has both buttons too and keeps its own connection. When the
-last browser disconnects, the server stops only what the web commanded: the
-joints it spins and its twist_mux input. Over ROS, keyboard driving carries
-on. For UI work with hot reload, run `npm run dev` in `web/` with
-`NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
+### Joystick (`/`)
+
+Open `http://<pi>.local:8000` on a phone or laptop on the same network.
+
+```text
+   [ CCW Q ]           [ CW E ]
+             [ UP W ]
+   [ LEFT A ] [ STOP ] [ RIGHT D ]
+            [ DOWN S ]
+
+   [ Wall nearby N ]   [ Release L ]
+```
+
+- **Hold to move:** a held button (or key) is re-sent every 100 ms and one
+  stop is sent on release. Sliding the finger off, hiding the tab or the
+  window losing focus also stops. One direction at a time.
+- **STOP** (Space) turns STOP on for every input; **Release STOP** (Enter)
+  shows in the header while STOP is on. STOP is on when the robot starts.
+- **Wall nearby** (N) starts the climb (`free` to `aligning`); **Release**
+  (L) goes back to `free` from any other mode (see Robot modes).
+- **Per mode:** the buttons the mode does not allow are greyed out.
+
+  | Mode | Drive | Rotate | Wall nearby | Release |
+  | --- | --- | --- | --- | --- |
+  | `free` (XY) | yes | yes | yes | no |
+  | `aligning`, `clamping` | no | no | no | yes |
+  | `climbing` (Z) | yes | no | no | yes |
+
+- The header shows the connection, the mode and why it changed, and which
+  input is driving (web, keyboard or nobody), also when `drive --ros`
+  changes them.
+- On a desktop the keys are the same as in `drive --ros`: W/S, A/D, Q/E,
+  Space, Enter, N and L.
+- Driving and the mode buttons need the ROS web server (`web --ros`) with the
+  mode node and twist_mux, which `pixi run -e ros robot` starts. With plain
+  `talos-servo web` only STOP works.
+
+### Per-motor page (`/debug`)
+
+Each joint gets a card: a position slider for position joints, a speed
+slider for speed joints, plus torque, live state and who sent the last
+command. **STOP ALL** (or Space) stops every speed joint, including wheels
+the CLI or a ROS node is driving, and over ROS turns STOP on (see twist_mux
+above); **Release STOP** (or Enter) lets the base drive again.
+
+When the last browser disconnects, the server stops only what the web
+commanded: the joints it spins and its twist_mux input. Over ROS, keyboard
+driving carries on. For UI work with hot reload, run `npm run dev` in `web/`
+with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
