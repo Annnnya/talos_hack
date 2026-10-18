@@ -18,6 +18,7 @@ from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.defaults import ROBOT_NODE_NAME  # noqa: E402
 from talos_servo.robot import Robot  # noqa: E402
 from talos_servo.ros.convert import (  # noqa: E402
     CENTER_STEP,
@@ -26,6 +27,10 @@ from talos_servo.ros.convert import (  # noqa: E402
 )
 from talos_servo.ros.hardware_bridge_node import (  # noqa: E402
     HardwareBridgeNode,
+)
+from talos_servo.ros.web_backend import (  # noqa: E402
+    STATUS_PREFIX,
+    RosBackend,
 )
 
 INVERTED = {
@@ -229,6 +234,27 @@ def test_stop_all_service(node, robot):
     response = node.on_stop_all(Trigger.Request(), Trigger.Response())
     assert response.success
     assert robot.joints["wheel"].target_speed == 0
+
+
+def test_status_as_robot_is_read_by_the_web_backend(robot, monkeypatch):
+    # launch/robot.launch.py runs the bridge as node "robot", so the web
+    # server takes it for the robot node.
+    node = HardwareBridgeNode(robot, node_name=ROBOT_NODE_NAME)
+    sent = []
+    monkeypatch.setattr(node.status_pub, "publish", sent.append)
+    try:
+        robot.tick()
+        node.publish_readouts()
+        (msg,) = sent
+        assert sorted(s.name for s in msg.status) == sorted(
+            f"{STATUS_PREFIX}{joint}" for joint in robot.joints
+        )
+        backend = RosBackend(robot.config)
+        backend._on_status(msg)
+        assert backend._first_status.is_set()
+        assert all(j.online for j in backend.joints.values())
+    finally:
+        node.destroy_node()
 
 
 def test_readout_topics_live_under_the_node(node):

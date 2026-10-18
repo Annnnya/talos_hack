@@ -21,6 +21,12 @@ two topics; this node answers them with the `Robot` on the servo bus. See
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
   `moving`: readouts the plugin cannot carry, see `talos_servo.ros.readouts`
 - `/hardware_bridge/stop_all` (std_srvs/Trigger)
+- `/diagnostics` (diagnostic_msgs/DiagnosticArray): one entry per joint named
+  `<node name>: <joint>`, the same as the robot node's. Run as node `robot`
+  (`--ros-args -r __node:=robot`, as launch/robot.launch.py does) and the web
+  server reads it like the robot node: status, `/robot/stop_all` and the
+  `/robot/<joint>/*` readouts. Per-joint commands from `/debug` are not
+  served: the controllers own the joints
 
 The hinge (`model.hinge_joint`, `bend`) is the opening angle alpha in rad, pi
 flat, converted by `talos_servo.hinge.Hinge` from the fixed flat position
@@ -42,6 +48,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -59,6 +66,7 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.diagnostics import DIAGNOSTICS_TOPIC, joint_diagnostics
 from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
 from talos_servo.ros.topic_bridge import Unwrapper, unpack_commands
@@ -117,6 +125,9 @@ class HardwareBridgeNode(Node):
             JointState, STATES_TOPIC, qos_profile_sensor_data
         )
         self.readouts = JointReadoutPublishers(self, "~", robot.joints)
+        self.status_pub = self.create_publisher(
+            DiagnosticArray, DIAGNOSTICS_TOPIC, QUEUE_DEPTH
+        )
         self.create_subscription(
             JointState, COMMANDS_TOPIC, self.on_commands, QUEUE_DEPTH
         )
@@ -174,8 +185,11 @@ class HardwareBridgeNode(Node):
         return steps_to_rad(j["position"]), step_speed_to_rad(j["speed"])
 
     def publish_readouts(self) -> None:
-        self.readouts.publish_snapshot(
-            self.robot.snapshot(), self.get_clock().now().to_msg()
+        snapshot = self.robot.snapshot()
+        stamp = self.get_clock().now().to_msg()
+        self.readouts.publish_snapshot(snapshot, stamp)
+        self.status_pub.publish(
+            joint_diagnostics(self.get_name(), snapshot, stamp)
         )
 
     # --- commands --------------------------------------------------------
