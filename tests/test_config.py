@@ -398,3 +398,44 @@ def test_broken_yaml_is_a_config_error(tmp_path):
     path.write_text("joints: [unclosed", "utf-8")
     with pytest.raises(ConfigError, match="not valid YAML"):
         load_config(path)
+
+
+# --- imu mount (#91) ------------------------------------------------------
+
+
+def test_imu_mount_defaults_to_zeros():
+    imu = parse_config(SMALL).imu
+    assert (imu.xyz, imu.rpy) == ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+
+
+def test_imu_mount_is_parsed():
+    data = {**SMALL, "imu": {"xyz": [0.01, 0, 0.05], "rpy": [0, 0, 1.5708]}}
+    imu = parse_config(data).imu
+    assert imu.xyz == (0.01, 0.0, 0.05)
+    assert imu.rpy == (0.0, 0.0, 1.5708)
+
+
+def test_imu_mount_keys_are_optional():
+    imu = parse_config({**SMALL, "imu": {"rpy": [0.1, 0, 0]}}).imu
+    assert (imu.xyz, imu.rpy) == ((0.0, 0.0, 0.0), (0.1, 0.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    ("imu", "message"),
+    [
+        ([0, 0, 0], "mapping"),
+        ({"xyz": [0, 0]}, "three numbers"),
+        ({"rpy": "flat"}, "three numbers"),
+        ({"xyz": [0, "a", 0]}, "three numbers"),
+        ({"rpy": [0, math.inf, 0]}, "finite"),
+    ],
+)
+def test_invalid_imu_mount_is_rejected(imu, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config({**SMALL, "imu": imu})
+
+
+def test_repo_config_mounts_the_imu_flat():
+    # The board lies flat on the platform (#91); the URDF reads the same.
+    imu = load_config(ROBOT_CONFIG).imu
+    assert (imu.xyz, imu.rpy) == ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))

@@ -188,3 +188,32 @@ def test_calibrated_max_fold_sets_the_bend_limit():
     limit = joints(ET.fromstring(urdf.toxml()))[HINGE].find("limit")
     assert float(limit.get("lower")) == pytest.approx(math.radians(100.5))
     assert float(limit.get("upper")) == pytest.approx(CONFIG.model.bend_max_rad)
+
+
+def test_imu_joint_comes_from_the_config(robot):
+    origin = joints(robot)["imu_joint"].find("origin")
+    xyz = [float(v) for v in origin.get("xyz").split()]
+    rpy = [float(v) for v in origin.get("rpy").split()]
+    assert xyz == pytest.approx(CONFIG.imu.xyz)
+    assert rpy == pytest.approx(CONFIG.imu.rpy)
+
+
+def test_imu_mount_values_reach_the_urdf(tmp_path):
+    data = yaml.safe_load(
+        (ROOT / "config" / "robot.yaml").read_text(encoding="utf-8")
+    )
+    data["imu"] = {"xyz": [0.01, 0.02, 0.03], "rpy": [0.1, 0.0, 1.5]}
+    path = tmp_path / "robot.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    robot = ET.fromstring(
+        xacro.process_file(
+            str(XACRO), mappings={"robot_config": path.as_posix()}
+        ).toxml()
+    )
+    origin = joints(robot)["imu_joint"].find("origin")
+    assert [float(v) for v in origin.get("xyz").split()] == pytest.approx(
+        [0.01, 0.02, 0.03]
+    )
+    assert [float(v) for v in origin.get("rpy").split()] == pytest.approx(
+        [0.1, 0.0, 1.5]
+    )
