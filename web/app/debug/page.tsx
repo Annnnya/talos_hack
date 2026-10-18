@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback } from "react";
 import ServoCard from "@/components/ServoCard";
 import StopAllButton from "@/components/StopAllButton";
@@ -11,7 +12,7 @@ const STATUS_STYLE = {
   disconnected: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 
-export default function Home() {
+export default function DebugPage() {
   const { status, servos, limits, ros, settings, clientId, lastError, clearError, send } =
     useBridge();
   const stopAll = useCallback(() => send({ type: "stop_all" }), [send]);
@@ -37,6 +38,9 @@ export default function Home() {
                 Via ROS
               </span>
             )}
+            <Link href="/" className="text-black/60 underline hover:text-black dark:text-white/60 dark:hover:text-white">
+              Joystick
+            </Link>
           </div>
         </div>
         <StopAllButton onStop={stopAll} disabled={status !== "connected"} />
