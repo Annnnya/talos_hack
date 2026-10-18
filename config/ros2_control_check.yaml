@@ -1,0 +1,16 @@
+# Controllers for the #88 bench check (description/ros2_control_check.urdf).
+# See docs/ros2_control.md.
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz, matches control_hz in config/robot.yaml
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    wheel_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+wheel_velocity_controller:
+  ros__parameters:
+    joints:
+      - front_left_wheel
