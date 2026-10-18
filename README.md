@@ -102,6 +102,47 @@ flowchart TB
     S2 -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
+### ros2_control (in progress, #62)
+
+Control is moving to ros2_control. How it works with our Python code (the
+topic based hardware plugin plus `hardware_bridge_node`) and the bench check
+`pixi run -e ros ros2-control-check` are in
+[docs/ros2_control.md](docs/ros2_control.md).
+
+### Robot model (#64)
+
+`description/talos.urdf.xacro` is the robot for ROS: the `bend` hinge, the
+two legs and the four mecanum wheels, plus `imu_link` and `camera_link`. It
+reads its sizes, limits and joint names from the `model` and `base` sections
+of `config/robot.yaml`, so change them there.
+
+The robot is an inverted V: the hinge on top with the platform, a leg down
+to each wheel pair. Each leg is half of `base.wheelbase_m` (the flat
+wheelbase) long. The hinge joint (`model.hinge_joint`, `bend`) is the
+opening angle between the legs in radians: pi (180 deg) flat,
+`bend_min_deg` at max fold.
+The legs follow it through mimic joints, each tilting by half the fold, so
+the platform stays level. The wheelbase is `2 * l * sin(bend / 2)`
+(`talos_servo.model.wheelbase_m`).
+
+The `<ros2_control>` block drives only the four wheels for now. The hinge
+joins it in #85, together with the conversion from opening angle to servo
+angle (`talos_servo.model.alpha_per_servo_rad`) and the flat offset from the
+calibration in #84.
+
+View it in RViz2 (needs a display; installs RViz only in the `viz`
+environment, not on the Pi; works on Linux and Windows):
+
+```
+pixi install -e viz
+pixi run -e viz view-model    # RViz2 plus a slider per joint
+```
+
+Drag the `bend` slider from 3.14 (flat) down to 1.57 (max fold): the legs
+fold symmetrically and the platform stays level. Check the model with
+`pixi run -e ros check-model` (`check_urdf`) or print it with
+`pixi run -e ros model-urdf`.
+
 ## Quick start
 
 Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
@@ -166,7 +207,7 @@ base:
            rear_right_wheel]
   wheelbase_m: 0.31
   track_width_m: 0.128
-  steps_per_meter: 1000.0
+  wheel_radius_m: 0.03     # steps per metre = 4096 / (2 * pi * r)
   max_linear_speed: 0.1    # m/s
   max_angular_speed: 0.5   # rad/s
 ```
@@ -278,17 +319,21 @@ Robot node parameters go after `--ros-args`, e.g.
 
 ## Web UI
 
-Each joint gets a card: a position slider for position joints, a speed slider
-for speed joints, plus torque, live state and who sent the last command.
-Several browsers can connect at once.
+The per-motor page lives at `/debug` for bench tests; `/` is kept for the
+joystick. On `/debug` each joint gets a card: a position slider for position
+joints, a speed slider for speed joints, plus torque, live state and who sent
+the last command. Several browsers can connect at once.
 
 ```
 cd web && npm install && npm run build    # once, Node 20+
 uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
-Open `http://<pi>.local:8000`. **STOP ALL** (or Space) stops every speed
-joint, and so does the last browser disconnecting. For UI work with hot reload,
+Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
+joint, and so does the last browser disconnecting. `/` has a STOP ALL button
+too and keeps its own connection. Leaving a page closes its connection: if no
+other browser is open, that runs STOP ALL, which also stops wheels the CLI or
+a ROS node is driving. For UI work with hot reload,
 run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate

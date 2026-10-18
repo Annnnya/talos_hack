@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from scservo_sdk import (
     SMS_STS_PRESENT_SPEED_L,
 )
 
-from talos_servo.bus import ServoBus
+from talos_servo.bus import STEPS_PER_TURN, ServoBus
 from talos_servo.config import RobotConfig, parse_config
 from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
 
@@ -48,6 +49,10 @@ SMALL = {
     },
 }
 
+# Wheel radius that gives 1000 steps per metre, so drive tests use round
+# numbers.
+WHEEL_RADIUS_M = STEPS_PER_TURN / (2 * math.pi * 1000.0)
+
 # Four mecanum wheels, rear right mounted the other way round.
 BASE = {
     "max_speed": 500,
@@ -62,7 +67,7 @@ BASE = {
         "wheels": ["fl", "fr", "rl", "rr"],
         "wheelbase_m": 0.3,
         "track_width_m": 0.3,
-        "steps_per_meter": 1000.0,
+        "wheel_radius_m": WHEEL_RADIUS_M,
         "max_linear_speed": 0.2,
         "max_angular_speed": 1.0,
     },

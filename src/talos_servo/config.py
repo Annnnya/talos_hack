@@ -10,7 +10,12 @@ from pathlib import Path
 
 import yaml
 
-from talos_servo.bus import MAX_POSITION, MAX_SERVO_ID, MAX_SPEED
+from talos_servo.bus import (
+    MAX_POSITION,
+    MAX_SERVO_ID,
+    MAX_SPEED,
+    STEPS_PER_TURN,
+)
 
 SPEED = "speed"
 POSITION = "position"
@@ -24,6 +29,8 @@ DEFAULT_COMMAND_TIMEOUT_S = 0.5
 DEFAULT_MAX_LINEAR_SPEED = 0.1
 DEFAULT_MAX_ANGULAR_SPEED = 0.5
 WHEEL_COUNT = 4
+# Hinge opening angle when the robot lies flat.
+FLAT_DEG = 180.0
 
 # Joint names are ROS names too (topics, services, JointState), so keep them
 # plain.
@@ -55,15 +62,46 @@ class BaseConfig:
     wheels: tuple[str, str, str, str]
     wheelbase_m: float
     track_width_m: float
-    steps_per_meter: float
+    wheel_radius_m: float
     max_linear_speed: float = DEFAULT_MAX_LINEAR_SPEED
     max_angular_speed: float = DEFAULT_MAX_ANGULAR_SPEED
+
+    @property
+    def steps_per_meter(self) -> float:
+        """Servo steps for one metre of wheel travel."""
+        return STEPS_PER_TURN / (2 * math.pi * self.wheel_radius_m)
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    """Body geometry shared with the URDF (`description/talos.urdf.xacro`).
+
+    The `hinge_joint` (`bend`) position is the opening angle between the
+    legs: 180 deg flat, smaller when folded. Each leg gear turns
+    `leg_gear_ratio` times the servo.
+    `leg_length_m` (hinge to wheel axle) is half the flat `base.wheelbase_m`.
+    """
+
+    hinge_joint: str
+    leg_length_m: float
+    leg_gear_ratio: float
+    bend_min_deg: float
+    bend_max_deg: float = FLAT_DEG
+
+    @property
+    def bend_min_rad(self) -> float:
+        return math.radians(self.bend_min_deg)
+
+    @property
+    def bend_max_rad(self) -> float:
+        return math.radians(self.bend_max_deg)
 
 
 @dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
+    model: ModelConfig | None = None
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -98,11 +136,19 @@ def parse_config(data: dict) -> RobotConfig:
         ),
     )
     raw_base = data.get("base")
-    if raw_base is None:
-        return config
-    return replace(
-        config, base=_parse_base(raw_base, {j.name: j for j in joints})
-    )
+    if raw_base is not None:
+        config = replace(
+            config, base=_parse_base(raw_base, {j.name: j for j in joints})
+        )
+    raw_model = data.get("model")
+    if raw_model is not None:
+        config = replace(
+            config,
+            model=_parse_model(
+                raw_model, config.base, {j.name: j for j in joints}
+            ),
+        )
+    return config
 
 
 def load_config(path: str | Path) -> RobotConfig:
@@ -166,7 +212,7 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
         wheels=(wheels[0], wheels[1], wheels[2], wheels[3]),
         wheelbase_m=_positive(raw, "wheelbase_m"),
         track_width_m=_positive(raw, "track_width_m"),
-        steps_per_meter=_positive(raw, "steps_per_meter"),
+        wheel_radius_m=_positive(raw, "wheel_radius_m"),
         max_linear_speed=_positive(
             raw, "max_linear_speed", DEFAULT_MAX_LINEAR_SPEED
         ),
@@ -174,6 +220,34 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
             raw, "max_angular_speed", DEFAULT_MAX_ANGULAR_SPEED
         ),
     )
+
+
+def _parse_model(
+    raw: dict, base: BaseConfig | None, joints: dict[str, JointConfig]
+) -> ModelConfig:
+    if base is None:
+        raise ConfigError(
+            "model needs a base section: the legs and wheels come from it"
+        )
+    hinge = str(raw.get("hinge_joint", ""))
+    joint = joints.get(hinge)
+    if joint is None or joint.control != POSITION:
+        raise ConfigError(
+            f"model.hinge_joint: {hinge!r} must name a position joint"
+        )
+    model = ModelConfig(
+        hinge_joint=hinge,
+        leg_length_m=base.wheelbase_m / 2,
+        leg_gear_ratio=_positive(raw, "leg_gear_ratio"),
+        bend_min_deg=_positive(raw, "bend_min_deg"),
+        bend_max_deg=_positive(raw, "bend_max_deg", FLAT_DEG),
+    )
+    if not model.bend_min_deg < model.bend_max_deg <= FLAT_DEG:
+        raise ConfigError(
+            "model: need 0 < bend_min_deg < bend_max_deg <= "
+            f"{FLAT_DEG:g}, got {model.bend_min_deg}..{model.bend_max_deg}"
+        )
+    return model
 
 
 def _positive(raw: dict, key: str, default: float | None = None) -> float:

@@ -50,6 +50,8 @@ MAX_ACCELERATION = 254
 
 # 12-bit encoder: 0..4095 is one full turn.
 MAX_POSITION = 4095
+# One full turn of a servo in position steps.
+STEPS_PER_TURN = MAX_POSITION + 1
 
 # Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1
 # V.
