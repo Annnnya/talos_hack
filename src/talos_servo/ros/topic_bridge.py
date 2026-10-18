@@ -19,8 +19,8 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 
+from talos_servo.bus import RAD_PER_STEP, STEPS_PER_TURN
 from talos_servo.config import POSITION, SPEED
-from talos_servo.ros.convert import RAD_PER_STEP, STEPS_PER_TURN
 
 HALF_TURN_STEPS = STEPS_PER_TURN // 2
 
@@ -36,8 +36,11 @@ def unpack_commands(
     `controls` maps each joint to its control (`position` or `speed`) from
     `config/robot.yaml`, which must match its command interface in the URDF.
     Arrays as long as `names` are read as aligned (a hand-written message);
-    otherwise they are read as packed in joint order (the plugin). Raises
-    ValueError for unknown joints or lengths that fit neither layout.
+    otherwise they are read as packed in joint order (the plugin). A NaN
+    position means no goal for that joint, so it never blocks the wheel
+    velocities in the same message. Raises ValueError for unknown joints,
+    lengths that fit neither layout, infinite positions and non-finite
+    velocities.
     """
     unknown = [n for n in names if n not in controls]
     if unknown:
@@ -47,7 +50,7 @@ def unpack_commands(
     position_joints = [n for n in names if controls[n] == POSITION]
     speed_joints = [n for n in names if controls[n] == SPEED]
     return (
-        _pick(names, position_joints, positions, "position"),
+        _pick(names, position_joints, positions, "position", skip_nan=True),
         _pick(names, speed_joints, velocities, "velocity"),
     )
 
@@ -57,20 +60,26 @@ def _pick(
     wanted: Sequence[str],
     values: Sequence[float],
     what: str,
+    *,
+    skip_nan: bool = False,
 ) -> dict[str, float]:
     if not values:
         return {}
     if len(values) == len(names):
         picked = dict(zip(names, values, strict=True))
-        return {n: _finite(picked[n], n, what) for n in wanted}
-    if len(values) == len(wanted):
-        return {
-            n: _finite(v, n, what) for n, v in zip(wanted, values, strict=True)
-        }
-    raise ValueError(
-        f"{len(values)} {what} values for {len(names)} joints, of which "
-        f"{len(wanted)} take a {what}"
-    )
+        pairs = [(n, picked[n]) for n in wanted]
+    elif len(values) == len(wanted):
+        pairs = list(zip(wanted, values, strict=True))
+    else:
+        raise ValueError(
+            f"{len(values)} {what} values for {len(names)} joints, of which "
+            f"{len(wanted)} take a {what}"
+        )
+    return {
+        n: _finite(v, n, what)
+        for n, v in pairs
+        if not (skip_nan and math.isnan(v))
+    }
 
 
 def _finite(value: float, joint: str, what: str) -> float:
