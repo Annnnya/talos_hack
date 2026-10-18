@@ -1,0 +1,33 @@
+# Start the whole robot on boot: `pixi run -e ros robot`, which runs the robot
+# node (the only program on the servo port), the mode node, twist_mux,
+# mux_status and the web UI on :8000 (launch/robot.launch.py). Edit User,
+# paths and the serial port, then:
+#   sudo systemctl disable --now talos-robot talos-web   # older setup only
+#   sudo cp deploy/talos.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now talos
+#   journalctl -u talos -f
+# Build the web UI once first (cd web && npm install && npm run build), and
+# stop any hand-started `talos-servo` command on the port.
+
+[Unit]
+Description=Talos robot (robot node, mode, twist_mux and web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/talos_hack
+Environment=TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
+# Every shell running --ros commands must use the same domain.
+# Environment=ROS_DOMAIN_ID=0
+# Add camera:=true imu:=true to start the camera and the IMU chain too.
+ExecStart=/home/pi/.pixi/bin/pixi run -e ros robot
+# SIGINT runs every node's Ctrl+C path: stop the wheels, close the port.
+KillSignal=SIGINT
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

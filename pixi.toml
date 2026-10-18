@@ -69,6 +69,10 @@ ros-jazzy-robot-state-publisher = "*"
 ros-jazzy-xacro = "*"
 
 [feature.ros.tasks]
+# The whole robot in one command: robot node, mode node, twist_mux,
+# mux_status and the web UI. Opt in to more with camera:=true imu:=true, and
+# pass port:=/dev/ttyACM0 without $TALOS_SERVO_PORT. See launch/robot.launch.py
+robot = "ros2 launch launch/robot.launch.py"
 # The only program on the servo port; everything else goes through it
 robot-node = "talos-robot-ros"
 # Keyboard driving through the robot node

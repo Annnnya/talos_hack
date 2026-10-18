@@ -1,0 +1,168 @@
+"""The whole robot in one command (#122).
+
+Starts what driving needs: the robot node on the servo port, the mode node
+(STOP lock), twist_mux, mux_status and the web server. The camera and the
+IMU chain (IMU node, Madgwick filter, IMU transform, EKF) are opt-in.
+
+    pixi run -e ros robot
+    pixi run -e ros robot camera:=true imu:=true port:=/dev/ttyACM0
+
+Port defaults to $TALOS_SERVO_PORT. STOP is on at start: press Release STOP
+on the web page (or Enter in `pixi run -e ros drive`) to drive. Ctrl+C stops
+every process through its own stop path. The commands match the pixi tasks
+of the same name in pixi.toml; keep both in step.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from launch import LaunchContext, LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    OpaqueFunction,
+    Shutdown,
+)
+from launch.substitutions import LaunchConfiguration
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG_DIR = ROOT / "config"
+ROBOT_CONFIG = CONFIG_DIR / "robot.yaml"
+UI_DIR = ROOT / "web" / "out"
+PORT_ENV_VAR = "TALOS_SERVO_PORT"
+ROBOT_NODE = "robot_node"
+WEB = "web"
+# The web server gives up when the robot node does not answer within a few
+# seconds, so it is restarted until the robot node is up.
+WEB_RESPAWN_DELAY_S = 2.0
+TRUE = ("true", "1", "yes", "on")
+
+
+def processes(
+    port: str,
+    config: str,
+    *,
+    web: bool = True,
+    camera: bool = False,
+    imu: bool = False,
+) -> dict[str, list[str]]:
+    """Name and command of every process to start, in start order."""
+    twist_mux = str(CONFIG_DIR / "twist_mux.yaml")
+    cmds: dict[str, list[str]] = {
+        ROBOT_NODE: ["talos-robot-ros", "--port", port, "--config", config],
+        "mode_node": ["talos-mode-ros", "--config", config],
+        "twist_mux": [
+            *("ros2", "run", "twist_mux", "twist_mux", "--ros-args"),
+            *("--params-file", twist_mux, "-r", "cmd_vel_out:=/cmd_vel"),
+        ],
+        "mux_status": [
+            *("talos-mux-status-ros", "--ros-args"),
+            *("--params-file", twist_mux),
+        ],
+    }
+    if web:
+        cmds[WEB] = [
+            *("talos-servo", "web", "--ros", "--config", config),
+            *("--ui-dir", str(UI_DIR)),
+        ]
+    if camera:
+        cmds["camera_node"] = [
+            *("talos-camera-ros", "--ros-args", "--params-file"),
+            str(CONFIG_DIR / "camera.yaml"),
+        ]
+    if imu:
+        cmds["imu_node"] = ["talos-imu-ros"]
+        cmds["imu_filter"] = [
+            *("ros2", "run", "imu_filter_madgwick"),
+            *("imu_filter_madgwick_node", "--ros-args", "--params-file"),
+            str(CONFIG_DIR / "imu_filter.yaml"),
+        ]
+        # Zeros until the board is mounted (#91), like the imu-tf task.
+        cmds["imu_tf"] = [
+            *("ros2", "run", "tf2_ros", "static_transform_publisher"),
+            *("--frame-id", "base_link", "--child-frame-id", "imu_link"),
+        ]
+        cmds["ekf"] = [
+            *("ros2", "run", "robot_localization", "ekf_node"),
+            *("--ros-args", "--params-file", str(CONFIG_DIR / "ekf.yaml")),
+        ]
+    return cmds
+
+
+def _flag(context: LaunchContext, name: str) -> bool:
+    value = LaunchConfiguration(name).perform(context)
+    return value.strip().lower() in TRUE
+
+
+def _robot(context: LaunchContext) -> list:
+    port = LaunchConfiguration("port").perform(context)
+    config = str(Path(LaunchConfiguration("config").perform(context)).resolve())
+    web = _flag(context, "web")
+    # Fail before anything starts, not with half a robot running.
+    if not port:
+        raise RuntimeError(
+            f"no servo port: pass port:=/dev/ttyACM0 or set {PORT_ENV_VAR}"
+        )
+    if web and not (UI_DIR / "index.html").is_file():
+        raise RuntimeError(
+            f"no web UI in {UI_DIR}: run `cd web && npm install && npm run "
+            "build` once, or pass web:=false"
+        )
+    cmds = processes(
+        port,
+        config,
+        web=web,
+        camera=_flag(context, "camera"),
+        imu=_flag(context, "imu"),
+    )
+    actions = []
+    for name, cmd in cmds.items():
+        options: dict = {}
+        if name == ROBOT_NODE:
+            # Nothing drives without the robot node: end the launch.
+            options["on_exit"] = Shutdown(reason="robot node exited")
+        elif name == WEB:
+            options["respawn"] = True
+            options["respawn_delay"] = WEB_RESPAWN_DELAY_S
+        actions.append(
+            ExecuteProcess(
+                cmd=cmd,
+                name=name,
+                output="screen",
+                # SIGINT runs each program's Ctrl+C path (stop the wheels).
+                sigterm_timeout="10",
+                **options,
+            )
+        )
+    return actions
+
+
+def generate_launch_description() -> LaunchDescription:
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument(
+                "port",
+                default_value=os.environ.get(PORT_ENV_VAR, ""),
+                description=f"servo serial port (default ${PORT_ENV_VAR})",
+            ),
+            DeclareLaunchArgument(
+                "config",
+                default_value=str(ROBOT_CONFIG),
+                description="robot config for every node",
+            ),
+            DeclareLaunchArgument(
+                "web", default_value="true", description="web UI on :8000"
+            ),
+            DeclareLaunchArgument(
+                "camera", default_value="false", description="camera node"
+            ),
+            DeclareLaunchArgument(
+                "imu",
+                default_value="false",
+                description="IMU node, filter, IMU transform and EKF",
+            ),
+            OpaqueFunction(function=_robot),
+        ]
+    )
