@@ -188,6 +188,22 @@ fold symmetrically and the platform stays level. Check the model with
 `pixi run -e ros check-model` (`check_urdf`) or print it with
 `pixi run -e ros model-urdf`.
 
+To watch the live robot instead (#127), start it with `viz:=true` on the Pi
+and open RViz on a laptop on the same network and `ROS_DOMAIN_ID`:
+
+```
+pixi run -e ros robot viz:=true    # on the Pi
+pixi run -e viz view-live          # on the laptop
+```
+
+The hinge and wheels follow the servos through ros2_control's
+`/joint_states`, and the model moves in the `odom` frame. Without the IMU the
+EKF runs on wheel odometry alone, so the pose drifts; it does not follow the
+robot up a chimney. `viz:=true` needs ros2_control (the default). Do not run
+`view-model` at the same time: its sliders publish `/joint_states` too. If
+the laptop sees no topics over Wi-Fi, multicast discovery is blocked: set up
+a Fast DDS discovery server or a CycloneDDS peer list.
+
 ## Quick start
 
 Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
@@ -229,6 +245,7 @@ Ctrl+C stops everything, and the wheels with it.
 | `camera:=` | `false` | camera node |
 | `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
 | `ros2_control:=` | `true` | `false`: the old robot node drives instead |
+| `viz:=` | `false` | EKF for the live robot in RViz (see below) |
 
 The per-motor `/debug` page needs `ros2_control:=false`: under ros2_control
 the controllers own the joints, so single-joint commands are not served.
