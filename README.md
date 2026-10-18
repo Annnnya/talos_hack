@@ -261,7 +261,7 @@ The single pixi tasks below still start one piece each, for debugging.
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
 | `pixi run -e ros robot` | The whole robot, see "Run the robot" |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
-| `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP |
+| `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP, R/F open/close the hinge |
 | `pixi run -e ros web-ros` | `talos-servo web --ros`, needed to drive from the joystick |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
@@ -279,7 +279,9 @@ The single pixi tasks below still start one piece each, for debugging.
   mode node, without freezing the keys during a slow switch. It
   prints the mode, why it changed and which input drives, also when the web
   changes them. Q/E do nothing while climbing, and the drive keys do nothing
-  while aligning or clamping. Quitting stops only the keyboard input.
+  while aligning or clamping. Holding R or F opens or closes the hinge
+  through the expansion node (`/expansion/rate`, #76) in free and clamping;
+  letting go stops it. Quitting stops only the keyboard input.
 - Every command stops what it started on exit, including Ctrl+C.
 - New servos ship with id 1. Connect them one at a time and give each its own
   id with `set-id` before chaining them.
