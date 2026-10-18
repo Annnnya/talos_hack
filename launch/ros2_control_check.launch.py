@@ -15,8 +15,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch import LaunchContext, LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    OpaqueFunction,
+    Shutdown,
+)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -26,6 +31,16 @@ CONTROLLERS = ROOT / "config" / "ros2_control_check.yaml"
 ROBOT_CONFIG = ROOT / "config" / "robot.yaml"
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
 SPAWNED = ("joint_state_broadcaster", "wheel_velocity_controller")
+
+
+def _require_port(context: LaunchContext) -> list:
+    # Without a port the bridge exits at once while controller_manager and
+    # the spawners keep running, which is confusing on the bench.
+    if not LaunchConfiguration("port").perform(context):
+        raise RuntimeError(
+            f"no servo port: pass port:=/dev/ttyACM0 or set {PORT_ENV_VAR}"
+        )
+    return []
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -43,6 +58,7 @@ def generate_launch_description() -> LaunchDescription:
                 default_value=str(ROBOT_CONFIG),
                 description="robot config with the joint ids",
             ),
+            OpaqueFunction(function=_require_port),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -72,6 +88,8 @@ def generate_launch_description() -> LaunchDescription:
                     config,
                 ],
                 output="screen",
+                # The check is pointless without the bridge: end the launch.
+                on_exit=Shutdown(reason="hardware bridge exited"),
             ),
         ]
     )
