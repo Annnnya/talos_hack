@@ -18,6 +18,7 @@ from talos_servo.bus import (
     MAX_SPEED,
     STEPS_PER_TURN,
 )
+from talos_servo.hinge import Hinge, HingeRangeError
 
 SPEED = "speed"
 POSITION = "position"
@@ -86,6 +87,8 @@ class ModelConfig:
     legs: 180 deg flat, smaller when folded. Each leg gear turns
     `leg_gear_ratio` times the servo.
     `leg_length_m` (hinge to wheel axle) is half the flat `base.wheelbase_m`.
+    `bend_flat_steps` is the hinge servo position when flat, from the
+    calibration (#84); None means the hinge is flat when the robot starts.
     """
 
     hinge_joint: str
@@ -93,6 +96,7 @@ class ModelConfig:
     leg_gear_ratio: float
     bend_min_deg: float
     bend_max_deg: float = FLAT_DEG
+    bend_flat_steps: int | None = None
 
     @property
     def bend_min_rad(self) -> float:
@@ -315,6 +319,17 @@ def _parse_model(
             "model: need 0 < bend_min_deg < bend_max_deg <= "
             f"{FLAT_DEG:g}, got {model.bend_min_deg}..{model.bend_max_deg}"
         )
+    flat = raw.get("bend_flat_steps")
+    if flat is not None:
+        if isinstance(flat, bool) or not isinstance(flat, int):
+            raise ConfigError(
+                f"model.bend_flat_steps must be a whole step, got {flat!r}"
+            )
+        model = replace(model, bend_flat_steps=flat)
+        try:
+            Hinge(model, flat)
+        except HingeRangeError as exc:
+            raise ConfigError(f"model.bend_flat_steps: {exc}") from exc
     return model
 
 

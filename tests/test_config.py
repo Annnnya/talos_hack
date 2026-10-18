@@ -160,11 +160,25 @@ def test_model_is_optional():
         ({"leg_gear_ratio": 0}, "positive"),
         ({"hinge_joint": "nope"}, "hinge_joint"),
         ({"hinge_joint": "fl"}, "position joint"),
+        ({"bend_flat_steps": 2048.5}, "whole step"),
+        ({"bend_flat_steps": True}, "whole step"),
+        # 90 deg of fold needs 1024 steps below flat.
+        ({"bend_flat_steps": 1000}, "outside one servo turn"),
+        ({"bend_flat_steps": 4096}, "outside one servo turn"),
     ],
 )
 def test_invalid_model_is_rejected(change, message):
     with pytest.raises(ConfigError, match=message):
         parse_config({**BASE, "model": {**MODEL, **change}})
+
+
+def test_bend_flat_steps_defaults_to_the_start_position():
+    assert parse_config({**BASE, "model": MODEL}).model.bend_flat_steps is None
+
+
+def test_bend_flat_steps_is_parsed():
+    data = {**BASE, "model": {**MODEL, "bend_flat_steps": 3000}}
+    assert parse_config(data).model.bend_flat_steps == 3000
 
 
 def test_repo_config_is_valid():
