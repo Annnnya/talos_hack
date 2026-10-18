@@ -236,6 +236,7 @@ def test_drive_passes_velocity_and_sender():
         (drive(vy=None), TypeError),
         (drive(wz=math.nan), CommandError),
         (drive(vx=math.inf), CommandError),
+        (drive(vy=True), CommandError),
     ],
 )
 def test_bad_drive_is_rejected(msg, error):
@@ -252,6 +253,20 @@ def test_drive_without_ros_is_an_error(client, robot):
         error = receive_until(ws, lambda m: m["type"] == "error")
     assert "--ros" in error["message"]
     assert robot.joints["wheel"].target_speed == 0
+
+
+def test_a_held_bad_drive_reports_its_error_once(client):
+    # The browser re-sends drive every 100 ms; one error is enough.
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(3):
+            ws.send_json(drive(vx=0.1))
+        # A different error marks the end of the drive replies.
+        ws.send_json({"type": "stop", "joint": "nope"})
+        errors = []
+        while not errors or "--ros" in errors[-1]:
+            msg = receive_until(ws, lambda m: m["type"] == "error")
+            errors.append(msg["message"])
+    assert sum("--ros" in e for e in errors) == 1
 
 
 def test_state_reports_the_base_speed_limits(sdk):

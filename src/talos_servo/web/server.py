@@ -99,7 +99,11 @@ QUIET_COMMANDS = frozenset({"drive"})
 
 
 def _finite(msg: dict[str, Any], key: str) -> float:
-    value = float(msg[key])
+    raw = msg[key]
+    # float(True) is 1.0, a full-speed drive from a malformed message.
+    if isinstance(raw, bool):
+        raise CommandError(f"{key} must be a number, got {raw}")
+    value = float(raw)
     if not math.isfinite(value):
         raise CommandError(f"{key} must be a finite number, got {value}")
     return value
@@ -211,19 +215,24 @@ def create_app(
         hub.clients.add(ws)
         await hub.send(ws, {"type": "hello", "client_id": client_id})
         await hub.send(ws, state())
+        # The last error a quiet command got. A held button re-sends the same
+        # bad drive every 100 ms, so report each error once until it changes.
+        quiet_error: str | None = None
         try:
             while True:
                 raw = await ws.receive_text()
                 quiet = False
                 try:
                     msg = json.loads(raw)
+                    quiet = msg.get("type") in QUIET_COMMANDS
                     if msg.get("type") == "settings":
                         settings.update(msg)
                     else:
                         await _run(
                             _dispatch(controller, msg, client_id, ros=ros)
                         )
-                        quiet = msg.get("type") in QUIET_COMMANDS
+                    if quiet:
+                        quiet_error = None
                 except (
                     CommandError,
                     ServoError,
@@ -231,7 +240,12 @@ def create_app(
                     KeyError,
                     TypeError,
                 ) as exc:
-                    await hub.send(ws, {"type": "error", "message": str(exc)})
+                    message = str(exc)
+                    if not (quiet and message == quiet_error):
+                        error = {"type": "error", "message": message}
+                        await hub.send(ws, error)
+                    if quiet:
+                        quiet_error = message
                 if not quiet:
                     await hub.broadcast(state())
         except WebSocketDisconnect:
