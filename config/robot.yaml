@@ -91,6 +91,23 @@ imu:
   xyz: [0.0, 0.0, 0.0]
   rpy: [3.14159265, 0.0, 0.0]
 
+# Keeping the platform level on the wall with the IMU (#82,
+# `talos_servo.level`, run by the expansion node when Level is on). Pitch
+# trims the front pair against the rear pair, roll the left pair against the
+# right pair: m/s of trim per rad of tilt, capped at max_trim_m_s. Flip a
+# sign (1 or -1) if a loop pushes the wrong way on the bench. Past
+# tilt_fault_rad the wheels stop and Level turns off.
+level:
+  pitch_gain_m_s_per_rad: 0.05
+  roll_gain_m_s_per_rad: 0.05
+  max_trim_m_s: 0.02
+  deadband_rad: 0.02
+  tilt_fault_rad: 0.35
+  pitch_sign: 1
+  roll_sign: 1
+  # Older IMU orientation than this gives no trim.
+  imu_timeout_s: 0.5
+
 # Opening and closing the hinge with the wheels rolling along (#76,
 # `talos-expansion-ros`). See docs/ros2_control.md.
 expansion:

@@ -215,6 +215,25 @@ class HingeHoldConfig:
 
 
 @dataclass(frozen=True)
+class LevelConfig:
+    """Keeping the platform level with the IMU on the wall (#82,
+    `talos_servo.level`). Gains in m/s of wheel-pair trim per rad of tilt,
+    each trim capped at `max_trim_m_s`; tilts inside `deadband_rad` get no
+    trim. `pitch_sign` and `roll_sign` (1 or -1) flip a loop that pushes the
+    wrong way on the bench. Past `tilt_fault_rad` the wheels stop. The IMU
+    orientation counts for `imu_timeout_s`."""
+
+    pitch_gain_m_s_per_rad: float = 0.05
+    roll_gain_m_s_per_rad: float = 0.05
+    max_trim_m_s: float = 0.02
+    deadband_rad: float = 0.02
+    tilt_fault_rad: float = 0.35
+    pitch_sign: float = 1.0
+    roll_sign: float = 1.0
+    imu_timeout_s: float = 0.5
+
+
+@dataclass(frozen=True)
 class ImuMountConfig:
     """Where the IMU sits on the central platform (#91): `xyz` in m and
     `rpy` in rad from `base_link`, the same values the URDF `imu_joint` uses.
@@ -233,6 +252,7 @@ class RobotConfig:
     expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
     hinge_hold: HingeHoldConfig = field(default_factory=HingeHoldConfig)
     imu: ImuMountConfig = field(default_factory=ImuMountConfig)
+    level: LevelConfig = field(default_factory=LevelConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -308,6 +328,9 @@ def parse_config(
     raw_imu = data.get("imu")
     if raw_imu is not None:
         config = replace(config, imu=_parse_imu(raw_imu))
+    raw_level = data.get("level")
+    if raw_level is not None:
+        config = replace(config, level=_parse_level(raw_level))
     return config
 
 
@@ -559,6 +582,34 @@ def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
         )
     except ConfigError as exc:
         raise ConfigError(f"hinge_hold: {exc}") from exc
+
+
+def _parse_level(raw: dict) -> LevelConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("level must be a mapping")
+    d = LevelConfig()
+    try:
+        signs = {}
+        for key in ("pitch_sign", "roll_sign"):
+            value = float(raw.get(key, 1.0))
+            if value not in (1.0, -1.0):
+                raise ConfigError(f"{key} must be 1 or -1, got {value}")
+            signs[key] = value
+        return LevelConfig(
+            pitch_gain_m_s_per_rad=_positive(
+                raw, "pitch_gain_m_s_per_rad", d.pitch_gain_m_s_per_rad
+            ),
+            roll_gain_m_s_per_rad=_positive(
+                raw, "roll_gain_m_s_per_rad", d.roll_gain_m_s_per_rad
+            ),
+            max_trim_m_s=_positive(raw, "max_trim_m_s", d.max_trim_m_s),
+            deadband_rad=_positive(raw, "deadband_rad", d.deadband_rad),
+            tilt_fault_rad=_positive(raw, "tilt_fault_rad", d.tilt_fault_rad),
+            imu_timeout_s=_positive(raw, "imu_timeout_s", d.imu_timeout_s),
+            **signs,
+        )
+    except ConfigError as exc:
+        raise ConfigError(f"level: {exc}") from exc
 
 
 def _parse_imu(raw: dict) -> ImuMountConfig:
