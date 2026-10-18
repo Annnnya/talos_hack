@@ -189,6 +189,22 @@ def test_server_shutdown_closes_the_port(sdk, robot):
     assert sdk.port.closed_count == 1
 
 
+# --- static ui
+# -------------------------------------------------------------------
+
+
+def test_ui_serves_home_and_debug_pages(robot, tmp_path):
+    # Next exports with trailingSlash, so each page is `<route>/index.html`.
+    (tmp_path / "index.html").write_text("home page")
+    (tmp_path / "debug").mkdir()
+    (tmp_path / "debug" / "index.html").write_text("debug page")
+    with TestClient(create_app(robot, ui_dir=tmp_path)) as c:
+        home = c.get("/")
+        debug = c.get("/debug")
+    assert home.status_code == 200 and home.text == "home page"
+    assert debug.status_code == 200 and debug.text == "debug page"
+
+
 # --- cli
 # -------------------------------------------------------------------------
 
