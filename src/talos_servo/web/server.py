@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -20,7 +21,7 @@ from talos_servo.bus import (
     MAX_POSITION,
     ServoError,
 )
-from talos_servo.defaults import DEFAULT_MOVE_SPEED
+from talos_servo.defaults import DEFAULT_MOVE_SPEED, WEB_CMD_VEL_TOPIC
 from talos_servo.robot import SOURCE_WEB, CommandError, clamp
 from talos_servo.web.backend import RobotBackend
 
@@ -92,14 +93,44 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
     return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
+# Client messages that change nothing the UI shows. The browser re-sends drive
+# while a button is held, so a state broadcast per message would flood it.
+QUIET_COMMANDS = frozenset({"drive"})
+
+
+def _finite(msg: dict[str, Any], key: str) -> float:
+    raw = msg[key]
+    # float(True) is 1.0, a full-speed drive from a malformed message.
+    if isinstance(raw, bool):
+        raise CommandError(f"{key} must be a number, got {raw}")
+    value = float(raw)
+    if not math.isfinite(value):
+        raise CommandError(f"{key} must be a finite number, got {value}")
+    return value
+
+
 def _dispatch(
-    controller: RobotBackend, msg: dict[str, Any], client: str | None = None
+    controller: RobotBackend,
+    msg: dict[str, Any],
+    client: str | None = None,
+    *,
+    ros: bool = False,
 ) -> Callable[[], None]:
     """Turn a client message into a controller call (validated, not yet run)."""
     kind = msg.get("type")
     who = {"source": SOURCE_WEB, "client": client}
     if kind == "stop_all":
         return lambda: controller.stop_all(**who)
+    if kind == "release_stop":
+        if not ros:
+            raise CommandError("releasing STOP needs `talos-servo web --ros`")
+        return lambda: controller.release_stop(**who)
+    if kind == "drive":
+        # The base is shared through twist_mux, so there is no direct path.
+        if not ros:
+            raise CommandError("driving the base needs `talos-servo web --ros`")
+        vx, vy, wz = (_finite(msg, k) for k in ("vx", "vy", "wz"))
+        return lambda: controller.drive(vx, vy, wz, **who)
     joint = str(msg["joint"])
     acc = int(msg.get("acc", DEFAULT_ACCELERATION))
     if kind == "stop":
@@ -133,10 +164,14 @@ def create_app(
     # Browsers get state at telemetry_hz; the robot ticks faster to keep wheels
     # in sync.
     ticks_per_broadcast = max(1, round(config.control_hz / config.telemetry_hz))
+    base = config.base
     limits = {
         "pos_max": MAX_POSITION,
-        "speed_max": controller.config.max_speed,
+        "speed_max": config.max_speed,
         "acc_max": MAX_ACCELERATION,
+        # m/s and rad/s for drive; None when the config has no base.
+        "linear_max": base.max_linear_speed if base else None,
+        "angular_max": base.max_angular_speed if base else None,
     }
 
     def state() -> dict[str, Any]:
@@ -146,6 +181,8 @@ def create_app(
             "limits": limits,
             "settings": settings.as_message(),
             "servos": controller.snapshot(),
+            # True while STOP locks twist_mux; None without ROS.
+            "stopped": controller.stopped(),
         }
 
     async def control_loop() -> None:
@@ -184,15 +221,24 @@ def create_app(
         hub.clients.add(ws)
         await hub.send(ws, {"type": "hello", "client_id": client_id})
         await hub.send(ws, state())
+        # The last error a quiet command got. A held button re-sends the same
+        # bad drive every 100 ms, so report each error once until it changes.
+        quiet_error: str | None = None
         try:
             while True:
                 raw = await ws.receive_text()
+                quiet = False
                 try:
                     msg = json.loads(raw)
+                    quiet = msg.get("type") in QUIET_COMMANDS
                     if msg.get("type") == "settings":
                         settings.update(msg)
                     else:
-                        await _run(_dispatch(controller, msg, client_id))
+                        await _run(
+                            _dispatch(controller, msg, client_id, ros=ros)
+                        )
+                    if quiet:
+                        quiet_error = None
                 except (
                     CommandError,
                     ServoError,
@@ -200,21 +246,28 @@ def create_app(
                     KeyError,
                     TypeError,
                 ) as exc:
-                    await hub.send(ws, {"type": "error", "message": str(exc)})
-                await hub.broadcast(state())
+                    message = str(exc)
+                    if not (quiet and message == quiet_error):
+                        error = {"type": "error", "message": message}
+                        await hub.send(ws, error)
+                    if quiet:
+                        quiet_error = message
+                if not quiet:
+                    await hub.broadcast(state())
         except WebSocketDisconnect:
             pass
         finally:
             hub.clients.discard(ws)
             if not hub.clients:
                 log.warning(
-                    "last client disconnected, stopping every speed joint"
+                    "last client disconnected, stopping what the web commanded"
                 )
                 # Shielded: the connection task can be cancelled right after a
                 # disconnect, and the motors must still stop. No client id: the
-                # UI shows this as the web server's own safety stop.
+                # UI shows this as the web server's own safety stop. Only our
+                # own commands, so keyboard driving carries on.
                 await asyncio.shield(
-                    _run(lambda: controller.stop_all(source=SOURCE_WEB))
+                    _run(lambda: controller.stop_own(source=SOURCE_WEB))
                 )
 
     if ui_dir is not None and ui_dir.is_dir():
@@ -254,7 +307,8 @@ def serve(
     if ros:
         from talos_servo.ros.web_backend import RosBackend
 
-        backend, source = RosBackend(config), "ros robot node"
+        backend = RosBackend(config, cmd_vel_topic=WEB_CMD_VEL_TOPIC)
+        source = "ros robot node"
     else:
         from talos_servo.bus import ServoBus
         from talos_servo.robot import Robot

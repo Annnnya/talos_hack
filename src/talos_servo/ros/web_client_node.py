@@ -14,9 +14,11 @@ from geometry_msgs.msg import Twist
 from rclpy.context import Context
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.defaults import QUEUE_DEPTH, ROBOT_NS
+from talos_servo.ros.names import SET_STOP_SERVICE, STOP_LOCK_TOPIC
 from talos_servo.ros.robot_node import (
     CMD_VEL_TOPIC,
     DIAGNOSTICS_TOPIC,
@@ -26,6 +28,10 @@ from talos_servo.ros.robot_node import (
 NODE_NAME = "robot_client"
 
 
+def _ignore(_msg: object) -> None:
+    pass
+
+
 class WebClientNode(Node):
     def __init__(
         self,
@@ -33,7 +39,9 @@ class WebClientNode(Node):
         on_joint_states: Callable[[JointState], None],
         on_status: Callable[[DiagnosticArray], None],
         *,
+        on_stop_lock: Callable[[Bool], None] = _ignore,
         node_name: str = NODE_NAME,
+        cmd_vel_topic: str = CMD_VEL_TOPIC,
         context: Context | None = None,
     ) -> None:
         super().__init__(node_name, context=context)
@@ -44,7 +52,7 @@ class WebClientNode(Node):
             JointState, f"{ROBOT_NS}/velocity_cmd", QUEUE_DEPTH
         )
         self.cmd_vel_pub = self.create_publisher(
-            Twist, CMD_VEL_TOPIC, QUEUE_DEPTH
+            Twist, cmd_vel_topic, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH
@@ -52,6 +60,12 @@ class WebClientNode(Node):
         self.create_subscription(
             DiagnosticArray, DIAGNOSTICS_TOPIC, on_status, QUEUE_DEPTH
         )
+        # Default volatile QoS like twist_mux: the mode node beats every
+        # 0.1 s, so a late subscriber hears the STOP state right away.
+        self.create_subscription(
+            Bool, STOP_LOCK_TOPIC, on_stop_lock, QUEUE_DEPTH
+        )
+        self.set_stop_client = self.create_client(SetBool, SET_STOP_SERVICE)
         self.stop_all_client = self.create_client(
             Trigger, f"{ROBOT_NS}/stop_all"
         )

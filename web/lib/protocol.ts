@@ -39,6 +39,9 @@ export interface Limits {
   pos_max: number;
   speed_max: number;
   acc_max: number;
+  /** Base speed limits for drive (m/s, rad/s); null when the config has no base. */
+  linear_max: number | null;
+  angular_max: number | null;
 }
 
 /** Shared by every browser, kept by the server until it restarts. */
@@ -55,6 +58,8 @@ export type ServerMessage =
       limits: Limits;
       settings: Record<string, ServoSettings>;
       servos: ServoState[];
+      /** True while STOP locks twist_mux; null without ROS. */
+      stopped: boolean | null;
     }
   | { type: "error"; message: string };
 
@@ -64,6 +69,10 @@ export type ClientMessage =
   | { type: "torque"; joint: string; enabled: boolean }
   | { type: "stop"; joint: string }
   | { type: "stop_all" }
+  /** Release STOP so twist_mux drives again, ROS only. */
+  | { type: "release_stop" }
+  /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
+  | { type: "drive"; vx: number; vy: number; wz: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;

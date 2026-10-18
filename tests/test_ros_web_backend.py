@@ -6,8 +6,11 @@ a private ROS domain, so nothing here can reach a real robot.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 import pytest
 
@@ -17,18 +20,21 @@ pytest.importorskip("sensor_msgs")
 pytest.importorskip("std_srvs")
 pytest.importorskip("nav_msgs")
 
-from conftest import SMALL, FakeClock, config, wait_for  # noqa: E402
+from conftest import BASE, SMALL, FakeClock, config, wait_for  # noqa: E402
 from diagnostic_msgs.msg import (  # noqa: E402
     DiagnosticArray,
     DiagnosticStatus,
     KeyValue,
 )
 from fastapi.testclient import TestClient  # noqa: E402
+from geometry_msgs.msg import Twist  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.defaults import WEB_CMD_VEL_TOPIC  # noqa: E402
 from talos_servo.robot import SOURCE_CLI, CommandError, Robot  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
+from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.robot_node import RobotNode  # noqa: E402
 from talos_servo.ros.web_backend import (  # noqa: E402
     STATUS_STALE_AFTER,
@@ -56,17 +62,25 @@ def robot(sdk):
     r.close()
 
 
-@pytest.fixture
-def robot_node(robot):
-    node = RobotNode(robot)
+@contextmanager
+def spinning(node) -> Iterator[None]:
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
-    yield node
-    executor.shutdown()
-    thread.join(2.0)
-    node.destroy_node()
+    try:
+        yield
+    finally:
+        executor.shutdown()
+        thread.join(2.0)
+        node.destroy_node()
+
+
+@pytest.fixture
+def robot_node(robot):
+    node = RobotNode(robot)
+    with spinning(node):
+        yield node
 
 
 def make_backend(**kwargs) -> RosBackend:
@@ -90,6 +104,66 @@ def feed_watchdog(backend: RosBackend, seconds: float) -> None:
     while time.monotonic() < deadline:
         backend.tick()
         time.sleep(0.05)
+
+
+@pytest.fixture
+def mode_node():
+    # Real mode node, no controller_manager: only STOP matters here.
+    node = ModeNode(node_name="mode_for_web_backend")
+    with spinning(node):
+        yield node
+
+
+def wait_for_mode_node(backend: RosBackend) -> None:
+    client = backend._require_node().set_stop_client
+    wait_for(client.service_is_ready, WAIT)
+
+
+def test_release_stop_and_stop_all_go_through_the_mode_node(backend, mode_node):
+    wait_for_mode_node(backend)
+    assert backend.stopped()  # the mode node starts with STOP on
+    backend.release_stop()
+    assert not mode_node.stopped
+    wait_for(lambda: not backend.stopped(), WAIT)
+    backend.stop_all()
+    assert mode_node.stopped
+    wait_for(backend.stopped, WAIT)
+
+
+def test_stopped_once_the_mode_node_goes_quiet(backend):
+    node = ModeNode(node_name="mode_that_dies")
+    with spinning(node):
+        wait_for_mode_node(backend)
+        backend.release_stop()
+        wait_for(lambda: not backend.stopped(), WAIT)
+    # Like twist_mux: no beats within the lock timeout means STOP on.
+    wait_for(backend.stopped, WAIT)
+
+
+def test_release_stop_without_a_mode_node_fails_loudly(backend):
+    with pytest.raises(CommandError, match="mode node is not running"):
+        backend.release_stop()
+
+
+def test_stop_all_without_a_mode_node_still_stops_the_wheels(backend, robot):
+    backend.spin("wheel", 300)
+    wait_for(lambda: robot.joints["wheel"].target_speed == 300, WAIT)
+    backend.stop_all()
+    wait_for(lambda: robot.joints["wheel"].target_speed == 0, WAIT)
+
+
+def test_browser_sees_stop_and_can_release_it(robot_node, mode_node):
+    backend = make_backend()
+    with TestClient(create_app(backend, ros=True)) as client:
+        wait_for_mode_node(backend)
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            assert ws.receive_json()["stopped"] is True
+            ws.send_json({"type": "release_stop"})
+            wait_for(lambda: not mode_node.stopped, WAIT)
+            wait_for(lambda: ws.receive_json()["stopped"] is False, WAIT)
+            ws.send_json({"type": "stop_all"})
+            wait_for(lambda: mode_node.stopped, WAIT)
 
 
 def test_open_mirrors_robot_state(backend, robot):
@@ -284,10 +358,10 @@ def test_cli_over_ros_rejects_unknown_joints_before_connecting():
     assert backend._node is None
 
 
-def test_drive_over_ros_publishes_cmd_vel_and_stops(robot_node, robot):
+def test_drive_over_ros_publishes_cmd_vel_and_stops(base_node):
     keys = ["w"] * 5 + ["x"]
     sent = []
-    backend = make_backend()
+    backend = RosBackend(BASE_CONFIG, context=rclpy.get_default_context())
     real_drive = backend.drive
 
     def record(*v):
@@ -397,3 +471,129 @@ def test_command_from_another_sender_is_adopted_right_away():
         "client": None,
         "age": 0.0,
     }
+
+
+# --- drive through the web input of twist_mux
+# ------------------------------------------------------------------------
+# No twist_mux runs here and the robot node listens on /cmd_vel, so what the
+# web backend sends on its mux input must not move a wheel by itself.
+
+BASE_CONFIG = config(BASE)
+
+
+@pytest.fixture
+def base_robot(sdk):
+    r = Robot(sdk.bus(), BASE_CONFIG)
+    r.open()
+    yield r
+    r.close()
+
+
+@pytest.fixture
+def base_node(base_robot):
+    node = RobotNode(base_robot)
+    with spinning(node):
+        yield node
+
+
+@pytest.fixture
+def web_input():
+    """Every Twist published on the web input of twist_mux."""
+    received: list[Twist] = []
+    node = rclpy.create_node("web_input_listener")
+    node.create_subscription(Twist, WEB_CMD_VEL_TOPIC, received.append, 10)
+    with spinning(node):
+        yield received
+
+
+def make_web_backend(cfg=BASE_CONFIG) -> RosBackend:
+    return RosBackend(
+        cfg,
+        context=rclpy.get_default_context(),
+        cmd_vel_topic=WEB_CMD_VEL_TOPIC,
+    )
+
+
+def velocity(msg: Twist) -> tuple[float, float, float]:
+    return msg.linear.x, msg.linear.y, msg.angular.z
+
+
+def send_until_received(send: Callable[[], None], received: list) -> None:
+    """Re-send until the listener has matched the publisher and got one."""
+    deadline = time.monotonic() + WAIT
+    while not received:
+        if time.monotonic() > deadline:
+            raise AssertionError("nothing arrived on the web input")
+        send()
+        time.sleep(0.05)
+
+
+def base_wheel_speeds(robot: Robot) -> list[int]:
+    return [robot.joints[w].target_speed for w in BASE_CONFIG.base.wheels]
+
+
+def test_drive_publishes_clamped_twist_on_the_web_input(
+    base_node, base_robot, web_input
+):
+    backend = make_web_backend()
+    backend.open()
+    try:
+        send_until_received(
+            lambda: backend.drive(9.0, -9.0, math.nan), web_input
+        )
+        assert velocity(web_input[-1]) == (0.2, -0.2, 0.0)
+        time.sleep(0.2)
+        assert base_wheel_speeds(base_robot) == [0, 0, 0, 0]
+    finally:
+        backend.release()
+
+
+def test_drive_without_a_base_is_refused(backend):
+    with pytest.raises(CommandError, match="no base"):
+        backend.drive(0.1, 0.0, 0.0)
+
+
+def test_stop_own_leaves_other_senders_alone(robot_node, robot, web_input):
+    backend = make_web_backend(CONFIG)
+    backend.open()
+    try:
+        # Another interface drives the wheel, without expiry.
+        robot.spin("wheel", 300, source=SOURCE_CLI)
+        send_until_received(backend.stop_own, web_input)
+        assert velocity(web_input[-1]) == (0.0, 0.0, 0.0)
+        time.sleep(0.2)
+        assert robot.joints["wheel"].target_speed == 300
+    finally:
+        backend.release()
+
+
+def test_stop_own_stops_the_joints_the_backend_spins(robot_node, robot):
+    backend = make_web_backend(CONFIG)
+    backend.open()
+    try:
+        backend.spin("wheel", 200)
+        wait_for(lambda: robot.joints["wheel"].target_speed == 200, WAIT)
+        backend.stop_own()
+        wait_for(lambda: robot.joints["wheel"].target_speed == 0, WAIT)
+        assert backend_state(backend, "wheel")["target_speed"] == 0
+        # Nothing is fed any more.
+        backend.tick()
+        time.sleep(0.2)
+        assert robot.joints["wheel"].target_speed == 0
+    finally:
+        backend.release()
+
+
+def test_browser_drive_reaches_the_web_input_and_leaving_stops_only_it(
+    base_node, base_robot, web_input
+):
+    # Another interface drives a wheel; the browser leaving must not stop it.
+    base_robot.spin("fl", 100, source=SOURCE_CLI)
+    command = {"type": "drive", "vx": 0.1, "vy": 0.0, "wz": 0.0}
+    with TestClient(create_app(make_web_backend(), ros=True)) as client:
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            send_until_received(lambda: ws.send_json(command), web_input)
+            assert velocity(web_input[-1]) == (0.1, 0.0, 0.0)
+        wait_for(lambda: velocity(web_input[-1]) == (0.0, 0.0, 0.0), WAIT)
+        assert base_robot.joints["fl"].target_speed == 100

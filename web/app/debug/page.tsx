@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback } from "react";
 import ServoCard from "@/components/ServoCard";
+import ReleaseStopButton from "@/components/ReleaseStopButton";
 import StopAllButton from "@/components/StopAllButton";
 import { useBridge } from "@/lib/useBridge";
 
@@ -13,9 +14,10 @@ const STATUS_STYLE = {
 };
 
 export default function DebugPage() {
-  const { status, servos, limits, ros, settings, clientId, lastError, clearError, send } =
+  const { status, servos, limits, ros, stopped, settings, clientId, lastError, clearError, send } =
     useBridge();
   const stopAll = useCallback(() => send({ type: "stop_all" }), [send]);
+  const releaseStop = useCallback(() => send({ type: "release_stop" }), [send]);
   const online = servos.filter((s) => s.online).length;
 
   return (
@@ -43,7 +45,12 @@ export default function DebugPage() {
             </Link>
           </div>
         </div>
-        <StopAllButton onStop={stopAll} disabled={status !== "connected"} />
+        <div className="flex items-center gap-3">
+          {ros && stopped && (
+            <ReleaseStopButton onRelease={releaseStop} disabled={status !== "connected"} />
+          )}
+          <StopAllButton onStop={stopAll} disabled={status !== "connected"} />
+        </div>
       </header>
 
       {lastError && (

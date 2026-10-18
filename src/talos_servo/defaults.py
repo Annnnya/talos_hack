@@ -19,3 +19,8 @@ DEFAULT_MOVE_SPEED = 200
 # below the stop lock timeout in config/twist_mux.yaml, so a few late beats
 # never lock the base by mistake.
 STOP_LOCK_PERIOD_S = 0.1
+# twist_mux's stop lock timeout (config/twist_mux.yaml). A STOP state older
+# than this means the beats stopped, which twist_mux treats as STOP on.
+STOP_LOCK_TIMEOUT_S = 0.5
+# twist_mux input the web server drives the base on (config/twist_mux.yaml).
+WEB_CMD_VEL_TOPIC = "/web/cmd_vel"

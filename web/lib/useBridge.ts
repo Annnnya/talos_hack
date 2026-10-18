@@ -16,8 +16,15 @@ function bridgeUrl() {
 export function useBridge() {
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [servos, setServos] = useState<ServoState[]>([]);
-  const [limits, setLimits] = useState<Limits>({ pos_max: 4095, speed_max: 3000, acc_max: 254 });
+  const [limits, setLimits] = useState<Limits>({
+    pos_max: 4095,
+    speed_max: 3000,
+    acc_max: 254,
+    linear_max: null,
+    angular_max: null,
+  });
   const [ros, setRos] = useState(false);
+  const [stopped, setStopped] = useState<boolean | null>(null);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -40,6 +47,7 @@ export function useBridge() {
           setServos(msg.servos);
           setLimits(msg.limits);
           setRos(msg.ros);
+          setStopped(msg.stopped);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -71,6 +79,7 @@ export function useBridge() {
     servos,
     limits,
     ros,
+    stopped,
     settings,
     clientId,
     lastError,

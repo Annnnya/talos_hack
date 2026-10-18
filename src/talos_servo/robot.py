@@ -282,9 +282,9 @@ class Robot:
                 "the config has no base section, so the robot cannot drive"
             )
         speeds = wheel_speeds(
-            _finite_clamp(linear_x, base.max_linear_speed),
-            _finite_clamp(linear_y, base.max_linear_speed),
-            _finite_clamp(angular_z, base.max_angular_speed),
+            finite_clamp(linear_x, base.max_linear_speed),
+            finite_clamp(linear_y, base.max_linear_speed),
+            finite_clamp(angular_z, base.max_angular_speed),
             wheelbase_m=base.wheelbase_m,
             track_width_m=base.track_width_m,
             steps_per_meter=base.steps_per_meter,
@@ -339,6 +339,22 @@ class Robot:
         """Best effort: stop every speed joint. Never raises."""
         with self._lock:
             self._stop_speed_joints(source, client)
+
+    def stop_own(
+        self, *, source: str = SOURCE_WEB, client: str | None = None
+    ) -> None:
+        """Stop what this owner commanded: on the bus that is every speed
+        joint. Never raises."""
+        self.stop_all(source=source, client=client)
+
+    def stopped(self) -> bool | None:
+        """No twist_mux on the direct bus, so no STOP lock."""
+        return None
+
+    def release_stop(
+        self, *, source: str = SOURCE_WEB, client: str | None = None
+    ) -> None:
+        raise CommandError("releasing STOP needs `talos-servo web --ros`")
 
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
@@ -511,5 +527,6 @@ class Robot:
         j.online, j.error = True, None
 
 
-def _finite_clamp(value: float, limit: float) -> float:
+def finite_clamp(value: float, limit: float) -> float:
+    """Clamp to [-limit, limit]; NaN and infinity become 0 (stopped)."""
     return clamp(value, -limit, limit) if math.isfinite(value) else 0.0
