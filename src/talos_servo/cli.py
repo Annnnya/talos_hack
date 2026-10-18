@@ -176,6 +176,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--new-id", type=parse_id, required=True, help="id to assign"
     )
 
+    calibrate = sub.add_parser(
+        "calibrate-bend",
+        help=(
+            "measure the hinge flat and max fold positions with the keyboard "
+            "(O/F jog, Enter records, X cancels) and save them to "
+            "config/bend_calibration.yaml on the robot. Goes through the "
+            "running hardware bridge (needs the pixi ros environment)"
+        ),
+    )
+    calibrate.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG,
+        help="robot config file (default: %(default)s)",
+    )
+
     web = sub.add_parser(
         "web",
         parents=[port_opts, ros_opts],
@@ -300,7 +315,9 @@ def _over_ros(
         from talos_servo.ros import cli_commands
     except ImportError as exc:
         return _ros_missing(
-            exc, f"pixi run -e ros talos-servo {args.command} --ros ..."
+            exc,
+            f"pixi run -e ros talos-servo {args.command}"
+            + (" --ros ..." if hasattr(args, "ros") else ""),
         )
     try:
         config = load_config(args.config)
@@ -430,6 +447,21 @@ def cmd_drive(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate_bend(args: argparse.Namespace) -> int:
+    from talos_servo import teleop
+
+    def run(m: Any, backend: Any, config: Any) -> None:
+        model = config.model
+        enabled = {j.name for j in config.enabled_joints}
+        if model is None or model.hinge_joint not in enabled:
+            raise ServoError("the config has no enabled hinge to calibrate")
+        if not m.calibrate_bend_over_ros(backend, read_key, model.hinge_joint):
+            print("not saved, the hinge keeps its old calibration")
+
+    with teleop.terminal_keys() as read_key:
+        return _over_ros(args, run)
+
+
 def cmd_set_id(args: argparse.Namespace) -> int:
     with ServoBus(args.port, args.baud) as bus:
         bus.set_id(args.id, args.new_id)
@@ -503,6 +535,7 @@ COMMANDS = {
     "monitor": cmd_monitor,
     "drive": cmd_drive,
     "set-id": cmd_set_id,
+    "calibrate-bend": cmd_calibrate_bend,
     "web": cmd_web,
     "imu": cmd_imu,
 }
@@ -515,9 +548,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    needs_port = args.command not in ("ports", "imu") and not getattr(
-        args, "ros", False
-    )
+    needs_port = args.command not in (
+        "ports",
+        "imu",
+        "calibrate-bend",
+    ) and not getattr(args, "ros", False)
     if needs_port and not args.port:
         parser.error(
             f"no serial port: pass --port or set {PORT_ENV_VAR} (see "

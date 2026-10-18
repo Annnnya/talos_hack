@@ -23,6 +23,14 @@ def parse_args(
         "--config", default=DEFAULT_CONFIG, help="robot config (%(default)s)"
     )
     parser.add_argument(
+        "--calibration",
+        default=None,
+        help=(
+            "bend calibration file (default: $TALOS_BEND_CALIBRATION, else "
+            "bend_calibration.yaml next to --config)"
+        ),
+    )
+    parser.add_argument(
         "--port",
         default=os.environ.get(PORT_ENV_VAR),
         help=f"serial port, e.g. /dev/ttyACM0 (default: ${PORT_ENV_VAR})",

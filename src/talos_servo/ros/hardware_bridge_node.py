@@ -23,6 +23,12 @@ two topics; this node answers them with the `Robot` on the servo bus. See
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
   `moving`: readouts the plugin cannot carry, see `talos_servo.ros.readouts`
 - `/hardware_bridge/stop_all` (std_srvs/Trigger)
+- `/hardware_bridge/<hinge>/calibrate/{start,open,fold,record_flat,
+  record_fold,status,save,cancel}` (std_srvs/Trigger): the bend calibration
+  (#84) behind `talos-servo calibrate-bend`, see
+  `talos_servo.bend_calibrator`. While it runs, controller goals for the
+  hinge are ignored and its angle reads NaN. A save applies the new hinge
+  at once. With no call for `IDLE_TIMEOUT_S` the session is cancelled
 - `/diagnostics` (diagnostic_msgs/DiagnosticArray): one entry per joint named
   `<node name>: <joint>`, the same as the robot node's. Run as node `robot`
   (`--ros-args -r __node:=robot`, as launch/robot.launch.py does) and the web
@@ -31,8 +37,9 @@ two topics; this node answers them with the `Robot` on the servo bus. See
   served: the controllers own the joints
 
 The hinge (`model.hinge_joint`, `bend`) is the opening angle alpha in rad, pi
-flat, converted by `talos_servo.hinge.Hinge` from the fixed flat position
-`model.bend_flat_steps`. While the servo is offline, or reads outside the
+flat, converted by `talos_servo.hinge.Hinge` from the flat position in
+`config/bend_calibration.yaml`, or `model.bend_flat_steps` until the hinge
+is calibrated. While the servo is offline, or reads outside the
 hinge range (a wrap past flat), its position and velocity are NaN: unknown,
 never a guess. Its goals are dropped meanwhile: from a wrapped reading the
 servo would take the long way round.
@@ -66,10 +73,11 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 
+from talos_servo.bend_calibrator import FOLD, OPEN, BendCalibrator
 from talos_servo.bus import ServoBus, ServoError
 from talos_servo.config import SPEED, load_config
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, PORT_ENV_VAR, QUEUE_DEPTH
-from talos_servo.hinge import Hinge
+from talos_servo.hinge import READ_MARGIN_STEPS, Hinge
 from talos_servo.robot import SOURCE_ROS, CommandError, Robot
 from talos_servo.ros.convert import (
     rad_speed_to_steps,
@@ -78,6 +86,16 @@ from talos_servo.ros.convert import (
     steps_to_rad,
 )
 from talos_servo.ros.diagnostics import DIAGNOSTICS_TOPIC, joint_diagnostics
+from talos_servo.ros.names import (
+    CALIBRATE_CANCEL,
+    CALIBRATE_FOLD,
+    CALIBRATE_OPEN,
+    CALIBRATE_RECORD_FLAT,
+    CALIBRATE_RECORD_FOLD,
+    CALIBRATE_SAVE,
+    CALIBRATE_START,
+    CALIBRATE_STATUS,
+)
 from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
 from talos_servo.ros.topic_bridge import Unwrapper, unpack_commands
@@ -89,14 +107,16 @@ COMMANDS_TOPIC = "/talos/joint_commands"
 STATES_TOPIC = "/talos/joint_states"
 # Goals closer than this to a position joint's first goal count as repeats.
 GOAL_TOLERANCE_RAD = 1e-9
-# A hinge reading this far outside its step range is not a real angle (the
-# servo wrapped past flat or misread), so it is reported as unknown.
-HINGE_READ_MARGIN_STEPS = 64
 
 
 class HardwareBridgeNode(Node):
     def __init__(
-        self, robot: Robot, *, node_name: str = NODE_NAME, **node_kwargs
+        self,
+        robot: Robot,
+        *,
+        calibrator: BendCalibrator | None = None,
+        node_name: str = NODE_NAME,
+        **node_kwargs,
     ) -> None:
         super().__init__(node_name, **node_kwargs)
         self.robot = robot
@@ -145,6 +165,11 @@ class HardwareBridgeNode(Node):
             JointState, COMMANDS_TOPIC, self.on_commands, QUEUE_DEPTH
         )
         self.create_service(Trigger, "~/stop_all", self.on_stop_all)
+        self.calibrator = calibrator if self._hinge is not None else None
+        # Calibration service step -> action, empty without a calibrator.
+        self.calibration_steps: dict[str, Callable[[], str]] = {}
+        if self.calibrator is not None:
+            self._serve_calibration(self.calibrator)
         self.create_timer(1.0 / config.control_hz, self.tick)
         self.create_timer(1.0 / status_hz, self.publish_readouts)
         self.get_logger().info(
@@ -162,6 +187,14 @@ class HardwareBridgeNode(Node):
 
     # --- states ----------------------------------------------------------
     def tick(self) -> None:
+        calibrator = self.calibrator
+        if calibrator is not None and calibrator.expired(self.robot.clock()):
+            self.get_logger().warning(
+                "bend calibration got no call for a while, cancelling it"
+            )
+            self._safely(
+                "calibration", lambda: self._calibrate(calibrator.cancel)
+            )
         try:
             self.robot.tick()
         except Exception as exc:  # keep ticking: the watchdog lives in tick()
@@ -242,6 +275,8 @@ class HardwareBridgeNode(Node):
                 ),
             )
         for joint, position in positions.items():
+            if self._calibrating(joint):
+                continue
             if not self._armed_for(joint, position):
                 continue
             self._safely(
@@ -320,6 +355,9 @@ class HardwareBridgeNode(Node):
         self, hinge: Hinge, j: dict[str, Any]
     ) -> tuple[float, float]:
         """Opening angle and rate, or NaN while they are unknown."""
+        if self._calibrating(hinge.joint):
+            # The hinge is being measured: no angle to trust yet.
+            return math.nan, math.nan
         problem = self._hinge_problem(hinge, j["online"], j["position"])
         if problem is None:
             return hinge.alpha(j["position"]), hinge.alpha_rate(j["speed"])
@@ -335,10 +373,81 @@ class HardwareBridgeNode(Node):
         if not online:
             return "servo offline"
         low, high = hinge.step_range
-        margin = HINGE_READ_MARGIN_STEPS
+        margin = READ_MARGIN_STEPS
         if not low - margin <= steps <= high + margin:
             return f"reads step {steps}, outside its range {low}..{high}"
         return None
+
+    # --- calibration -----------------------------------------------------
+    def _serve_calibration(self, calibrator: BendCalibrator) -> None:
+        self.calibration_steps = {
+            CALIBRATE_START: calibrator.start,
+            CALIBRATE_OPEN: lambda: calibrator.jog(OPEN),
+            CALIBRATE_FOLD: lambda: calibrator.jog(FOLD),
+            CALIBRATE_RECORD_FLAT: calibrator.record_flat,
+            CALIBRATE_RECORD_FOLD: calibrator.record_fold,
+            CALIBRATE_STATUS: calibrator.status,
+            CALIBRATE_SAVE: calibrator.save,
+            CALIBRATE_CANCEL: calibrator.cancel,
+        }
+        for step, action in self.calibration_steps.items():
+
+            def serve(
+                _request: Trigger.Request,
+                response: Trigger.Response,
+                step: str = step,
+                action: Callable[[], str] = action,
+            ) -> Trigger.Response:
+                return self.on_calibrate(step, action, response)
+
+            self.create_service(
+                Trigger, f"~/{calibrator.joint}/calibrate/{step}", serve
+            )
+
+    def on_calibrate(
+        self,
+        step: str,
+        action: Callable[[], str],
+        response: Trigger.Response,
+    ) -> Trigger.Response:
+        try:
+            response.message = self._calibrate(action)
+            response.success = True
+        except (CommandError, ServoError, ValueError) as exc:
+            # ConfigError and CalibrationError are ValueErrors too.
+            response.success, response.message = False, str(exc)
+            self.get_logger().warning(f"calibrate {step}: {exc}")
+        return response
+
+    def _calibrate(self, action: Callable[[], str]) -> str:
+        """Run one calibration step. When the session starts or ends the
+        hinge waits for a new controller goal, so the last one (from
+        before, or in the old calibration) never moves it."""
+        calibrator = self.calibrator
+        assert calibrator is not None
+        was_active = calibrator.active
+        message = action()
+        if calibrator.active != was_active:
+            self._disarm(calibrator.joint)
+            self._hinge = self.robot.config.hinge
+            self.get_logger().info(
+                f"{calibrator.joint} calibration "
+                f"{'started' if calibrator.active else 'ended'}: {message}"
+            )
+        return message
+
+    def _calibrating(self, joint: str) -> bool:
+        calibrator = self.calibrator
+        return (
+            calibrator is not None
+            and calibrator.active
+            and joint == calibrator.joint
+        )
+
+    def _disarm(self, joint: str) -> None:
+        self._armed.discard(joint)
+        self._first_goals.pop(joint, None)
+        self._goals.pop(joint, None)
 
     # --- helpers ---------------------------------------------------------
     def _states(self) -> dict[str, dict[str, Any]]:
@@ -365,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{prog}: pass --port or set {PORT_ENV_VAR}", file=sys.stderr)
         return 2
     try:
-        config = load_config(args.config)
+        config = load_config(args.config, args.calibration)
     except ValueError as exc:  # ConfigError is a ValueError
         print(f"{prog}: {exc}", file=sys.stderr)
         return 2
@@ -375,7 +484,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     node = None
     try:
         robot.open()
-        node = HardwareBridgeNode(robot)
+        calibrator = (
+            BendCalibrator(
+                robot,
+                config_path=args.config,
+                calibration=args.calibration,
+                source=SOURCE_ROS,
+            )
+            if config.hinge is not None and config.hinge.joint in robot.joints
+            else None
+        )
+        node = HardwareBridgeNode(robot, calibrator=calibrator)
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass

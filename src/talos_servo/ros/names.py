@@ -25,6 +25,23 @@ EXPANSION_RATE_TOPIC = "/expansion/rate"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
 
+# Hardware bridge: bend calibration (#84), std_srvs/Trigger services at
+# <node>/<hinge joint>/calibrate/<step>; the node runs as `robot`.
+CALIBRATE_START = "start"
+CALIBRATE_OPEN = "open"
+CALIBRATE_FOLD = "fold"
+CALIBRATE_RECORD_FLAT = "record_flat"
+CALIBRATE_RECORD_FOLD = "record_fold"
+CALIBRATE_STATUS = "status"
+CALIBRATE_SAVE = "save"
+CALIBRATE_CANCEL = "cancel"
+
+
+def calibrate_service(joint: str, step: str) -> str:
+    """Full name of a calibration service on the robot node."""
+    return f"{ROBOT_NS}/{joint}/calibrate/{step}"
+
+
 # mux_status node
 ACTIVE_INPUT_TOPIC = f"{ROBOT_NS}/active_input"
 

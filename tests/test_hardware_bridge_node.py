@@ -9,16 +9,23 @@ import copy
 import math
 
 import pytest
+import yaml
 
 rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("sensor_msgs")
 
-from conftest import BASE, SMALL, FakeClock, config  # noqa: E402
+from conftest import BASE, SMALL, FakeClock, config, wait_for  # noqa: E402
 from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_TORQUE_ENABLE  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
+from talos_servo.bend_calibrator import (  # noqa: E402
+    CALIBRATION_SPEED,
+    IDLE_TIMEOUT_S,
+    BendCalibrator,
+)
 from talos_servo.bus import ServoError  # noqa: E402
+from talos_servo.config import load_config  # noqa: E402
 from talos_servo.defaults import ROBOT_NODE_NAME  # noqa: E402
 from talos_servo.robot import FAULT_CLEAR_S, Robot  # noqa: E402
 from talos_servo.ros.convert import (  # noqa: E402
@@ -28,6 +35,16 @@ from talos_servo.ros.convert import (  # noqa: E402
 )
 from talos_servo.ros.hardware_bridge_node import (  # noqa: E402
     HardwareBridgeNode,
+)
+from talos_servo.ros.names import (  # noqa: E402
+    CALIBRATE_CANCEL,
+    CALIBRATE_FOLD,
+    CALIBRATE_OPEN,
+    CALIBRATE_RECORD_FLAT,
+    CALIBRATE_RECORD_FOLD,
+    CALIBRATE_SAVE,
+    CALIBRATE_START,
+    CALIBRATE_STATUS,
 )
 from talos_servo.ros.web_backend import (  # noqa: E402
     STATUS_PREFIX,
@@ -492,3 +509,157 @@ def test_shutdown_brakes_without_turning_torque_off(node, robot, sdk):
     assert packet[5] | packet[6] << 8 == 0
     assert len(moves(sdk)) == sent
     assert torque_writes(sdk) == []
+
+
+# --- bend calibration (#84) ----------------------------------------------
+@pytest.fixture
+def cal_paths(tmp_path):
+    robot = tmp_path / "robot.yaml"
+    robot.write_text(yaml.safe_dump(hinge_config()), "utf-8")
+    return robot, tmp_path / "bend_calibration.yaml"
+
+
+@pytest.fixture
+def cal_robot(sdk, clock, cal_paths):
+    r = Robot(sdk.bus(), load_config(*cal_paths), clock=clock)
+    r.open()
+    yield r
+    r.close()
+
+
+@pytest.fixture
+def cal_node(cal_robot, cal_paths):
+    config_path, cal_path = cal_paths
+    calibrator = BendCalibrator(
+        cal_robot, config_path=config_path, calibration=cal_path
+    )
+    n = HardwareBridgeNode(cal_robot, calibrator=calibrator)
+    yield n
+    n.destroy_node()
+
+
+def calibrate(node, step: str) -> Trigger.Response:
+    return node.on_calibrate(
+        step, node.calibration_steps[step], Trigger.Response()
+    )
+
+
+def ok(node, step: str) -> str:
+    response = calibrate(node, step)
+    assert response.success, response.message
+    return response.message
+
+
+def bend_goals(robot, node, position: float) -> int | None:
+    node.on_commands(commands(["bend"], position=[position]))
+    return robot.joints["bend"].target
+
+
+def test_calibration_services_are_served(cal_node):
+    expected = {
+        f"/hardware_bridge/bend/calibrate/{step}"
+        for step in (
+            CALIBRATE_START,
+            CALIBRATE_OPEN,
+            CALIBRATE_FOLD,
+            CALIBRATE_RECORD_FLAT,
+            CALIBRATE_RECORD_FOLD,
+            CALIBRATE_STATUS,
+            CALIBRATE_SAVE,
+            CALIBRATE_CANCEL,
+        )
+    }
+    assert set(cal_node.calibration_steps) == {
+        name.rsplit("/", 1)[1] for name in expected
+    }
+    wait_for(
+        lambda: (
+            expected
+            <= {name for name, _ in cal_node.get_service_names_and_types()}
+        )
+    )
+
+
+def test_no_calibration_without_a_hinge(robot):
+    # SMALL has no model, so no hinge to calibrate even if asked.
+    calibrator = object()
+    n = HardwareBridgeNode(robot, calibrator=calibrator)
+    try:
+        assert n.calibrator is None
+        assert n.calibration_steps == {}
+    finally:
+        n.destroy_node()
+
+
+def test_hinge_goals_are_ignored_while_calibrating(cal_node, cal_robot):
+    hold(cal_node, math.pi)
+    ok(cal_node, CALIBRATE_START)
+    cal_node.on_commands(
+        commands(["bend", "fl"], position=[2.0], velocity=[1.0])
+    )
+    assert cal_robot.joints["bend"].target is None
+    # The wheels still follow their controller.
+    assert cal_robot.joints["fl"].target_speed != 0
+
+
+def test_hinge_angle_is_unknown_while_calibrating(cal_node):
+    ok(cal_node, CALIBRATE_START)
+    assert math.isnan(bend_state(cal_node)[0])
+
+
+def test_jog_moves_the_hinge_slowly(cal_node, cal_robot, sdk):
+    ok(cal_node, CALIBRATE_START)
+    ok(cal_node, CALIBRATE_OPEN)
+    move = [c for c in sdk.handler.calls if c[0] == "move"][-1]
+    assert move[1:4] == (5, START_STEPS + 11, CALIBRATION_SPEED)
+
+
+def test_save_applies_the_new_hinge_at_once(
+    cal_node, cal_robot, sdk, cal_paths
+):
+    hold(cal_node, math.pi)
+    assert bend_goals(cal_robot, cal_node, 2.5) is not None  # armed
+    ok(cal_node, CALIBRATE_START)
+    sdk.handler.position = 3100
+    ok(cal_node, CALIBRATE_RECORD_FLAT)
+    sdk.handler.position = 2100
+    ok(cal_node, CALIBRATE_RECORD_FOLD)
+    assert "steps 2100..3100" in ok(cal_node, CALIBRATE_SAVE)
+    assert cal_paths[1].exists()
+    cal_robot.joints["bend"].position = 3100
+    assert bend_state(cal_node)[0] == pytest.approx(math.pi)
+    # The controller's old goal repeats: it must not move the hinge.
+    target = cal_robot.joints["bend"].target
+    assert bend_goals(cal_robot, cal_node, 2.5) == target
+    # A new goal does, in the new calibration.
+    assert bend_goals(cal_robot, cal_node, math.pi) == 3100
+
+
+def test_cancel_keeps_the_old_hinge_and_waits_for_a_new_goal(
+    cal_node, cal_robot
+):
+    hold(cal_node, math.pi)
+    assert bend_goals(cal_robot, cal_node, 2.5) is not None
+    ok(cal_node, CALIBRATE_START)
+    ok(cal_node, CALIBRATE_CANCEL)
+    target = cal_robot.joints["bend"].target
+    assert bend_goals(cal_robot, cal_node, 2.5) == target
+    assert cal_robot.joints["bend"].target == target
+    assert cal_node._hinge.flat_steps == FLAT
+    bend = cal_robot.joints["bend"]
+    assert (bend.min_pos, bend.max_pos) == cal_node._hinge.step_range
+
+
+def test_idle_calibration_is_cancelled(cal_node, cal_robot, clock):
+    ok(cal_node, CALIBRATE_START)
+    clock.now += IDLE_TIMEOUT_S + 1
+    cal_node.tick()
+    assert not cal_node.calibrator.active
+    bend = cal_robot.joints["bend"]
+    assert (bend.min_pos, bend.max_pos) == cal_node._hinge.step_range
+
+
+def test_calibration_errors_come_back_as_failures(cal_node):
+    response = calibrate(cal_node, CALIBRATE_SAVE)
+    assert not response.success
+    assert "no calibration running" in response.message
