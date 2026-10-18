@@ -28,6 +28,8 @@ from talos_servo.ros.names import (
     HOLD_STATE_TOPIC,
     IMU_DATA_TOPIC,
     LATCHED,
+    LEVEL_ENABLE_SERVICE,
+    LEVEL_STATE_TOPIC,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
     RELEASE_SERVICE,
@@ -62,6 +64,7 @@ class WebClientNode(Node):
         on_active_input: Callable[[String], None] = _ignore,
         on_hold_state: Callable[[String], None] = _ignore,
         on_imu: Callable[[Imu], None] = _ignore,
+        on_level_state: Callable[[String], None] = _ignore,
         node_name: str = NODE_NAME,
         cmd_vel_topic: str = CMD_VEL_TOPIC,
         context: Context | None = None,
@@ -122,6 +125,13 @@ class WebClientNode(Node):
         )
         self.create_subscription(
             String, HOLD_STATE_TOPIC, on_hold_state, QUEUE_DEPTH
+        )
+        # Level loop in the expansion node (#82).
+        self.level_enable_client = self.create_client(
+            SetBool, LEVEL_ENABLE_SERVICE
+        )
+        self.create_subscription(
+            String, LEVEL_STATE_TOPIC, on_level_state, QUEUE_DEPTH
         )
         # Filtered IMU with orientation, for the platform tilt (#91).
         self.create_subscription(

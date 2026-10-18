@@ -81,6 +81,12 @@ class RobotBackend(Protocol):
         """Hinge angle and raw servo step for calibration; None without ROS
         or without a hinge."""
 
+    def set_level(self, enabled: bool) -> None:
+        """Turn the IMU level loop on or off. Over ROS only."""
+
+    def level_state(self) -> dict[str, Any] | None:
+        """Level loop state, None without ROS or the expansion node."""
+
     def tilt(self) -> dict[str, float] | None:
         """Platform roll and pitch in degrees from the IMU (`roll_deg`,
         `pitch_deg`); None without ROS or while the IMU is quiet."""

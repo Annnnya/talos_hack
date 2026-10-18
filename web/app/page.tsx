@@ -76,6 +76,7 @@ export default function Home() {
     hinge,
     hold,
     tilt,
+    level,
     lastError,
     clearError,
     send,
@@ -216,6 +217,8 @@ export default function Home() {
           speed={limits.climb_max * scale}
           enabled={canClimb}
           wheelCurrents={hinge?.wheel_currents ?? null}
+          level={level}
+          levelEnabled={connected && ros && nearWall}
         />
       )}
 

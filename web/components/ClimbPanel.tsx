@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { HoldButton } from "@/components/HingePanel";
-import type { ClientMessage } from "@/lib/protocol";
+import type { ClientMessage, LevelState } from "@/lib/protocol";
 import { type Sign, useHold } from "@/lib/useHold";
 
 /** Desktop keys next to the hinge keys: T up, G down. */
@@ -19,6 +19,8 @@ export default function ClimbPanel({
   speed,
   enabled,
   wheelCurrents,
+  level,
+  levelEnabled,
 }: {
   send: (msg: ClientMessage) => void;
   /** m/s while held. */
@@ -26,6 +28,10 @@ export default function ClimbPanel({
   enabled: boolean;
   /** Wheel currents (A) by joint name. */
   wheelCurrents: Record<string, number> | null;
+  /** IMU level loop (#82); null without the expansion node. */
+  level: LevelState | null;
+  /** The loop may be turned on (near the wall, ROS). */
+  levelEnabled: boolean;
 }) {
   const message = useCallback((sign: Sign | 0): ClientMessage => ({ type: "climb", speed: sign * speed }), [speed]);
   const { held, start, end } = useHold(send, message, enabled, CLIMB_KEYS);
@@ -68,6 +74,34 @@ export default function ClimbPanel({
         <HoldButton label="Down" hint="G" sign={-1} held={held} disabled={!enabled} onStart={start} onEnd={end} />
         <span />
       </div>
+      {level && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <button
+            type="button"
+            onClick={() => send({ type: "level", enabled: !level.active })}
+            disabled={!levelEnabled && !level.active}
+            title="Keep the platform level with the IMU: pitch trims the front pair against the rear, roll the left against the right"
+            className={`rounded-2xl px-4 py-2 font-semibold text-white shadow-md active:scale-95 disabled:opacity-40 ${
+              level.active ? "bg-red-600" : "bg-emerald-600"
+            }`}
+          >
+            {level.active ? "Stop levelling" : "Level with the IMU"}
+          </button>
+          <span className="tabular-nums text-black/60 dark:text-white/60">
+            {level.imu_ok && level.pitch_deg !== null && level.roll_deg !== null
+              ? `pitch ${level.pitch_deg.toFixed(1)}°, roll ${level.roll_deg.toFixed(1)}°`
+              : "no IMU"}
+            {level.active &&
+              ` · trim ${(level.front_rear_m_s * 100).toFixed(1)} / ${(level.left_right_m_s * 100).toFixed(1)} cm/s`}
+          </span>
+          {level.fault && (
+            <span className="w-full text-xs font-semibold text-red-600 dark:text-red-400">{level.fault}</span>
+          )}
+          {level.note && !level.active && !level.fault && (
+            <span className="w-full text-xs text-amber-700 dark:text-amber-400">Level stopped: {level.note}</span>
+          )}
+        </div>
+      )}
       {wheelCurrents && Object.keys(wheelCurrents).length > 0 && (
         <dl className="mt-3 grid grid-cols-5 gap-1 text-center text-xs">
           {Object.entries(wheelCurrents).map(([name, a]) => (

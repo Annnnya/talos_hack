@@ -317,6 +317,34 @@ until the wheels press on both walls. The logic is in `talos_servo.clamp`.
   time. A rate on `/expansion/rate` (R or F) cancels the clamp and the
   operator takes over until `clamping` is entered again.
 
+## Keeping level (#82)
+
+With Level on (`/level/enable`, `std_srvs/SetBool`) the expansion node
+reads the platform roll and pitch from `/imu/data` (the IMU orientation
+with the mount from `imu` in `config/robot.yaml` taken off,
+`talos_servo.orientation`) and trims the wheel pairs with two P loops
+(`talos_servo.level`): pitch trims the front pair against the rear pair,
+roll the right pair against the left pair, each with a deadband, a cap
+(`level.max_trim_m_s`) and a sign flag for the bench. The trims are "up"
+speeds added per pair before the wall mapping in `talos_servo.climb`, so
+they work at rest and on top of Up/Down/Left/Right.
+
+- **Only on the wall:** aligning, clamping and climbing, never while STOP
+  is on or its beats are missing (the same `blocked` rule as the climb);
+  leaving those modes turns it off and zeroes the wheels once.
+- **Tilt fault:** past `level.tilt_fault_rad` on either axis the wheels
+  stop, Level turns off and `/level/state` carries the reason; the hinge
+  keeps its goal. The fault clears with hysteresis.
+- **No IMU:** older orientation than `level.imu_timeout_s` gives no trim
+  and Level cannot be turned on.
+- `/level/state` (`std_msgs/String`, JSON at 10 Hz): active, imu_ok,
+  roll_deg, pitch_deg, front_rear_m_s, left_right_m_s, fault, note.
+
+```
+ros2 service call /level/enable std_srvs/srv/SetBool "{data: true}"
+ros2 topic echo /level/state
+```
+
 ## Open points
 
 - **State rate:** every `Robot.tick` (`control_hz`, 50 Hz, the same as

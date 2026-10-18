@@ -552,6 +552,11 @@ Open `http://<pi>.local:8000` on a phone or laptop on the same network.
   shows in the header while STOP is on. STOP is on when the robot starts.
 - **Wall nearby** (N) starts the climb (`free` to `aligning`); **Release**
   (L) goes back to `free` from any other mode (see Robot modes).
+- **Level with the IMU** (in the "On the wall" panel after Wall nearby):
+  the platform roll and pitch from the IMU trim the wheel pairs so the
+  platform stays horizontal, also at rest (#82). It stops with STOP,
+  Release, or a tilt past `level.tilt_fault_rad`, and shows the tilt and
+  the trims. Gains and signs are `level` in `config/robot.yaml`.
 - **Per mode:** the buttons the mode does not allow are greyed out.
 
   | Mode | Drive | Rotate | Wall nearby | Release |
@@ -623,9 +628,22 @@ them there.
 
 The joystick page shows the platform roll and pitch from `/imu/data` with
 the mount taken off ("Platform: pitch, roll"). Check it with the robot flat
-on a level floor: both within 1 deg of zero. Lifting the front must raise
-the pitch reading; if it drops, the board is mounted backwards, so set
-`rpy: [0, 0, 3.1416]`.
+on a level floor: both within 1 deg of zero (measured 0.1 and 0.8 deg).
+Lifting the front must raise the pitch reading; if it drops, the board is
+mounted backwards, so set `rpy: [0, 0, 3.1416]`.
+
+### Keeping the platform level (#82)
+
+On the wall the expansion node can trim the wheel pairs from the IMU
+(`talos_servo.level`, "Level with the IMU" on the joystick page or
+`/level/enable`): pitch (nose down) speeds the front pair up and the rear
+pair down, roll (right side low) speeds the right pair up and the left pair
+down, each a P loop with a deadband and a cap (`level` in
+`config/robot.yaml`). It runs at rest too, so a clamped robot levels
+itself, and on top of Up/Down/Left/Right. If a loop pushes the wrong way on
+the bench, flip `level.pitch_sign` or `level.roll_sign`. Past
+`level.tilt_fault_rad` the wheels stop and the loop turns off.
+`/level/state` reports the tilt, the trims and the fault as JSON.
 
 ## Camera
 

@@ -87,6 +87,22 @@ export interface HoldState {
   load_limited: boolean;
 }
 
+/** Level loop in the expansion node (#82). */
+export interface LevelState {
+  active: boolean;
+  /** False while the IMU orientation is missing or stale. */
+  imu_ok: boolean;
+  roll_deg: number | null;
+  pitch_deg: number | null;
+  /** Trims in m/s: front pair vs rear pair, right pair vs left pair. */
+  front_rear_m_s: number;
+  left_right_m_s: number;
+  /** Set while the platform tilts past the limit. */
+  fault: string | null;
+  /** Why it stopped last ("turned off", "tilt fault: ...", ...). */
+  note: string | null;
+}
+
 /** Platform roll and pitch from the IMU (#91), degrees. */
 export interface TiltState {
   roll_deg: number;
@@ -120,6 +136,8 @@ export type ServerMessage =
       hinge_hold: HoldState | null;
       /** Null without ROS or while the IMU chain is quiet. */
       tilt: TiltState | null;
+      /** Null without the expansion node. */
+      level: LevelState | null;
     }
   | { type: "error"; message: string };
 
@@ -143,6 +161,8 @@ export type ClientMessage =
   | { type: "climb"; speed: number }
   /** Sideways speed on the wall (m/s, + left, 0 stops), ROS only. Re-send while held. */
   | { type: "wall_side"; speed: number }
+  /** IMU level loop on/off (#82), ROS only. */
+  | { type: "level"; enabled: boolean }
   /** Hinge current hold on/off with its setpoint (A), ROS only. */
   | { type: "hinge_hold"; enabled: boolean; setpoint: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
