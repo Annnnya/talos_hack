@@ -309,6 +309,23 @@ def test_failed_wheel_read_keeps_ticking(sdk, base, caplog):
     assert caplog.text.count("wheel sync read failed") == 1
     # Speeds are still written.
     assert last_speeds(sdk)
+    # One lost sync-read packet must not brake the robot: the round robin
+    # owns online state and the safe state.
+    assert base.fault is None
+    base.spin("fl", 300)
+    base.tick()
+    assert speed_of(last_speeds(sdk)[1]) == 300
+
+
+def test_lost_wheel_latches_through_the_round_robin(sdk, base):
+    base.spin("fl", 300)
+    sdk.fail[("sync_read", 1)] = (COMM_RX_TIMEOUT, 0)
+    sdk.fail[("read_block", 1)] = (COMM_RX_TIMEOUT, 0)
+    for _ in base.joints:
+        base.tick()
+    assert not base.joints["fl"].online
+    assert "fl stopped answering" in base.fault
+    assert all(j.target_speed == 0 for j in base.joints.values())
 
 
 # --- safe state --------------------------------------------------------------
