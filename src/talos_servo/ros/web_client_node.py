@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 
 from diagnostic_msgs.msg import DiagnosticArray
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from rclpy.context import Context
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -64,7 +64,7 @@ class WebClientNode(Node):
             JointState, f"{ROBOT_NS}/velocity_cmd", QUEUE_DEPTH
         )
         self.cmd_vel_pub = self.create_publisher(
-            Twist, cmd_vel_topic, QUEUE_DEPTH
+            TwistStamped, cmd_vel_topic, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH

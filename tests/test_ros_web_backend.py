@@ -27,7 +27,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
     KeyValue,
 )
 from fastapi.testclient import TestClient  # noqa: E402
-from geometry_msgs.msg import Twist  # noqa: E402
+from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
@@ -412,10 +412,10 @@ def listener():
     executor.add_node(node)
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
-    received: list[Twist] = []
+    received: list[TwistStamped] = []
 
-    def listen(topic: str) -> list[Twist]:
-        node.create_subscription(Twist, topic, received.append, 10)
+    def listen(topic: str) -> list[TwistStamped]:
+        node.create_subscription(TwistStamped, topic, received.append, 10)
         return received
 
     yield listen
@@ -448,7 +448,7 @@ def test_drive_over_ros_waits_for_twist_mux_before_warning(base_node):
     def open_then_listen() -> None:
         original_open()
         late.create_subscription(
-            Twist, KEYBOARD_CMD_VEL_TOPIC, lambda _m: None, 10
+            TwistStamped, KEYBOARD_CMD_VEL_TOPIC, lambda _m: None, 10
         )
 
     backend.open = open_then_listen
@@ -544,7 +544,7 @@ def test_drive_over_ros_publishes_on_the_keyboard_input(
     )
     assert sent[0] == (0.1, 0.0, 0.0)
     assert sent[-1] == (0.0, 0.0, 0.0)
-    wait_for(lambda: any(m.linear.x == 0.1 for m in received), WAIT)
+    wait_for(lambda: any(m.twist.linear.x == 0.1 for m in received), WAIT)
     # The robot node only listens on /cmd_vel, which twist_mux feeds.
     assert not any(base_wheel_speeds(base_robot))
 
@@ -810,10 +810,12 @@ def base_node(base_robot):
 
 @pytest.fixture
 def web_input():
-    """Every Twist published on the web input of twist_mux."""
-    received: list[Twist] = []
+    """Every twist published on the web input of twist_mux."""
+    received: list[TwistStamped] = []
     node = rclpy.create_node("web_input_listener")
-    node.create_subscription(Twist, WEB_CMD_VEL_TOPIC, received.append, 10)
+    node.create_subscription(
+        TwistStamped, WEB_CMD_VEL_TOPIC, received.append, 10
+    )
     with spinning(node):
         yield received
 
@@ -826,8 +828,9 @@ def make_web_backend(cfg=BASE_CONFIG) -> RosBackend:
     )
 
 
-def velocity(msg: Twist) -> tuple[float, float, float]:
-    return msg.linear.x, msg.linear.y, msg.angular.z
+def velocity(msg: TwistStamped) -> tuple[float, float, float]:
+    twist = msg.twist
+    return twist.linear.x, twist.linear.y, twist.angular.z
 
 
 def send_until_received(send: Callable[[], None], received: list) -> None:

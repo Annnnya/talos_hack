@@ -279,7 +279,7 @@ base:
 
 | Topic or service | Type | Direction |
 | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/Twist` | in: drive the base |
+| `/cmd_vel` | `geometry_msgs/TwistStamped` | in: drive the base |
 | `/odom` | `nav_msgs/Odometry` | out: wheel odometry, no TF |
 | `/joint_states` | `sensor_msgs/JointState` | out: rad, rad/s, load |
 | `/diagnostics` | `DiagnosticArray` | out: one entry per joint |
@@ -297,8 +297,8 @@ base:
 | `/camera/take_snapshot` | `std_srvs/Trigger` | capture and publish one snapshot |
 | `/camera/stream` | `std_srvs/SetBool` | enable/disable camera stream |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
-| `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
-| `/keyboard/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, keyboard |
+| `/web/cmd_vel` | `geometry_msgs/TwistStamped` | in: twist_mux, web |
+| `/keyboard/cmd_vel` | `geometry_msgs/TwistStamped` | in: twist_mux, keyboard |
 | `/robot/set_stop` | `std_srvs/SetBool` | true: STOP, false: release |
 | `/robot/stop_lock` | `std_msgs/Bool` | out: STOP state, 10 Hz |
 | `/robot/active_input` | `std_msgs/String` | out: who drives |
@@ -335,7 +335,8 @@ Enter on either, or `/robot/set_stop` `false`.
 pixi run -e ros mode-node
 pixi run -e ros twist-mux
 pixi run -e ros mux-status
-ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/Twist   "{linear: {x: 0.05}}"
+ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/TwistStamped \
+  "{twist: {linear: {x: 0.05}}}"
 ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: false}"
 ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: true}"
 ros2 topic echo /robot/active_input
@@ -350,12 +351,12 @@ Drive the base. `/cmd_vel` stops unless repeated, so publish at a rate; Ctrl+C
 stops the wheels within `command_timeout_s`:
 
 ```
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.05}}"                  # forward
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {y: 0.05}}"                  # strafe left
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-  "{angular: {z: 0.3}}"                  # turn left
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/TwistStamped \
+  "{twist: {linear: {x: 0.05}}}"         # forward
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/TwistStamped \
+  "{twist: {linear: {y: 0.05}}}"         # strafe left
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/TwistStamped \
+  "{twist: {angular: {z: 0.3}}}"         # turn left
 ```
 
 One joint. Velocities are rad/s (1 rad/s is about 650 steps/s), positions are

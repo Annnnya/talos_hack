@@ -12,7 +12,7 @@ pytest.importorskip("geometry_msgs")
 pytest.importorskip("std_msgs")
 
 from conftest import MUX_CONFIG  # noqa: E402
-from geometry_msgs.msg import Twist  # noqa: E402
+from geometry_msgs.msg import TwistStamped  # noqa: E402
 from std_msgs.msg import Bool  # noqa: E402
 
 from talos_servo.ros.mux_status import LOCKED, NONE  # noqa: E402
@@ -59,8 +59,8 @@ def test_locked_until_the_mode_node_beats(node):
 
 def test_publishes_who_drives(node):
     release(node)
-    node.on_input("web", Twist())
-    node.on_input("keyboard", Twist())
+    node.on_input("web", TwistStamped())
+    node.on_input("keyboard", TwistStamped())
     node.on_lock("stop", Bool(data=True))
     node.on_lock("stop", Bool(data=False))
     assert node.sent == ["web", "keyboard", LOCKED, "keyboard"]
@@ -68,8 +68,8 @@ def test_publishes_who_drives(node):
 
 def test_repeats_only_on_change_from_messages(node):
     release(node)
-    node.on_input("web", Twist())
-    node.on_input("web", Twist())
+    node.on_input("web", TwistStamped())
+    node.on_input("web", TwistStamped())
     assert node.sent == ["web"]
 
 

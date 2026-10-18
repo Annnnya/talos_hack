@@ -17,7 +17,7 @@ from functools import partial
 from typing import Any
 
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -71,7 +71,7 @@ class MuxStatusNode(Node):
 
         for entry in inputs:
             self.create_subscription(
-                Twist,
+                TwistStamped,
                 entry.topic,
                 partial(self.on_input, entry.name),
                 QUEUE_DEPTH,
@@ -103,7 +103,7 @@ class MuxStatusNode(Node):
     def now_s(self) -> float:
         return self.get_clock().now().nanoseconds / NANOSECONDS_PER_SECOND
 
-    def on_input(self, name: str, _msg: Twist) -> None:
+    def on_input(self, name: str, _msg: TwistStamped) -> None:
         self.state.on_input(name, self.now_s())
         self.publish_active(only_on_change=True)
 

@@ -1,7 +1,7 @@
 """ROS 2 node that owns the robot: the only program on the servo serial port.
 
-- `/cmd_vel` (geometry_msgs/Twist, in): drive the mecanum base. Stops unless
-  repeated within `command_timeout_s` from the config
+- `/cmd_vel` (geometry_msgs/TwistStamped, in): drive the mecanum base. Stops
+  unless repeated within `command_timeout_s` from the config
 - `/odom` (nav_msgs/Odometry): wheel odometry in frame `odom`, child
   `base_link`, no TF (the EKF publishes odom -> base_link)
 - `/joint_states` (sensor_msgs/JointState): position rad, velocity rad/s, effort
@@ -30,7 +30,7 @@ from collections.abc import Callable, Sequence
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import Quaternion, Twist
+from geometry_msgs.msg import Quaternion, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -109,7 +109,7 @@ class RobotNode(Node):
         )
         self.readouts = JointReadoutPublishers(self, "~", robot.joints)
         self.create_subscription(
-            Twist, CMD_VEL_TOPIC, self.on_cmd_vel, QUEUE_DEPTH
+            TwistStamped, CMD_VEL_TOPIC, self.on_cmd_vel, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, "~/position_cmd", self.on_position_cmd, QUEUE_DEPTH
@@ -227,10 +227,13 @@ class RobotNode(Node):
         return msg
 
     # --- commands --------------------------------------------------------
-    def on_cmd_vel(self, msg: Twist) -> None:
+    def on_cmd_vel(self, msg: TwistStamped) -> None:
+        twist = msg.twist
         self._safely(
             "cmd_vel",
-            lambda: self.robot.drive(msg.linear.x, msg.linear.y, msg.angular.z),
+            lambda: self.robot.drive(
+                twist.linear.x, twist.linear.y, twist.angular.z
+            ),
         )
 
     def on_position_cmd(self, msg: JointState) -> None:

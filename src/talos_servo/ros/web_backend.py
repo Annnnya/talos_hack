@@ -30,7 +30,7 @@ from typing import Any
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
@@ -63,7 +63,7 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
-from talos_servo.ros.robot_node import CMD_VEL_TOPIC
+from talos_servo.ros.robot_node import BASE_FRAME, CMD_VEL_TOPIC
 from talos_servo.ros.web_client_node import WebClientNode
 
 log = logging.getLogger(__name__)
@@ -425,10 +425,10 @@ class RosBackend:
         source: str = SOURCE_WEB,
         client: str | None = None,
     ) -> None:
-        """Publish one Twist (m/s, m/s, rad/s) on `cmd_vel_topic`, clamped
+        """Publish one twist (m/s, m/s, rad/s) on `cmd_vel_topic`, clamped
         to the base limits.
 
-        The robot stops unless this is repeated, so call it in a loop. A Twist
+        The robot stops unless this is repeated, so call it in a loop. A twist
         carries no sender, so `source` and `client` are not sent.
         """
         base = self.config.base
@@ -507,7 +507,7 @@ class RosBackend:
     def stop_own(
         self, *, source: str = SOURCE_WEB, client: str | None = None
     ) -> None:
-        """Stop only what this backend commanded: one zero Twist on its drive
+        """Stop only what this backend commanded: one zero twist on its drive
         topic and zero speed for the joints it spins. Never raises.
 
         Unlike `stop_all` it leaves the robot node's `stop_all` alone, so
@@ -535,13 +535,17 @@ class RosBackend:
     def _publish_twist(
         self, linear_x: float, linear_y: float, angular_z: float
     ) -> None:
-        msg = Twist()
-        msg.linear.x, msg.linear.y, msg.angular.z = (
+        node = self._require_node()
+        msg = TwistStamped()
+        msg.header.stamp = node.get_clock().now().to_msg()
+        msg.header.frame_id = BASE_FRAME
+        twist = msg.twist
+        twist.linear.x, twist.linear.y, twist.angular.z = (
             linear_x,
             linear_y,
             angular_z,
         )
-        self._require_node().cmd_vel_pub.publish(msg)
+        node.cmd_vel_pub.publish(msg)
 
     def _record(self, j: Joint, source: str, client: str | None) -> None:
         """Note a command we are about to send.
