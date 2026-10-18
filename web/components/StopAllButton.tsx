@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 
-/** Big emergency stop. Also triggered by the Space key (unless typing in a field). */
-export default function StopAllButton({ onStop, disabled }: { onStop: () => void; disabled?: boolean }) {
+/** Space calls `onStop` (unless typing in a field). */
+export function useStopKey(onStop: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -15,6 +15,11 @@ export default function StopAllButton({ onStop, disabled }: { onStop: () => void
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onStop]);
+}
+
+/** Big emergency stop. Also triggered by the Space key (unless typing in a field). */
+export default function StopAllButton({ onStop, disabled }: { onStop: () => void; disabled?: boolean }) {
+  useStopKey(onStop);
 
   return (
     <button
