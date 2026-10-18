@@ -35,6 +35,7 @@ from talos_servo.mecanum import (
     wheel_accelerations,
     wheel_speeds,
 )
+from talos_servo.modes import RobotStatus
 
 log = logging.getLogger(__name__)
 
@@ -355,6 +356,17 @@ class Robot:
         self, *, source: str = SOURCE_WEB, client: str | None = None
     ) -> None:
         raise CommandError("releasing STOP needs `talos-servo web --ros`")
+
+    def robot_status(self) -> RobotStatus:
+        """No mode node or twist_mux on the direct bus, so nothing to
+        report."""
+        return RobotStatus(None, None, None)
+
+    def wall_nearby(self) -> None:
+        raise CommandError("wall nearby needs `talos-servo web --ros`")
+
+    def release_walls(self) -> None:
+        raise CommandError("release needs `talos-servo web --ros`")
 
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:

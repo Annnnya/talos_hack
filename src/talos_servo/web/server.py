@@ -22,6 +22,7 @@ from talos_servo.bus import (
     ServoError,
 )
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, WEB_CMD_VEL_TOPIC
+from talos_servo.modes import Mode
 from talos_servo.robot import SOURCE_WEB, CommandError, clamp
 from talos_servo.web.backend import RobotBackend
 
@@ -96,6 +97,8 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
 # Client messages that change nothing the UI shows. The browser re-sends drive
 # while a button is held, so a state broadcast per message would flood it.
 QUIET_COMMANDS = frozenset({"drive"})
+# Client messages that ask the mode node for a mode change -> backend method.
+MODE_COMMANDS = {"wall_nearby": "wall_nearby", "release": "release_walls"}
 
 
 def _finite(msg: dict[str, Any], key: str) -> float:
@@ -130,7 +133,15 @@ def _dispatch(
         if not ros:
             raise CommandError("driving the base needs `talos-servo web --ros`")
         vx, vy, wz = (_finite(msg, k) for k in ("vx", "vy", "wz"))
+        # The robot cannot turn on the walls; the climb controller also
+        # rejects it (#80).
+        if wz and controller.robot_status().mode == Mode.CLIMBING.value:
+            raise CommandError("cannot rotate while climbing")
         return lambda: controller.drive(vx, vy, wz, **who)
+    if kind in MODE_COMMANDS:
+        if not ros:
+            raise CommandError(f"{kind} needs `talos-servo web --ros`")
+        return getattr(controller, MODE_COMMANDS[kind])
     joint = str(msg["joint"])
     acc = int(msg.get("acc", DEFAULT_ACCELERATION))
     if kind == "stop":
@@ -175,6 +186,7 @@ def create_app(
     }
 
     def state() -> dict[str, Any]:
+        status = controller.robot_status()
         return {
             "type": "state",
             "ros": ros,
@@ -183,6 +195,11 @@ def create_app(
             "servos": controller.snapshot(),
             # True while STOP locks twist_mux; None without ROS.
             "stopped": controller.stopped(),
+            # From the mode node and mux_status; None until heard or
+            # without ROS.
+            "mode": status.mode,
+            "mode_reason": status.mode_reason,
+            "active_input": status.active_input,
         }
 
     async def control_loop() -> None:
