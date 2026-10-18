@@ -73,7 +73,8 @@ ros-jazzy-xacro = "*"
 # the hardware bridge), mode node, twist_mux, mux_status and the web UI. Opt
 # in to more with camera:=true imu:=true, pass port:=/dev/ttyACM0 without
 # $TALOS_SERVO_PORT, and ros2_control:=false for the old robot node (needed by
-# the /debug page). See launch/robot.launch.py
+# the /debug page). viz:=true for the live robot in RViz (view-live). See
+# launch/robot.launch.py
 robot = "ros2 launch launch/robot.launch.py"
 # The only program on the servo port; everything else goes through it
 robot-node = "talos-robot-ros"
@@ -124,6 +125,9 @@ ros-jazzy-compressed-image-transport = "*"
 
 [feature.viz.tasks]
 view-model = "ros2 launch launch/view_model.launch.py"
+# The live robot from `robot viz:=true` on the Pi (#127): the model follows
+# the servos and moves in the odom frame. Same ROS_DOMAIN_ID as the Pi
+view-live = "rviz2 -d description/view_live.rviz"
 
 [environments]
 ros = ["ros"]

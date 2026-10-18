@@ -146,3 +146,11 @@ def test_control_nodes_build_from_the_robot_config():
     config = str(ROOT / "config" / "robot.yaml")
     # robot_state_publisher, controller_manager and one spawner each.
     assert len(control_nodes(ROOT, config)) == 2 + len(spawned(config))
+
+
+def test_live_rviz_watches_the_ekf_frame():
+    yaml = pytest.importorskip("yaml")
+    ekf = yaml.safe_load((ROOT / "config" / "ekf.yaml").read_text())
+    rviz = yaml.safe_load((ROOT / "description" / "view_live.rviz").read_text())
+    fixed = rviz["Visualization Manager"]["Global Options"]["Fixed Frame"]
+    assert fixed == ekf["/**"]["ros__parameters"]["odom_frame"]
