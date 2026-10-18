@@ -172,12 +172,12 @@ def test_action_key_does_not_keep_a_held_key_going():
 @pytest.mark.parametrize(
     ("mode", "keys"),
     [
-        ("free", set("wsadqe")),
+        ("free", set("wsadqerf")),
         ("climbing", set("wsad")),
         ("aligning", set()),
-        ("clamping", set()),
-        (None, set("wsadqe")),
-        ("unheard of", set("wsadqe")),
+        ("clamping", set("rf")),
+        (None, set("wsadqerf")),
+        ("unheard of", set("wsadqerf")),
     ],
 )
 def test_allowed_keys_per_mode(mode, keys):
@@ -247,3 +247,75 @@ def test_terminal_keys_need_a_terminal(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
     with pytest.raises(RuntimeError), teleop.terminal_keys():
         pass
+
+
+HINGE_RATE = 0.15
+OPEN = HINGE_RATE
+CLOSE = -HINGE_RATE
+
+
+def hinge_with(
+    keys: list[str | None], **kwargs: Any
+) -> tuple[list[float], list[tuple[float, float, float]]]:
+    """Hinge rates and drive commands sent for scripted keys."""
+    rates: list[float] = []
+    sent = drive_with(keys, hinge=rates.append, hinge_rate=HINGE_RATE, **kwargs)
+    return rates, sent
+
+
+def test_held_r_opens_the_hinge_every_loop():
+    rates, sent = hinge_with(["r", "r", "r", "x"])
+    assert rates == [OPEN, OPEN, OPEN, 0.0]
+    assert sent == []
+
+
+def test_f_closes_the_hinge():
+    rates, _ = hinge_with(["f", "x"])
+    assert rates == [CLOSE, 0.0]
+
+
+def test_letting_go_stops_the_hinge_once():
+    quiet = [None] * (round(teleop.KEY_TIMEOUT_S / teleop.LOOP_PERIOD_S) + 3)
+    rates, _ = hinge_with(["r", *quiet, "x"])
+    assert rates[-1] == 0.0
+    assert rates.count(0.0) == 1
+    assert set(rates[:-1]) == {OPEN}
+
+
+def test_space_stops_the_hinge():
+    rates, _ = hinge_with(["r", " ", None, "x"])
+    assert rates == [OPEN, 0.0]
+
+
+def test_ctrl_c_stops_the_hinge():
+    rates, _ = hinge_with(["r"])
+    assert rates == [OPEN, 0.0]
+
+
+def test_drive_key_stops_the_hinge_and_r_stops_the_drive():
+    rates, sent = hinge_with(["r", "w", "r", "x"])
+    assert rates == [OPEN, 0.0, OPEN, 0.0]
+    assert sent == [FORWARD, teleop.STOPPED]
+
+
+@pytest.mark.parametrize("mode", ["aligning", "climbing"])
+def test_hinge_keys_do_nothing_outside_free_and_clamping(mode):
+    allowed = lambda: teleop.allowed_keys(mode)  # noqa: E731
+    rates, _ = hinge_with(["r", "f", "x"], allowed=allowed)
+    assert rates == []
+
+
+def test_hinge_keys_work_while_clamping():
+    allowed = lambda: teleop.allowed_keys("clamping")  # noqa: E731
+    rates, sent = hinge_with(["r", "w", "x"], allowed=allowed)
+    assert rates == [OPEN, 0.0]
+    assert sent == []
+
+
+def test_hinge_keys_without_a_hinge_only_stop_the_drive():
+    assert drive_with(["w", "r", "x"]) == [FORWARD, teleop.STOPPED]
+
+
+def test_ros_help_names_the_hinge_keys():
+    assert "R/F" in teleop.ROS_HELP
+    assert "R/F" not in teleop.HELP
