@@ -10,7 +10,11 @@ import yaml
 from conftest import BASE, FakeClock
 from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MOVING
 
-from talos_servo.bend_calibration import BendCalibration, load_calibration
+from talos_servo.bend_calibration import (
+    BendCalibration,
+    CalibrationError,
+    load_calibration,
+)
 from talos_servo.bend_calibrator import (
     CALIBRATION_SPEED,
     FOLD,
@@ -92,8 +96,8 @@ def test_jog_moves_slowly_by_one_step(calibrator, sdk):
     calibrator.start()
     calibrator.jog(OPEN)
     assert moves(sdk)[-1][1:4] == (BEND_ID, START + 11, CALIBRATION_SPEED)
-    calibrator.jog(FOLD)
-    assert moves(sdk)[-1][2] == START
+    calibrator.jog(FOLD)  # reversing starts from the hinge
+    assert moves(sdk)[-1][2] == START - 11
 
 
 def test_jog_goal_stays_close_to_the_hinge(calibrator, sdk):
@@ -250,14 +254,58 @@ def test_jog_never_moves_the_other_way(calibrator, sdk):
     assert moves(sdk)[-1][2] == 3811
 
 
-def test_save_refuses_when_the_hinge_servo_changed(
-    calibrator, sdk, robot, paths
-):
+def test_save_refuses_when_the_hinge_servo_changed(sdk, robot, paths):
+    # robot.yaml changed between robot start and calibrator start.
     data = robot_data()
     data["joints"]["bend"]["id"] = 9
     paths[0].write_text(yaml.safe_dump(data), "utf-8")
+    calibrator = BendCalibrator(
+        robot, config_path=paths[0], calibration=paths[1]
+    )
     record(calibrator, sdk, 4050, 3050)
     with pytest.raises(CommandError, match="restart the robot"):
         calibrator.save()
     assert not paths[1].exists()
     assert robot.config.hinge.flat_steps == FLAT
+
+
+def test_save_ignores_robot_yaml_edits_since_start(
+    calibrator, sdk, robot, paths
+):
+    data = robot_data()
+    data["joints"]["bend"]["id"] = 9
+    data["model"]["bend_max_deg"] = 170
+    data["max_speed"] = 1
+    paths[0].write_text(yaml.safe_dump(data), "utf-8")
+    record(calibrator, sdk, 4050, 3050)
+    calibrator.save()
+    assert robot.config.hinge.flat_steps == 4050
+    assert robot.config.model.bend_max_deg == 180
+    assert robot.config.max_speed != 1
+    bend = next(j for j in robot.config.joints if j.name == "bend")
+    assert bend.id == BEND_ID
+
+
+def test_unwritable_calibration_fails_without_applying(
+    sdk, robot, paths, tmp_path
+):
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("", "utf-8")
+    calibrator = BendCalibrator(
+        robot, config_path=paths[0], calibration=blocker / "cal.yaml"
+    )
+    record(calibrator, sdk, 4050, 3050)
+    with pytest.raises(CalibrationError, match="could not write"):
+        calibrator.save()
+    assert calibrator.active
+    assert robot.config.hinge.flat_steps == FLAT
+
+
+def test_reversing_after_a_stall_moves_the_other_way(calibrator, sdk):
+    # Folding into the wheels: the hinge stalls while the goal runs ahead.
+    calibrator.start()
+    for _ in range(5):
+        calibrator.jog(FOLD)
+    assert moves(sdk)[-1][2] == START - JOG_LEAD * 11
+    calibrator.jog(OPEN)
+    assert moves(sdk)[-1][2] == START + 11

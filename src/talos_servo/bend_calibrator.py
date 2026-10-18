@@ -67,6 +67,9 @@ class BendCalibrator:
         self.path = calibration_path(config_path, calibration)
         self._source = source
         self._clock = clock or robot.clock
+        # robot.yaml as it was at start. Save applies the calibration to
+        # this, so later edits to the file never reach the running robot.
+        self._data = read_config_data(self.config_path)
         joint = _joint_config(robot.config, self.joint)
         self._id, self._inverted = joint.id, joint.inverted
         self.jog_steps = max(
@@ -102,10 +105,15 @@ class BendCalibrator:
         position, _ = self.robot.read_position(self.joint)
         lead = JOG_LEAD * self.jog_steps
         # Go on from the last goal while the hinge keeps up with it. A goal
-        # far from the hinge (pushed by hand, stalled) restarts from the
-        # hinge, so a key never moves it the other way.
+        # far from the hinge (pushed by hand) or on the other side of it
+        # (stalled against a stop, then reversed) restarts from the hinge,
+        # so a key never moves it the other way.
         base = self._target
-        if base is None or abs(base - position) > lead:
+        if (
+            base is None
+            or abs(base - position) > lead
+            or (base - position) * direction < 0
+        ):
             base = position
         target = clamp(
             base + direction * self.jog_steps,
@@ -141,8 +149,9 @@ class BendCalibrator:
         if self._flat is None or self._fold is None:
             raise CommandError("record flat and max fold before saving")
         cal = BendCalibration(self._flat, self._fold)
-        new = parse_config(read_config_data(self.config_path), cal)
-        assert new.model is not None and new.hinge is not None
+        new = parse_config(self._data, cal)
+        if new.model is None or new.hinge is None:
+            raise CommandError(f"{self.config_path} has no hinge model")
         joint = _joint_config(new, self.joint)
         if (joint.id, joint.inverted) != (self._id, self._inverted):
             # The points were measured with the servo the robot started
@@ -226,4 +235,7 @@ def _point(raw: int | None) -> str:
 
 
 def _joint_config(config: RobotConfig, name: str) -> JointConfig:
-    return next(j for j in config.joints if j.name == name)
+    joint = next((j for j in config.joints if j.name == name), None)
+    if joint is None:
+        raise CommandError(f"no joint {name} in the robot config")
+    return joint
