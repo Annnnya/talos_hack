@@ -96,23 +96,29 @@ Checked in the plugin source (0.3.0):
   `talos_servo.model.alpha_per_servo_rad` (1:1 today) and clamps goals to
   `model.bend_min_deg`..`bend_max_deg`. There is no `<transmission>`: the
   plugin ignores them.
-- **Flat position:** `model.bend_flat_steps` in `config/robot.yaml`, written
-  by the calibration (#84). Without it the hinge counts as flat wherever it
-  is when the bridge starts, so start it flat. If the servo is offline at
-  start, `bend` reads pi and its goals are dropped (logged) until it
-  answers.
+- **Flat position:** `model.bend_flat_steps` in `config/robot.yaml`, the
+  raw servo position when the robot lies flat (4095). It is fixed by
+  aligning the servo horn to the leg, so the servo's absolute position is
+  the hinge angle and nothing is measured at startup. It is required while
+  `bend` is enabled, and `joints.bend` `min_pos`/`max_pos` are narrowed on
+  load to the `bend_min_deg`..`bend_max_deg` range, so every move is
+  clamped to it (robot node, `/debug` and the bridge alike).
+- **Unknown angle:** while the servo is offline, or reads more than 64
+  steps outside the hinge range (a wrap past flat), `bend` reports NaN
+  position and velocity and logs an error.
 - **No wrap:** position mode covers one servo turn and never crosses
   4095 -> 0, so there are no turns to count. The range from flat down to max
   fold must fit inside 0..4095; the config check and the bridge refuse a
   flat position where it does not. Fix that by turning the servo horn, not
   with an EEPROM offset.
-- **Startup:** the plugin takes the position state `initial_value` (pi) as
-  the first command and sends it until a controller writes a goal, even
-  when no controller claims `bend`. The bridge ignores goals equal to a
-  position joint's initial value (pi for the hinge, 0.0 for others) until
-  the first different goal, then follows every goal. So starting the stack
-  never moves the hinge. A NaN position means no goal and never blocks the
-  wheel velocities in the same message.
+- **Startup:** the plugin repeats the last goal of a position joint: the
+  position state `initial_value` (pi) until a controller writes one, even
+  when no controller claims `bend`, or the controller's last goal when only
+  the bridge restarts. The bridge ignores the first goal each position
+  joint gets and every repeat of it, then follows every goal from the first
+  different one. So starting or restarting the bridge never moves the
+  hinge; send a new goal to move it. A NaN position means no goal and never
+  blocks the wheel velocities in the same message.
 - **Current and load:** `/dynamic_joint_states` shows position, velocity
   and effort only. Effort is the present current (A). Load stays on
   `/hardware_bridge/<joint>/load`.

@@ -115,7 +115,7 @@ ros2 topic pub --once /bend_position_controller/commands \
 ros2 topic echo /dynamic_joint_states                 # effort = current
 ```
 
-Start it with the hinge flat unless `model.bend_flat_steps` is calibrated.
+The hinge does not move at startup: send a new goal to move it.
 
 ### Robot model (#64)
 
@@ -135,8 +135,8 @@ the platform stays level. The wheelbase is `2 * l * sin(bend / 2)`
 
 The `<ros2_control>` block drives the four wheels and the hinge. The
 hardware bridge turns the opening angle into servo steps
-(`talos_servo.hinge`) from the flat servo position: `model.bend_flat_steps`
-once calibrated (#84), otherwise where the hinge was at startup.
+(`talos_servo.hinge`) from the fixed flat servo position
+`model.bend_flat_steps` (the horn is aligned to the leg).
 
 View it in RViz2 (needs a display; installs RViz only in the `viz`
 environment, not on the Pi; works on Linux and Windows):
@@ -230,8 +230,9 @@ base:
 - **Find the `inverted` values:** lift the wheels, run `talos-servo drive`,
   press W, and set `inverted: true` on any wheel that turns backwards.
 - **bend:** folding must lower its position; set `inverted: true` if it
-  folds the other way. Its topics appear under `/robot/bend/`. Real
-  `min_pos`/`max_pos` come with the calibration (#84).
+  folds the other way. Its topics appear under `/robot/bend/`. Its
+  `min_pos`/`max_pos` are narrowed on load to the `model` bend range from
+  `model.bend_flat_steps`, which is required while it is enabled.
 
 ## ROS topics
 
