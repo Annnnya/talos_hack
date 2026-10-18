@@ -25,8 +25,21 @@ from rclpy.callback_groups import ReentrantCallbackGroup  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
-from std_msgs.msg import String  # noqa: E402
-from std_srvs.srv import Trigger  # noqa: E402
+from rclpy.qos import (  # noqa: E402
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
+from std_msgs.msg import Bool, String  # noqa: E402
+from std_srvs.srv import SetBool, Trigger  # noqa: E402
+from test_twist_mux_config import (  # noqa: E402
+    MUX_CONFIG,
+    flatten,
+)
+from test_twist_mux_config import (  # noqa: E402
+    STOP_LOCK_PERIOD_S as CONFIG_TEST_PERIOD_S,
+)
 
 from talos_servo.config import ModesConfig  # noqa: E402
 from talos_servo.modes import Event, Mode  # noqa: E402
@@ -35,7 +48,16 @@ from talos_servo.ros.mode_node import (  # noqa: E402
     MODE_REASON_TOPIC,
     MODE_TOPIC,
     RECONCILE_PERIOD_S,
+    STOP_LOCK_PERIOD_S,
+    STOP_LOCK_TOPIC,
     ModeNode,
+)
+from talos_servo.ros.mux_status import (  # noqa: E402
+    LOCKED,
+    LOCKS_PREFIX,
+    TOPICS_PREFIX,
+    MuxState,
+    parse_entries,
 )
 
 MODES = ModesConfig(
@@ -51,6 +73,14 @@ WAIT = 3.0
 # Discovery plus a few reconcile rounds.
 RECONCILE_WAIT = WAIT + 3 * RECONCILE_PERIOD_S
 _names = iter(range(1_000_000))
+# What twist_mux 4.5.0 subscribes to locks with: a restarted mux gets no old
+# message, only new ones.
+TWIST_MUX_LOCK_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    durability=DurabilityPolicy.VOLATILE,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -319,3 +349,118 @@ def test_mode_and_reason_are_latched_for_late_subscribers(node, executor):
         assert reasons[-1] == "tilt fault"
     finally:
         remove(executor, listener)
+
+
+class StopLockListener:
+    """Stands in for twist_mux: records stop lock beats from now on."""
+
+    def __init__(self, executor) -> None:
+        self.executor = executor
+        self.node = Node(f"stop_listener_{next(_names)}")
+        self.beats: list[tuple[float, bool]] = []
+        self.node.create_subscription(
+            Bool, STOP_LOCK_TOPIC, self.on_beat, TWIST_MUX_LOCK_QOS
+        )
+        executor.add_node(self.node)
+
+    def on_beat(self, msg: Bool) -> None:
+        self.beats.append((time.monotonic(), bool(msg.data)))
+
+    def last(self) -> bool | None:
+        return self.beats[-1][1] if self.beats else None
+
+    def close(self) -> None:
+        remove(self.executor, self.node)
+
+
+@pytest.fixture
+def listener(executor):
+    stop_listener = StopLockListener(executor)
+    yield stop_listener
+    stop_listener.close()
+
+
+def set_stop(node: ModeNode, stopped: bool) -> SetBool.Response:
+    return node.on_set_stop(SetBool.Request(data=stopped), SetBool.Response())
+
+
+def real_mux() -> MuxState:
+    yaml = pytest.importorskip("yaml")
+    data = yaml.safe_load(MUX_CONFIG.read_text())
+    params = flatten(data["/**"]["ros__parameters"])
+    return MuxState(
+        parse_entries(params, TOPICS_PREFIX),
+        parse_entries(params, LOCKS_PREFIX),
+    )
+
+
+def test_stop_lock_period_matches_the_config_test():
+    assert STOP_LOCK_PERIOD_S == CONFIG_TEST_PERIOD_S
+
+
+def test_stop_starts_on(lonely_node, listener):
+    assert lonely_node.stopped
+    wait_for(lambda: listener.beats, WAIT)
+    assert all(data for _, data in listener.beats)
+
+
+def test_set_stop_releases_and_stops_again(lonely_node, listener):
+    response = set_stop(lonely_node, False)
+    assert (response.success, response.message) == (True, "released")
+    wait_for(lambda: listener.last() is False, WAIT)
+    response = set_stop(lonely_node, True)
+    assert (response.success, response.message) == (True, "stopped")
+    wait_for(lambda: listener.last() is True, WAIT)
+    # STOP is not a mode change.
+    assert lonely_node.mode is Mode.FREE
+
+
+def test_stop_lock_keeps_beating(lonely_node, listener):
+    wait_for(lambda: listener.beats, WAIT)
+    window = 5 * STOP_LOCK_PERIOD_S
+    start = time.monotonic()
+    time.sleep(window)
+    beats = [t for t, _ in listener.beats if t >= start]
+    # Leaves room for a slow CI machine; twist_mux only needs one per 0.5 s.
+    assert len(beats) >= 2
+
+
+def test_restarted_twist_mux_is_locked_again(lonely_node, executor):
+    # STOP goes on while the first twist_mux runs.
+    first = StopLockListener(executor)
+    try:
+        set_stop(lonely_node, False)
+        wait_for(lambda: first.last() is False, WAIT)
+        set_stop(lonely_node, True)
+        wait_for(lambda: first.last() is True, WAIT)
+    finally:
+        first.close()
+    # A fresh subscriber with twist_mux's QoS gets no old message, but the
+    # next beats lock it.
+    restarted = StopLockListener(executor)
+    try:
+        wait_for(lambda: len(restarted.beats) >= 2, WAIT)
+        assert all(data for _, data in restarted.beats)
+        # mux_status, fed the same beats while the web keeps sending,
+        # reports locked.
+        mux = real_mux()
+        for stamp, data in restarted.beats:
+            mux.on_lock("stop", data, stamp)
+            mux.on_input("web", stamp)
+        assert mux.active(restarted.beats[-1][0]) == LOCKED
+    finally:
+        restarted.close()
+
+
+def test_stop_does_not_wait_for_a_controller_switch(node, cm, listener):
+    cm.delay_s = MODES.switch_timeout_s * 2
+    switching = threading.Thread(target=call, args=(node.on_wall_nearby,))
+    switching.start()
+    try:
+        wait_for(lambda: not cm.idle.is_set(), WAIT)
+        start = time.monotonic()
+        set_stop(node, False)
+        assert time.monotonic() - start < MODES.switch_timeout_s
+        wait_for(lambda: listener.last() is False, WAIT)
+    finally:
+        switching.join(WAIT)

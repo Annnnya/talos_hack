@@ -20,6 +20,10 @@ from talos_servo.ros.mux_status import (  # noqa: E402
 )
 
 MUX_CONFIG = Path(__file__).resolve().parents[1] / "config" / "twist_mux.yaml"
+# The mode node's beat period, kept here so this test runs without ROS.
+# test_mode_node.py checks it matches the node.
+STOP_LOCK_PERIOD_S = 0.1
+MIN_BEATS_PER_TIMEOUT = 3
 # Long enough to ride out jitter between key repeats or web messages, short
 # enough that a quiet input hands over to the other one quickly.
 MAX_INPUT_TIMEOUT_S = 1.0
@@ -88,9 +92,16 @@ def test_stop_lock_masks_every_input(inputs, locks):
     assert all(stop.priority > e.priority for e in inputs.values())
 
 
-def test_stop_lock_holds_until_released(locks):
-    # With a timeout the lock would also turn on whenever nobody publishes.
-    assert locks["stop"].timeout_s == 0
+def test_stop_lock_turns_on_when_quiet(locks):
+    # Timeout 0 would keep STOP only in twist_mux's memory, lost on a
+    # restart (#103). With a timeout a quiet lock counts as on.
+    assert locks["stop"].timeout_s > 0
+
+
+def test_mode_node_beats_well_within_the_stop_lock_timeout(locks):
+    # Missing a couple of beats must not lock the base by mistake.
+    timeout_s = locks["stop"].timeout_s
+    assert timeout_s >= STOP_LOCK_PERIOD_S * MIN_BEATS_PER_TIMEOUT
 
 
 def test_status_node_settings(data):

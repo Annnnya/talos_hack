@@ -46,7 +46,22 @@ def test_reads_inputs_and_lock_from_the_params_file(node):
     assert node.state.locks["stop"].topic == "/robot/stop_lock"
 
 
+def release(node) -> None:
+    """A STOP released beat from the mode node, then forget what was sent."""
+    node.on_lock("stop", Bool(data=False))
+    node.sent.clear()
+
+
+def test_locked_until_the_mode_node_beats(node):
+    # The stop lock has a timeout, so it is on before its first message.
+    node.publish_active()
+    assert node.sent == [LOCKED]
+    node.on_lock("stop", Bool(data=False))
+    assert node.sent == [LOCKED, NONE]
+
+
 def test_publishes_who_drives(node):
+    release(node)
     node.on_input("web", Twist())
     node.on_input("keyboard", Twist())
     node.on_lock("stop", Bool(data=True))
@@ -55,12 +70,14 @@ def test_publishes_who_drives(node):
 
 
 def test_repeats_only_on_change_from_messages(node):
+    release(node)
     node.on_input("web", Twist())
     node.on_input("web", Twist())
     assert node.sent == ["web"]
 
 
 def test_timer_republishes(node):
+    release(node)
     node.publish_active()
     assert node.sent == [NONE]
 
