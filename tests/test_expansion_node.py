@@ -1,4 +1,5 @@
-"""Expansion node (#76): rate in, hinge goals and wheel speeds out.
+"""Expansion node (#76): rate in, hinge goals and wheel speeds out, and the
+automatic clamp in clamping mode (#78).
 
 The node is never spun: tests feed its callbacks and call `tick` with a fake
 clock. Skipped where ROS is missing; conftest.py keeps it on a private ROS
@@ -27,8 +28,9 @@ from std_msgs.msg import (  # noqa: E402
     Float64MultiArray,
     String,
 )
-from std_srvs.srv import SetBool  # noqa: E402
+from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
+from talos_servo.clamp import Outcome  # noqa: E402
 from talos_servo.config import load_config  # noqa: E402
 from talos_servo.expansion import STILL  # noqa: E402
 from talos_servo.ros.expansion_node import ExpansionNode  # noqa: E402
@@ -73,6 +75,19 @@ class Recorder:
             node.hinge_motion_client, "service_is_ready", lambda: self.ready
         )
         monkeypatch.setattr(node, "call_hinge_motion", self.call)
+        self.told: list[Outcome] = []
+        self.tell_ok = True
+        for client in node.clamp_clients.values():
+            monkeypatch.setattr(client, "service_is_ready", lambda: self.ready)
+        monkeypatch.setattr(node, "call_clamp_service", self.tell)
+
+    def tell(self, outcome: Outcome) -> Future:
+        self.told.append(outcome)
+        future = Future()
+        future.set_result(
+            Trigger.Response(success=self.tell_ok, message="test")
+        )
+        return future
 
     def call(self, wanted: bool) -> Future:
         self.calls.append(wanted)
@@ -115,10 +130,28 @@ def ready(node: ExpansionNode, mode: str = "clamping") -> None:
     joint_state(node, ALPHA)
 
 
-def joint_state(node: ExpansionNode, alpha: float) -> None:
+def joint_state(
+    node: ExpansionNode, alpha: float, bend_a: float = 0.0, wheel_a: float = 0.0
+) -> None:
     node.on_joint_state(
-        JointState(name=["front_left_wheel", "bend"], position=[0.0, alpha])
+        JointState(
+            name=["front_left_wheel", "bend"],
+            position=[0.0, alpha],
+            effort=[wheel_a, bend_a],
+        )
     )
+
+
+def touch(node: ExpansionNode, clock: FakeClock, bend_a: float) -> None:
+    """Tick past the grace and hold times with the hinge drawing `bend_a`."""
+    settings = node.settings
+    end = clock.now + settings.contact_grace_s + settings.contact_hold_s + 0.1
+    node.tick()
+    while clock.now < end:
+        clock.now += node.period_s
+        node.on_stop_lock(Bool(data=False))
+        joint_state(node, ALPHA, bend_a=bend_a)
+        node.tick()
 
 
 def test_reads_the_hinge_angle(node):
@@ -137,8 +170,22 @@ def test_rate_moves_the_hinge_and_turns_the_wheels(node, out):
     assert out.calls == []
 
 
+def test_reads_the_motor_currents(node):
+    joint_state(node, ALPHA, bend_a=-0.4, wheel_a=0.2)
+    assert node.currents == {
+        "bend": pytest.approx(-0.4),
+        "front_left_wheel": pytest.approx(0.2),
+    }
+
+
+def test_no_effort_drops_the_currents(node):
+    joint_state(node, ALPHA, bend_a=2.0)
+    node.on_joint_state(JointState(name=["bend"], position=[ALPHA]))
+    assert node.currents == {}
+
+
 def test_no_rate_sends_nothing(node, out):
-    ready(node)
+    ready(node, "free")
     node.tick()
     assert (out.goals, out.wheels) == ([], [])
 
@@ -309,3 +356,103 @@ def test_rate_reaches_the_wheels_through_the_mode_node():
         thread.join(2.0)
         for each in (mode, expansion, helper):
             each.destroy_node()
+
+
+def test_clamping_opens_by_itself(node, out):
+    ready(node)
+    node.tick()
+    rate = node.settings.clamp_rate_rad_s
+    assert out.goals == [pytest.approx(ALPHA + rate * node.period_s)]
+    (wheels,) = out.wheels
+    assert wheels[0] > 0 > wheels[2]
+
+
+def test_wall_contact_stops_and_tells_the_mode_node(node, out, clock):
+    ready(node)
+    touch(node, clock, bend_a=node.settings.hinge_contact_current_a + 0.5)
+    assert node.clamp.outcome is Outcome.CONTACT
+    assert out.wheels[-1] == STILL
+    assert out.goals[-1] == pytest.approx(ALPHA)
+    goals = len(out.goals)
+    node.tick()
+    node.tick()
+    assert out.told == [Outcome.CONTACT]
+    assert len(out.goals) == goals
+
+
+def test_low_current_keeps_opening(node, out, clock):
+    ready(node)
+    touch(node, clock, bend_a=node.settings.hinge_contact_current_a / 2)
+    assert node.clamp.outcome is Outcome.OPENING
+    assert out.told == []
+    assert out.wheels[-1] != STILL
+
+
+def test_fully_open_tells_no_wall(node, out):
+    ready(node)
+    joint_state(node, math.pi)
+    node.tick()
+    node.tick()
+    assert out.told == [Outcome.NO_WALL]
+    assert node.mode is not None and node.mode.value == "clamping"
+    assert out.wheels in ([], [STILL])
+
+
+def test_refused_report_is_asked_again_later(node, out, clock):
+    ready(node)
+    out.tell_ok = False
+    joint_state(node, math.pi)
+    node.tick()
+    node.tick()
+    assert out.told == [Outcome.NO_WALL]
+    clock.now += 1.5
+    node.on_stop_lock(Bool(data=False))
+    node.tick()
+    assert out.told == [Outcome.NO_WALL, Outcome.NO_WALL]
+
+
+def test_stop_pauses_the_clamp(node, out):
+    ready(node)
+    node.tick()
+    node.on_stop_lock(Bool(data=True))
+    node.tick()
+    assert out.wheels[-1] == STILL
+    goals = len(out.goals)
+    node.tick()
+    assert len(out.goals) == goals
+    node.on_stop_lock(Bool(data=False))
+    node.tick()
+    assert len(out.goals) == goals + 1
+    assert out.wheels[-1] != STILL
+
+
+def test_manual_rate_cancels_the_clamp(node, out):
+    ready(node)
+    node.tick()
+    node.on_rate(Float64(data=-RATE))
+    assert node.clamp is None
+    node.tick()
+    assert out.wheels[-1][0] < 0
+    node.on_rate(Float64(data=0.0))
+    node.tick()
+    node.tick()
+    # The operator stopped: the clamp does not come back by itself.
+    assert out.wheels[-1] == STILL
+    assert node.clamp is None
+
+
+def test_entering_clamping_again_starts_a_new_clamp(node, out):
+    ready(node)
+    node.on_rate(Float64(data=RATE))
+    assert node.clamp is None
+    node.on_mode(String(data="climbing"))
+    node.on_mode(String(data="clamping"))
+    assert node.clamp is not None
+
+
+@pytest.mark.parametrize("mode", ["free", "aligning", "climbing"])
+def test_no_clamp_outside_clamping(node, out, mode):
+    ready(node, mode)
+    assert node.clamp is None
+    node.tick()
+    assert (out.goals, out.wheels) == ([], [])

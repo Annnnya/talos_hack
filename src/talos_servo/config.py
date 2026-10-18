@@ -55,6 +55,13 @@ DEFAULT_EXPANSION_RATE_RAD_S = 0.15
 DEFAULT_CLIMB_SPEED_M_S = 0.05
 DEFAULT_EXPANSION_HZ = 50.0
 DEFAULT_EXPANSION_LEAD_RAD = 0.05
+# Clamping (#78): open slowly, and count a current over these as wall
+# contact. Placeholders until tuned on the bench.
+DEFAULT_CLAMP_RATE_RAD_S = 0.05
+DEFAULT_HINGE_CONTACT_CURRENT_A = 1.0
+DEFAULT_WHEEL_CONTACT_CURRENT_A = 0.6
+DEFAULT_CONTACT_HOLD_S = 0.2
+DEFAULT_CONTACT_GRACE_S = 0.3
 
 # Joint names are ROS names too (topics, services, JointState), so keep them
 # plain.
@@ -165,6 +172,11 @@ class ExpansionConfig:
     goal and the wheel speeds are sent, `max_lead_rad` is how far the goal
     may run ahead of the measured angle and `command_timeout_s` stops a
     motion whose rate is not repeated.
+
+    Clamping (`talos_servo.clamp`) opens at `clamp_rate_rad_s` until the
+    hinge or a wheel current stays over `hinge_contact_current_a` or
+    `wheel_contact_current_a` for `contact_hold_s`, ignoring the first
+    `contact_grace_s` of each motion.
     """
 
     max_rate_rad_s: float = DEFAULT_EXPANSION_RATE_RAD_S
@@ -173,6 +185,11 @@ class ExpansionConfig:
     rate_hz: float = DEFAULT_EXPANSION_HZ
     max_lead_rad: float = DEFAULT_EXPANSION_LEAD_RAD
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
+    clamp_rate_rad_s: float = DEFAULT_CLAMP_RATE_RAD_S
+    hinge_contact_current_a: float = DEFAULT_HINGE_CONTACT_CURRENT_A
+    wheel_contact_current_a: float = DEFAULT_WHEEL_CONTACT_CURRENT_A
+    contact_hold_s: float = DEFAULT_CONTACT_HOLD_S
+    contact_grace_s: float = DEFAULT_CONTACT_GRACE_S
 
 
 @dataclass(frozen=True)
@@ -470,9 +487,29 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
             command_timeout_s=_positive(
                 raw, "command_timeout_s", DEFAULT_COMMAND_TIMEOUT_S
             ),
+            clamp_rate_rad_s=_positive(
+                raw, "clamp_rate_rad_s", DEFAULT_CLAMP_RATE_RAD_S
+            ),
+            hinge_contact_current_a=_positive(
+                raw, "hinge_contact_current_a", DEFAULT_HINGE_CONTACT_CURRENT_A
+            ),
+            wheel_contact_current_a=_positive(
+                raw, "wheel_contact_current_a", DEFAULT_WHEEL_CONTACT_CURRENT_A
+            ),
+            contact_hold_s=_positive(
+                raw, "contact_hold_s", DEFAULT_CONTACT_HOLD_S
+            ),
+            contact_grace_s=_positive(
+                raw, "contact_grace_s", DEFAULT_CONTACT_GRACE_S
+            ),
         )
     except ConfigError as exc:
         raise ConfigError(f"expansion: {exc}") from exc
+    if expansion.clamp_rate_rad_s > expansion.max_rate_rad_s:
+        raise ConfigError(
+            f"expansion.clamp_rate_rad_s must not exceed max_rate_rad_s "
+            f"{expansion.max_rate_rad_s}, got {expansion.clamp_rate_rad_s}"
+        )
     if model is not None:
         # The bridge moves the hinge servo at DEFAULT_MOVE_SPEED: a faster
         # goal stream leaves the hinge behind and the wheels ahead.

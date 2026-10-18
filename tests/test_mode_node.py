@@ -34,6 +34,7 @@ from rclpy.qos import (  # noqa: E402
 from std_msgs.msg import Bool, String  # noqa: E402
 from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
+from talos_servo.clamp import NO_WALL_REASON  # noqa: E402
 from talos_servo.config import ModesConfig  # noqa: E402
 from talos_servo.defaults import STOP_LOCK_PERIOD_S  # noqa: E402
 from talos_servo.modes import Event, Mode  # noqa: E402
@@ -228,6 +229,38 @@ def test_release_returns_to_free(node, cm):
     last = cm.requests[-1]
     assert list(last.deactivate_controllers) == ["expand"]
     assert list(last.activate_controllers) == ["drive"]
+
+
+def test_wall_contact_starts_climbing(node, cm):
+    node.request(Event.WALL_NEARBY)
+    node.request(Event.ALIGNED)
+    response = call(node.on_wall_contact)
+    assert response.success, response.message
+    assert (node.mode, node.machine.reason) == (Mode.CLIMBING, "wall contact")
+    last = cm.requests[-1]
+    assert list(last.deactivate_controllers) == ["expand"]
+    assert list(last.activate_controllers) == ["wall"]
+
+
+def test_wall_contact_is_refused_outside_clamping(node, cm):
+    response = call(node.on_wall_contact)
+    assert not response.success
+    assert node.mode is Mode.FREE
+
+
+def test_no_wall_keeps_clamping_and_says_why(node, cm):
+    node.request(Event.WALL_NEARBY)
+    node.request(Event.ALIGNED)
+    response = call(node.on_no_wall)
+    assert response.success, response.message
+    assert node.mode is Mode.CLAMPING
+    assert node.machine.reason == NO_WALL_REASON
+
+
+def test_no_wall_is_refused_outside_clamping(node, cm):
+    response = call(node.on_no_wall)
+    assert not response.success
+    assert (node.mode, node.machine.reason) == (Mode.FREE, "started")
 
 
 def test_rejected_switch_keeps_the_mode(node, cm):

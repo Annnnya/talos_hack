@@ -97,6 +97,17 @@ expansion:
   max_lead_rad: 0.05
   # Stop when /expansion/rate is not repeated this often.
   command_timeout_s: 0.5
+  # Clamping (#78): the hinge opens by itself at this rate (rad/s, at most
+  # max_rate_rad_s) until a wall is touched.
+  clamp_rate_rad_s: 0.05
+  # Wall contact: the hinge or any wheel current (A) stays over its
+  # threshold for contact_hold_s. The first contact_grace_s of each motion
+  # are ignored (start-up current). Current is read about 10 Hz per joint,
+  # so contact_hold_s 0.2 needs about two readings. Tune on the bench.
+  hinge_contact_current_a: 1.0
+  wheel_contact_current_a: 0.6
+  contact_hold_s: 0.2
+  contact_grace_s: 0.3
 
 # Holding the hinge at a current setpoint while climbing (#142,
 # `talos_servo.hinge_hold`, run by the expansion node). A PI loop moves the
