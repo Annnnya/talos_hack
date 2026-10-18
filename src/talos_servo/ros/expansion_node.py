@@ -312,14 +312,16 @@ class ExpansionNode(Node):
 
     def climb_wheels(self, speed: float, side: float = 0.0) -> Wheels:
         """Wheel speeds in rad/s on the wall: up is the front pair one way
-        and the rear pair the other; sideways (+ left) is the same wheel
-        pattern as a sideways move on the ground (`mecanum.wheel_speeds`).
+        and the rear pair the other; sideways (+ left) is the ground
+        pattern (`mecanum.wheel_speeds`) with the rear pair flipped too.
         Scaled down together so no wheel passes the climb speed cap."""
+        # The rear pair faces the other wall, so it turns the other way for
+        # sideways too (found live: the ground pattern twists the robot).
         surface = (
             speed - side,
             speed + side,
-            -speed + side,
             -speed - side,
+            -speed + side,
         )
         largest = max(abs(v) for v in surface)
         scale = min(1.0, self.max_climb / largest) if largest else 1.0
