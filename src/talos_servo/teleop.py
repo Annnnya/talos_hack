@@ -61,24 +61,35 @@ def run(
 ) -> None:
     """Drive from keys until X.
 
-    Sends a stop on the way out, also on Ctrl+C.
+    A held key is re-sent every loop. Letting go sends one stop, then
+    nothing while idle, so another interface (the web UI) can drive without
+    being cancelled. Space always sends a stop. On the way out, also on
+    Ctrl+C, a stop is sent only if this loop was still driving.
     """
     command = STOPPED
+    sent = STOPPED
     last_key_at = clock()
     try:
         while True:
             key = read_key(LOOP_PERIOD_S)
+            stop_now = False
             if key is not None:
                 if key.lower() == QUIT_KEY:
                     return
                 command = velocity_for(key, linear, angular) or STOPPED
+                stop_now = key == STOP_KEY
                 last_key_at = clock()
             if clock() - last_key_at > KEY_TIMEOUT_S:
                 command = STOPPED
-            drive(*command)
+            if command != STOPPED or sent != STOPPED or stop_now:
+                # Set first: a drive() that raises partway may already have
+                # moved some wheels, so `finally` must still stop them.
+                sent = command
+                drive(*command)
             tick()
     finally:
-        drive(*STOPPED)
+        if sent != STOPPED:
+            drive(*STOPPED)
         tick()
 
 
