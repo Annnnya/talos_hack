@@ -128,33 +128,77 @@ Checked in the plugin source (0.3.0):
   and effort only. Effort is the present current (A). Load stays on
   `/hardware_bridge/<joint>/load`.
 
+## The base (#65)
+
+`mecanum_drive_controller` from ros2_controllers drives the four wheels.
+Its config is in `config/ros2_control.yaml`.
+
+- **Input:** `geometry_msgs/TwistStamped` on
+  `/mecanum_drive_controller/reference`, which twist_mux publishes
+  (`use_stamped: true`). The keyboard, the web server and the robot node use
+  `TwistStamped` too.
+- **Timeout:** `reference_timeout` 0.5 s (= `command_timeout_s`). After that
+  without a reference the controller sends zero. It also drops references
+  stamped more than 0.5 s ago, so a laptop that sends keyboard commands needs
+  its clock synced with the Pi. A zero stamp is taken as "now", but the
+  controller warns on every such message.
+- **Kinematics:** the same as the old `talos_servo.mecanum.wheel_speeds`:
+  `wheels_radius` = `base.wheel_radius_m`, and
+  `sum_of_robot_center_projection_on_X_Y_axis` = (wheelbase + track) / 2,
+  with the hinge flat. Every wheel is "positive rolls forward"; the bridge
+  applies `inverted`, so there is no sign handling in the controller config.
+- **Speed limits:** `linear.x/y` and `angular.z` `max_velocity` /
+  `min_velocity` are `base.max_linear_speed` and `base.max_angular_speed`.
+  These are the only limits on this path. The bridge does not clip base
+  wheels to `max_speed` (`Robot.spin(capped=False)`), and the old
+  proportional scaling of the four wheels is gone. Full stick therefore
+  drives faster than the robot node did, where `max_speed` 1000 steps/s
+  capped the wheels at about 0.046 m/s.
+- **Odometry:** `/mecanum_drive_controller/odometry` is remapped to `/odom`
+  for the EKF. `enable_odom_tf` is false, so the EKF alone publishes
+  odom -> base_link.
+- **Modes:** the mode node activates it in `free` and `aligning`.
+  `clamping` and `climbing` list no controllers until #76 and #92, so the
+  base stops there.
+
+`tests/test_ros2_control_config.py` checks the values against
+`config/robot.yaml`, and the wheel signs against the old kinematics.
+
 ## Bench: the whole robot
 
-`config/ros2_control.yaml` and `launch/ros2_control.launch.py` run every
-wheel through a `JointGroupVelocityController` and the hinge through a
+`config/ros2_control.yaml` and `launch/ros2_control.launch.py` run the base
+through `mecanum_drive_controller` and the hinge through a
 `JointGroupPositionController`, on `description/talos.urdf.xacro` built from
-the same robot config as the bridge. Stop the robot node first.
+the same robot config as the bridge, without the teleop nodes. Stop the
+robot node first. `pixi run -e ros robot` starts the same plus twist_mux,
+the mode node and the web server (`pixi run -e ros twist-mux-control` adds
+just the mux).
 
 ```
 pixi run -e ros ros2-control port:=/dev/ttyACM0
 ros2 control list_hardware_interfaces
+ros2 control list_controllers
+ros2 topic pub -r 10 /mecanum_drive_controller/reference \
+  geometry_msgs/msg/TwistStamped "{twist: {linear: {x: 0.05}}}"
 ros2 topic pub --once /bend_position_controller/commands \
   std_msgs/msg/Float64MultiArray "{data: [2.8]}"
-ros2 topic pub -r 10 /wheel_velocity_controller/commands \
-  std_msgs/msg/Float64MultiArray "{data: [0.5, 0.5, 0.5, 0.5]}"
+ros2 topic echo /odom
 ros2 topic echo /dynamic_joint_states
 ```
 
-The wheel controller keeps its last command: publish zeros to stop.
+`wheel_velocity_controller` (one rad/s value per wheel) is still configured
+for bench tests but not spawned, since it claims the same wheels. Load it by
+hand after deactivating the mecanum controller. It keeps its last command:
+publish zeros to stop.
 
 ## Open points
 
 - **State rate:** the bridge publishes states at `telemetry_hz` (20 Hz by
   default), and `Robot.tick` reads one servo per tick round robin, so with 5
   joints each one is refreshed at about 10 Hz. controller_manager runs at
-  50 Hz, so controllers see repeated samples. Fine for the bench; the
-  odometry in #65 needs fresher wheel states (for example a sync read of the
-  wheels every tick).
+  50 Hz, so controllers see repeated samples. The mecanum odometry (#65)
+  therefore lags and steps; fresher wheel states (for example a sync read of
+  the wheels every tick) are a follow-up.
 
 ## Fallback
 

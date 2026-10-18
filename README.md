@@ -67,30 +67,37 @@ serial port. Then nothing else can use the servos.
 ```mermaid
 flowchart LR
     BROWSER["Browser"] <-- "WebSocket /ws" --> WEB["talos-servo web --ros"]
-    CLI["talos-servo ... --ros"]
+    CLI["talos-servo drive --ros"]
     subgraph pi["Raspberry Pi (ROS 2 Jazzy)"]
-        NODE["robot_node<br/>owns the servo port"]
+        MUX["twist_mux<br/>+ mux_status"]
+        CM["controller_manager<br/>mecanum_drive_controller"]
+        NODE["hardware_bridge (as robot)<br/>owns the servo port"]
         IMUN["imu_node"]
       CAM["camera_node<br/>Camera Module 3"]
         FILT["imu_filter_madgwick"]
         EKF["robot_localization<br/>ekf_node"]
-        MUX["twist_mux<br/>+ mux_status"]
     end
     SERVOS[("Servos")]
     MPU[("MPU6050")]
 
-    WEB -- "/robot/position_cmd · velocity_cmd · services" --> NODE
-    CLI -- "/cmd_vel · /robot/velocity_cmd" --> NODE
-    NODE -- "/joint_states · /diagnostics" --> WEB
-    MUX -- "/cmd_vel" --> NODE
+    WEB -- "/web/cmd_vel" --> MUX
+    CLI -- "/keyboard/cmd_vel" --> MUX
+    MUX -- "/mecanum_drive_controller/reference" --> CM
+    CM <-- "/talos/joint_commands · joint_states" --> NODE
+    NODE -- "/diagnostics · /robot/stop_all" --> WEB
+    CM -- "/joint_states" --> WEB
     NODE <--> SERVOS
     CAM --> CAMERA["/camera/image/compressed"]
-    NODE -- "/odom" --> EKF
+    CM -- "/odom" --> EKF
     IMUN <--> MPU
     IMUN -- "/imu/data_raw" --> FILT
     IMUN -- "/imu/data_raw" --> EKF
     EKF --> OUT["/odometry/filtered<br/>tf odom -> base_link"]
 ```
+
+With `ros2_control:=false` the old `robot_node` owns the port instead: twist_mux
+feeds it on `/cmd_vel`, it publishes `/odom`, and the web server's `/debug`
+page commands single joints through it.
 
 ### On the Pi
 
@@ -98,22 +105,26 @@ flowchart LR
 flowchart TB
     S["talos.service<br/>pixi run -e ros robot"]
     S --> L["launch/robot.launch.py"]
-    L --> NODE["robot_node"]
+    L --> CM["robot_state_publisher · controller_manager"]
+    L --> NODE["hardware_bridge"]
     L --> REST["mode_node · twist_mux · mux_status"]
     L --> WEB["talos-servo web --ros"]
     NODE -- "opens TALOS_SERVO_PORT" --> PORT[("/dev/serial/by-id/...")]
     WEB -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
-### ros2_control (in progress, #62)
+### ros2_control (#62)
 
-Control is moving to ros2_control. How it works with our Python code (the
-topic based hardware plugin plus `hardware_bridge_node`) is in
-[docs/ros2_control.md](docs/ros2_control.md). Drive every wheel and the
-hinge by hand on the bench (stop the robot node first):
+The base drives through ros2_control: `mecanum_drive_controller` (#65) on
+the topic based hardware plugin plus `hardware_bridge_node`, see
+[docs/ros2_control.md](docs/ros2_control.md). `pixi run -e ros robot` starts
+it with the teleop nodes. Without them, on the bench (stop the robot node
+first):
 
 ```
 pixi run -e ros ros2-control port:=/dev/ttyACM0
+ros2 topic pub -r 10 /mecanum_drive_controller/reference \
+  geometry_msgs/msg/TwistStamped "{twist: {linear: {x: 0.05}}}"
 ros2 topic pub --once /bend_position_controller/commands \
   std_msgs/msg/Float64MultiArray "{data: [2.8]}"      # alpha in rad
 ros2 topic echo /dynamic_joint_states                 # effort = current
@@ -180,8 +191,9 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 
 ## Run the robot
 
-One command starts everything driving needs: the robot node, the mode node,
-twist_mux, mux_status and the web UI.
+One command starts everything driving needs: ros2_control with the
+mecanum controller and the hardware bridge, the mode node, twist_mux,
+mux_status and the web UI.
 
 ```
 cd web && npm install && npm run build      # once, Node 20+
@@ -199,6 +211,14 @@ Ctrl+C stops everything, and the wheels with it.
 | `web:=` | `true` | web UI on :8000 |
 | `camera:=` | `false` | camera node |
 | `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
+| `ros2_control:=` | `true` | `false`: the old robot node drives instead |
+
+The per-motor `/debug` page needs `ros2_control:=false`: under ros2_control
+the controllers own the joints, so single-joint commands are not served.
+
+Drive commands are `TwistStamped` and the controller drops ones older than
+0.5 s. Keyboard driving from a laptop therefore needs the laptop clock in step
+with the Pi (NTP, as both get by default when online).
 
 The single pixi tasks below still start one piece each, for debugging.
 
@@ -279,7 +299,8 @@ base:
 
 | Topic or service | Type | Direction |
 | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/TwistStamped` | in: drive the base |
+| `/mecanum_drive_controller/reference` | `geometry_msgs/TwistStamped` | in: drive the base (twist_mux output) |
+| `/cmd_vel` | `geometry_msgs/TwistStamped` | in: drive the base, robot node only |
 | `/odom` | `nav_msgs/Odometry` | out: wheel odometry, no TF |
 | `/joint_states` | `sensor_msgs/JointState` | out: rad, rad/s, load |
 | `/diagnostics` | `DiagnosticArray` | out: one entry per joint |
@@ -309,10 +330,11 @@ base:
 
 ### Web and keyboard through twist_mux
 
-`twist_mux` merges `/web/cmd_vel` and `/keyboard/cmd_vel` into `/cmd_vel`
-(`config/twist_mux.yaml`). The keyboard has the higher priority, so it wins
-while a key is held; an input that is quiet for 0.5 s stops counting and the
-other one takes over. STOP blocks both: the mode node owns it, starts with
+`twist_mux` merges `/web/cmd_vel` and `/keyboard/cmd_vel` into
+`/mecanum_drive_controller/reference` (`/cmd_vel` with
+`ros2_control:=false`), see `config/twist_mux.yaml`. The keyboard has the
+higher priority, so it wins while a key is held; an input that is quiet for
+0.5 s stops counting and the other one takes over. STOP blocks both: the mode node owns it, starts with
 STOP on and repeats it on `/robot/stop_lock` every 0.1 s. Release it with
 `/robot/set_stop` `false`. The lock times out after 0.5 s, so the mux stays
 locked while the mode node is not running, and a restarted twist_mux is
@@ -399,7 +421,9 @@ Python in `talos_servo.modes`.
 | `climbing` | not moving up | `clamping` |
 | any | release (`/robot/release`) | `free` |
 
-- Controllers per mode come from `modes.controllers` in `config/robot.yaml`.
+- Controllers per mode come from `modes.controllers` in `config/robot.yaml`:
+  `mecanum_drive_controller` in `free` and `aligning`, none yet in
+  `clamping` and `climbing` (#76, #92), so the base stops there.
   The node diffs the new mode's set against the controllers
   controller_manager reports as active, and a switch that controller_manager
   rejects keeps the old mode. Every second it also puts the active
