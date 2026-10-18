@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import copy
+import math
+from pathlib import Path
 
 import pytest
 from conftest import BASE, SMALL
 
 from talos_servo.config import (
     ConfigError,
+    load_config,
     parse_config,
 )
+
+ROBOT_CONFIG = Path(__file__).parent.parent / "config" / "robot.yaml"
 
 
 def with_changes(data: dict, **joint_changes: dict) -> dict:
@@ -62,3 +67,43 @@ def test_invalid_base_is_rejected(change, message):
 
 def test_base_is_optional():
     assert parse_config(SMALL).base is None
+
+
+MODEL = {
+    "wheel_radius_m": 0.03,
+    "leg_length_m": 0.15,
+    "leg_gear_ratio": 0.5,
+    "bend_min_deg": 90,
+    "bend_max_deg": 180,
+}
+
+
+def test_model_is_parsed():
+    model = parse_config({**BASE, "model": MODEL}).model
+    assert model.leg_length_m == 0.15
+    assert model.bend_min_rad == pytest.approx(math.pi / 2)
+    assert model.bend_max_rad == pytest.approx(math.pi)
+
+
+def test_model_is_optional():
+    assert parse_config(BASE).model is None
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"leg_length_m": 0.2}, "base.wheelbase_m"),
+        ({"bend_min_deg": 180}, "bend_min_deg < bend_max_deg"),
+        ({"bend_max_deg": 200}, "bend_max_deg <= 180"),
+        ({"wheel_radius_m": 0}, "positive"),
+    ],
+)
+def test_invalid_model_is_rejected(change, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config({**BASE, "model": {**MODEL, **change}})
+
+
+def test_repo_config_is_valid():
+    config = load_config(ROBOT_CONFIG)
+    assert config.model is not None
+    assert config.base is not None
