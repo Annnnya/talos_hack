@@ -25,7 +25,7 @@ joints:
   # min_pos / max_pos clamp position targets (0-4095 is one full turn). For
   # the hinge they are narrowed on load to the model bend range below.
   # Folding the hinge must lower its position: flip inverted if it rises.
-  bend:              { id: 1, control: position, inverted: false,
+  bend:              { id: 1, control: position, inverted: true,
                        min_pos: 0, max_pos: 4095 }
 
 base:
@@ -37,7 +37,8 @@ base:
   # Steps per metre of wheel travel are 4096 / (2 * pi * wheel_radius_m).
   wheel_radius_m: 0.03
   # m/s and rad/s; /cmd_vel and `talos-servo drive` are clamped to these.
-  max_linear_speed: 0.1
+  # Measured top speed is about 0.32 m/s (wheels saturate near 10.6 rad/s).
+  max_linear_speed: 0.3
   max_angular_speed: 0.5
 
 modes:
@@ -67,16 +68,16 @@ model:
   # Each leg gear turns this many times the servo. Both legs move, so the
   # opening angle changes 2 * 0.5 = 1 times the servo angle.
   leg_gear_ratio: 0.5
-  # Max fold. Placeholder until measured on the robot (#84). The bend
-  # min_pos/max_pos clamp is narrowed to this range on load.
-  bend_min_deg: 90
-  bend_max_deg: 180
+  # Measured from the web hinge panel: fully closed reads raw 1813 (35.1 deg),
+  # fully open raw 164 (flat). The limits sit about 1 deg inside both hard
+  # stops. The bend min_pos/max_pos clamp is narrowed to this range on load.
+  bend_min_deg: 36
+  bend_max_deg: 179
   # Raw bend servo position (0-4095, as `talos-servo monitor` shows it) when
   # the robot lies flat, fixed by aligning the servo horn to the leg.
   # Required while bend is enabled. The range down to max fold must fit in
-  # one servo turn from here. 4000 leaves about 8 deg past flat before the
-  # reading wraps to 0.
-  bend_flat_steps: 4000
+  # one servo turn from here. Fully open (flat) reads 164.
+  bend_flat_steps: 164
 
 # Opening and closing the hinge with the wheels rolling along (#76,
 # `talos-expansion-ros`). See docs/ros2_control.md.
@@ -84,6 +85,8 @@ expansion:
   # Opening speed cap in rad/s. Must stay below the hinge servo speed
   # (about 0.31 rad/s at the bridge's fixed move speed).
   max_rate_rad_s: 0.15
+  # Wheel speed cap (m/s) of the Up/Down and Left/Right buttons on the wall.
+  max_climb_speed_m_s: 0.3
   # How often the hinge goal and the wheel speeds are sent.
   rate_hz: 50
   # How far (rad) the hinge goal may run ahead of the measured angle before
@@ -107,3 +110,6 @@ hinge_hold:
   max_offset_rad: 0.25
   # Opening (rad) with almost no current that counts as no wall contact.
   no_contact_rad: 0.3
+  # Back off above this servo load (%): the servo cuts to 20 % drive after
+  # 2 s above 50 % (EEPROM overload settings of servo 1).
+  max_load_pct: 40
