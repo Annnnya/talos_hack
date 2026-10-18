@@ -11,8 +11,10 @@ import pytest
 pytest.importorskip("launch_ros")
 
 ROOT = Path(__file__).resolve().parent.parent
-DRIVE = ["robot_node", "mode_node", "twist_mux", "mux_status"]
+DRIVE = ["hardware_bridge", "mode_node", "twist_mux", "mux_status"]
+ROBOT_NODE_DRIVE = ["robot_node", *DRIVE[1:]]
 IMU = ["imu_node", "imu_filter", "imu_tf", "ekf"]
+CONTROLLER_REFERENCE = "/mecanum_drive_controller/reference"
 
 
 @pytest.fixture(scope="module")
@@ -39,19 +41,46 @@ def test_flags_add_the_camera_and_the_imu_chain(launch):
     assert list(cmds) == [*DRIVE, "camera_node", *IMU]
 
 
-def test_only_the_robot_node_gets_the_port(launch):
-    cmds = launch.processes("/dev/ttyX", "robot.yaml", camera=True, imu=True)
+def test_robot_node_instead_of_ros2_control(launch):
+    cmds = launch.processes("/dev/ttyX", "robot.yaml", ros2_control=False)
+    assert list(cmds) == [*ROBOT_NODE_DRIVE, "web"]
+
+
+@pytest.mark.parametrize(
+    ("ros2_control", "owner"),
+    [(True, "hardware_bridge"), (False, "robot_node")],
+)
+def test_only_the_port_owner_gets_the_port(launch, ros2_control, owner):
+    cmds = launch.processes(
+        "/dev/ttyX",
+        "robot.yaml",
+        camera=True,
+        imu=True,
+        ros2_control=ros2_control,
+    )
     with_port = [name for name, cmd in cmds.items() if "/dev/ttyX" in cmd]
-    assert with_port == ["robot_node"]
+    assert with_port == [owner]
+
+
+def test_bridge_answers_as_the_robot_node(launch):
+    # The web server looks for /robot/stop_all and "robot: <joint>" status.
+    cmd = launch.processes("/dev/ttyX", "robot.yaml")["hardware_bridge"]
+    assert "__node:=robot" in cmd
 
 
 def test_web_goes_through_the_robot_node(launch):
     assert "--ros" in launch.processes("/dev/ttyX", "robot.yaml")["web"]
 
 
-def test_twist_mux_feeds_the_robot_node(launch):
-    cmd = launch.processes("/dev/ttyX", "robot.yaml")["twist_mux"]
-    assert "cmd_vel_out:=/cmd_vel" in cmd
+@pytest.mark.parametrize(
+    ("ros2_control", "target"),
+    [(True, CONTROLLER_REFERENCE), (False, "/cmd_vel")],
+)
+def test_twist_mux_feeds_the_base(launch, ros2_control, target):
+    cmd = launch.processes(
+        "/dev/ttyX", "robot.yaml", ros2_control=ros2_control
+    )["twist_mux"]
+    assert f"cmd_vel_out:={target}" in cmd
 
 
 def test_config_files_exist(launch):
@@ -68,3 +97,22 @@ def test_config_files_exist(launch):
 
 def test_description_builds(launch):
     assert launch.generate_launch_description().entities
+
+
+def test_controller_odometry_feeds_the_ekf():
+    yaml = pytest.importorskip("yaml")
+    from talos_servo.ros.control_launch import BASE_CONTROLLER, ODOM_REMAP
+
+    ekf = yaml.safe_load((ROOT / "config" / "ekf.yaml").read_text())
+    assert (
+        f"/{BASE_CONTROLLER}/odometry",
+        ekf["/**"]["ros__parameters"]["odom0"],
+    ) == ODOM_REMAP
+
+
+def test_control_nodes_build_from_the_robot_config():
+    from talos_servo.ros.control_launch import control_nodes, spawned
+
+    config = str(ROOT / "config" / "robot.yaml")
+    # robot_state_publisher, controller_manager and one spawner each.
+    assert len(control_nodes(ROOT, config)) == 2 + len(spawned(config))
