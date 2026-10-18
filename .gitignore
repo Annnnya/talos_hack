@@ -25,6 +25,9 @@ Thumbs.db
 # Git worktrees (see AGENTS.md)
 worktrees/
 
+# Bend hinge calibration, measured per robot (talos-servo calibrate-bend)
+config/bend_calibration.yaml
+
 # Personal agent instructions
 CLAUDE.local.md
 

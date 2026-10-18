@@ -276,6 +276,7 @@ The single pixi tasks below still start one piece each, for debugging.
 | `talos-servo drive` | Drive with the keyboard: W/S, A/D, Q/E, Space stop, X quit |
 | `talos-servo web` | Browser UI on port 8000: joystick at `/`, per-motor page at `/debug` |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
+| `talos-servo calibrate-bend` | Measure hinge flat and max fold through the running robot: O/F jog, Enter records, X cancels. Saves `config/bend_calibration.yaml` |
 | `pixi run -e ros robot` | The whole robot, see "Run the robot" |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
 | `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP, R/F open/close the hinge |
@@ -339,6 +340,11 @@ base:
   folds the other way. Its topics appear under `/robot/bend/`. Its
   `min_pos`/`max_pos` are narrowed on load to the `model` bend range from
   `model.bend_flat_steps`, which is required while it is enabled.
+- **Calibrate the hinge:** with the robot running, `pixi run -e ros
+  calibrate-bend` records flat and max fold into
+  `config/bend_calibration.yaml` (gitignored, so `git clean -fdx` deletes
+  it). It overrides `bend_flat_steps` and `bend_min_deg`. See "Calibration"
+  in `docs/ros2_control.md`.
 
 ## ROS topics
 
@@ -358,6 +364,7 @@ base:
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
 | `/robot/hinge_motion` | `std_srvs/SetBool` | free: wheels to the expansion node |
+| `/robot/bend/calibrate/<step>` | `std_srvs/Trigger` | hinge calibration, used by `talos-servo calibrate-bend` |
 | `/expansion/rate` | `std_msgs/Float64` | in: open (+) or close (-) the hinge, rad/s |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
