@@ -361,3 +361,10 @@ def test_invalid_calibration_names_the_file(tmp_path, monkeypatch):
 def test_calibration_needs_a_model():
     with pytest.raises(ConfigError, match="model section"):
         parse_config(BASE, BendCalibration(4000, 3000))
+
+
+def test_broken_yaml_is_a_config_error(tmp_path):
+    path = tmp_path / "robot.yaml"
+    path.write_text("joints: [unclosed", "utf-8")
+    with pytest.raises(ConfigError, match="not valid YAML"):
+        load_config(path)

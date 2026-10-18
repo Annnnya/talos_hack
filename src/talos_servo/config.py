@@ -319,6 +319,8 @@ def read_config_data(path: str | Path) -> dict:
         return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except OSError as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"config {path} is not valid YAML: {exc}") from exc
 
 
 def _parse_joint(name: str, raw: dict) -> JointConfig:

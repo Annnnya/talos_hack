@@ -196,18 +196,24 @@ def calibration_yaml(cal: BendCalibration, fold_deg: float) -> str:
 def save_calibration(
     path: str | Path, cal: BendCalibration, fold_deg: float
 ) -> None:
-    """Write the file in one step, so a crash never leaves half of it."""
+    """Write the file in one step, so a crash never leaves half of it.
+    Raises CalibrationError when it cannot be written."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+        )
+    except OSError as exc:
+        raise CalibrationError(f"could not write {path}: {exc}") from exc
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(calibration_yaml(cal, fold_deg))
         os.replace(tmp, path)
-    except BaseException:
+    except BaseException as exc:
         Path(tmp).unlink(missing_ok=True)
+        if isinstance(exc, OSError):
+            raise CalibrationError(f"could not write {path}: {exc}") from exc
         raise
 
 

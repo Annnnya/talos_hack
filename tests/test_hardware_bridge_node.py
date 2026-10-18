@@ -663,3 +663,12 @@ def test_calibration_errors_come_back_as_failures(cal_node):
     response = calibrate(cal_node, CALIBRATE_SAVE)
     assert not response.success
     assert "no calibration running" in response.message
+
+
+def test_unexpected_calibration_error_keeps_the_bridge_up(cal_node):
+    def boom() -> str:
+        raise RuntimeError("disk on fire")
+
+    response = cal_node.on_calibrate(CALIBRATE_SAVE, boom, Trigger.Response())
+    assert not response.success
+    assert "RuntimeError: disk on fire" in response.message

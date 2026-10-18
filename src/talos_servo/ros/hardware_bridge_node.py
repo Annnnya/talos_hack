@@ -417,6 +417,14 @@ class HardwareBridgeNode(Node):
             # ConfigError and CalibrationError are ValueErrors too.
             response.success, response.message = False, str(exc)
             self.get_logger().warning(f"calibrate {step}: {exc}")
+        except Exception as exc:
+            # An unexpected error answers the call instead of escaping
+            # rclpy.spin and taking the bridge down mid-session.
+            response.success = False
+            response.message = f"{type(exc).__name__}: {exc}"
+            self.get_logger().error(
+                f"calibrate {step} failed: {response.message}"
+            )
         return response
 
     def _calibrate(self, action: Callable[[], str]) -> str:
