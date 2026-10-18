@@ -1,9 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import ClimbPanel from "@/components/ClimbPanel";
+import HingePanel from "@/components/HingePanel";
+import HoldPanel from "@/components/HoldPanel";
 import Joystick from "@/components/Joystick";
 import ReleaseStopButton from "@/components/ReleaseStopButton";
+import SpeedSlider from "@/components/SpeedSlider";
 import { useStopKey } from "@/components/StopAllButton";
 import { useJoystick } from "@/lib/joystick";
 import { allowedDirections, describeInput, MODE_LABEL, MODE_STYLE } from "@/lib/modes";
@@ -38,15 +42,51 @@ function useActionKeys(actions: Record<string, (() => void) | null>) {
   }, [actions]);
 }
 
+const SPEED_KEY = "talos.speedPercent";
+const DEFAULT_SPEED_PERCENT = 50;
+
+/** Speed slider value, remembered per browser. */
+function useSpeedPercent() {
+  const [percent, setPercent] = useState(DEFAULT_SPEED_PERCENT);
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(SPEED_KEY));
+      if (saved >= 5 && saved <= 100) setPercent(saved);
+    } catch {}
+  }, []);
+  const set = useCallback((value: number) => {
+    setPercent(value);
+    try {
+      window.localStorage.setItem(SPEED_KEY, String(value));
+    } catch {}
+  }, []);
+  return [percent, set] as const;
+}
+
 export default function Home() {
-  const { status, limits, ros, stopped, mode, modeReason, activeInput, lastError, clearError, send } =
+  const { status, servos, limits, ros, stopped, mode, modeReason, activeInput, hinge, hold, lastError, clearError, send } =
     useBridge();
   const connected = status === "connected";
+  // Same modes as HINGE_MODES in modes.py; an unknown mode is left to the
+  // expansion node, which refuses without one.
+  const canHinge =
+    connected && ros && !stopped && (mode === null || mode === "free" || mode === "aligning" || mode === "clamping");
+  // CLIMB_MODES in modes.py: only after wall nearby.
+  const nearWall = mode === "aligning" || mode === "clamping" || mode === "climbing";
+  // HOLD_MODES in modes.py; holding keeps going through STOP.
+  const canHold = connected && ros && nearWall;
+  const hingeServo = servos.find((s) => s.name === hinge?.joint);
+  const hingeTemp = hingeServo?.temp ?? null;
+  const hingeLoad = hingeServo?.load ?? null;
+  const hingeFault = hingeServo?.fault ?? null;
+  const canClimb = connected && ros && !stopped && nearWall;
+  const [speedPercent, setSpeedPercent] = useSpeedPercent();
+  const scale = speedPercent / 100;
   // Driving goes through twist_mux, so it needs the ROS server and a base.
   const canDrive = connected && ros && limits.linear_max !== null && limits.angular_max !== null;
   const { active, start, end, release } = useJoystick(send, {
-    linear: limits.linear_max ?? 0,
-    angular: limits.angular_max ?? 0,
+    linear: (limits.linear_max ?? 0) * scale,
+    angular: (limits.angular_max ?? 0) * scale,
     enabled: canDrive,
     allowed: allowedDirections(mode),
   });
@@ -137,6 +177,30 @@ export default function Home() {
         />
       </div>
 
+      {ros && (
+        <SpeedSlider
+          percent={speedPercent}
+          onChange={setSpeedPercent}
+          linearMax={limits.linear_max}
+          climbMax={limits.climb_max}
+        />
+      )}
+
+      {ros && hold && (nearWall || hold.active) && (
+        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} fault={hingeFault} load={hingeLoad} />
+      )}
+
+      {ros && nearWall && (
+        <ClimbPanel
+          send={send}
+          speed={limits.climb_max * scale}
+          enabled={canClimb}
+          wheelCurrents={hinge?.wheel_currents ?? null}
+        />
+      )}
+
+      {hinge && <HingePanel hinge={hinge} send={send} enabled={canHinge} />}
+
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
@@ -159,7 +223,8 @@ export default function Home() {
       </div>
 
       <p className="hidden text-center text-xs text-black/50 sm:block dark:text-white/50">
-        Hold W/S/A/D to move, Q/E to turn. Space stops, Enter releases STOP. N wall nearby, L release.
+        Hold W/S/A/D to move, Q/E to turn, R/F to open/close the hinge, T/G to climb up/down after wall nearby. Space stops, Enter releases STOP. N wall
+        nearby, L release.
       </p>
     </main>
   );

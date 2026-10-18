@@ -11,7 +11,7 @@ from talos_servo.bus import DEFAULT_BAUDRATE
 from talos_servo.defaults import DEFAULT_CONFIG, PORT_ENV_VAR
 
 # Rate of the per-joint readout topics (temperature, voltage, ...).
-DEFAULT_STATUS_HZ = 2.0
+DEFAULT_STATUS_HZ = 5.0
 
 
 def parse_args(

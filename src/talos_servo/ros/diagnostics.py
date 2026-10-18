@@ -25,6 +25,8 @@ STATUS_KEYS = (
     "temp",
     "current",
     "moving",
+    # The servo's own protection flag (overload, overheat), empty when clear.
+    "fault",
     # Last command, so clients such as the web UI can show who moved a joint
     # and when.
     "target",
@@ -50,8 +52,9 @@ def joint_diagnostics(
                 DiagnosticStatus.ERROR,
                 j["error"] or "offline",
             )
-        elif j["error"]:
-            status.level, status.message = DiagnosticStatus.WARN, j["error"]
+        elif j["error"] or j.get("fault"):
+            status.level = DiagnosticStatus.WARN
+            status.message = j["error"] or j["fault"]
         else:
             status.level, status.message = DiagnosticStatus.OK, "ok"
         last = j["last_command"] or {}
@@ -62,7 +65,7 @@ def joint_diagnostics(
             "command_age": last.get("age"),
         }
         for key in STATUS_KEYS:
-            value = fields[key]
+            value = fields.get(key)
             status.values.append(
                 KeyValue(key=key, value="" if value is None else str(value))
             )

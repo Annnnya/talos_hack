@@ -231,7 +231,7 @@ def test_drive_over_ros_uses_the_keyboard_mux_input(
     backend, read_key, kw = calls["drive"]
     assert backend["cmd_vel_topic"] == KEYBOARD_CMD_VEL_TOPIC
     assert read_key is fake_terminal
-    assert kw == {"linear": 0.1, "angular": 0.5}
+    assert kw == {"linear": 0.3, "angular": 0.5}
     out = capsys.readouterr().out
     assert "N wall nearby" in out
     assert "L release" in out

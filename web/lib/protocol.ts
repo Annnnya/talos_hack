@@ -32,6 +32,8 @@ export interface ServoState {
   target: number | null;
   target_speed: number;
   error: string | null;
+  /** The servo's own protection flag (overload, overheat) while it answers. */
+  fault: string | null;
   last_command: LastCommand | null;
 }
 
@@ -45,6 +47,44 @@ export interface Limits {
   /** Base speed limits for drive (m/s, rad/s); null when the config has no base. */
   linear_max: number | null;
   angular_max: number | null;
+  /** m/s cap of the Up and Down buttons. */
+  climb_max: number;
+}
+
+/** Hinge readout for calibrating model.bend_flat_steps (ROS only). */
+export interface HingeState {
+  joint: string;
+  /** Opening angle, 180 flat; null while the bridge cannot tell. */
+  angle_deg: number | null;
+  /** Raw servo position as `talos-servo monitor` shows it; null while unknown. */
+  raw_steps: number | null;
+  /** model.bend_flat_steps in config/robot.yaml. */
+  flat_steps: number | null;
+  min_deg: number;
+  max_deg: number;
+  /** Opening speed of the hold buttons, rad/s. */
+  max_rate: number;
+  /** Hinge current (A, signed), fresh every control tick; null until heard. */
+  current_a: number | null;
+  /** Online wheel currents (A, signed) by joint name, about 5 Hz. */
+  wheel_currents: Record<string, number> | null;
+}
+
+/** Hinge current hold in the expansion node (#142). */
+export interface HoldState {
+  active: boolean;
+  setpoint_a: number;
+  /** Filtered |hinge current| the loop runs on, A. */
+  measured_a: number;
+  /** How far the goal leads the measured angle, rad. */
+  offset_rad: number;
+  max_current_a: number;
+  /** Why it stopped last ("no wall contact", "turned off", ...). */
+  note: string | null;
+  /** Hinge servo load in %, null when stale. */
+  load_pct: number | null;
+  /** True while the load limit backs the goal off. */
+  load_limited: boolean;
 }
 
 /** Shared by every browser, kept by the server until it restarts. */
@@ -68,6 +108,10 @@ export type ServerMessage =
       mode_reason: string | null;
       /** twist_mux input driving now: "web", "keyboard", "none" or "locked". */
       active_input: string | null;
+      /** Null without ROS or without a hinge. */
+      hinge: HingeState | null;
+      /** Null without the expansion node. */
+      hinge_hold: HoldState | null;
     }
   | { type: "error"; message: string };
 
@@ -85,6 +129,14 @@ export type ClientMessage =
   | { type: "release" }
   /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
   | { type: "drive"; vx: number; vy: number; wz: number }
+  /** Hinge opening speed (rad/s, + opens, 0 stops), ROS only. Re-send while held. */
+  | { type: "hinge"; rate: number }
+  /** Climb speed (m/s, + up, 0 stops), ROS only. Re-send while held. */
+  | { type: "climb"; speed: number }
+  /** Sideways speed on the wall (m/s, + left, 0 stops), ROS only. Re-send while held. */
+  | { type: "wall_side"; speed: number }
+  /** Hinge current hold on/off with its setpoint (A), ROS only. */
+  | { type: "hinge_hold"; enabled: boolean; setpoint: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;
