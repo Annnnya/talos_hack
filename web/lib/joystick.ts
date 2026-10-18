@@ -52,7 +52,12 @@ function typing(e: KeyboardEvent) {
  */
 export function useJoystick(
   send: (msg: ClientMessage) => void,
-  { linear, angular, enabled }: { linear: number; angular: number; enabled: boolean },
+  {
+    linear,
+    angular,
+    enabled,
+    allowed,
+  }: { linear: number; angular: number; enabled: boolean; allowed: ReadonlySet<Direction> },
 ) {
   const [active, setActive] = useState<Direction | null>(null);
   const activeRef = useRef<Direction | null>(null);
@@ -64,12 +69,12 @@ export function useJoystick(
 
   const start = useCallback(
     (dir: Direction) => {
-      if (!enabled) return;
+      if (!enabled || !allowed.has(dir)) return;
       activeRef.current = dir;
       setActive(dir);
       hold(...velocity(dir, linear, angular));
     },
-    [enabled, hold, linear, angular],
+    [enabled, allowed, hold, linear, angular],
   );
 
   const end = useCallback(
@@ -79,9 +84,11 @@ export function useJoystick(
     [release],
   );
 
+  // A mode change can take away the direction being held.
   useEffect(() => {
-    if (!enabled) release();
-  }, [enabled, release]);
+    const dir = activeRef.current;
+    if (!enabled || (dir !== null && !allowed.has(dir))) release();
+  }, [enabled, allowed, release]);
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
