@@ -12,8 +12,8 @@ export const DRIVE_RESEND_MS = 100;
 
 /**
  * Hold-to-drive for the base. `hold(vx, vy, wz)` sends at once and keeps
- * re-sending; `release()` stops re-sending and sends one stop. Unmounting
- * releases too.
+ * re-sending; `release()` stops re-sending and sends one stop. Unmounting,
+ * hiding the tab, losing window focus and leaving the page release too.
  */
 export function useDrive(send: (msg: ClientMessage) => void) {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -40,7 +40,23 @@ export function useDrive(send: (msg: ClientMessage) => void) {
     if (wasHeld) sendRef.current({ type: "drive", vx: 0, vy: 0, wz: 0 });
   }, []);
 
-  useEffect(() => release, [release]);
+  // A held button may never see its release: the tab is hidden, the window
+  // loses focus or the page goes away. Hidden tabs also slow timers past the
+  // mux timeout. Stop on all of those, so no page has to remember to.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) release();
+    };
+    window.addEventListener("blur", release);
+    window.addEventListener("pagehide", release);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", release);
+      window.removeEventListener("pagehide", release);
+      document.removeEventListener("visibilitychange", onVisibility);
+      release();
+    };
+  }, [release]);
 
   return { hold, release };
 }
