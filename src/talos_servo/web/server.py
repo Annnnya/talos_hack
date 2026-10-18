@@ -263,5 +263,6 @@ def serve(
             raise ValueError("no serial port given")
         backend, source = Robot(ServoBus(port, baudrate), config), port
     app = create_app(backend, ui_dir=Path(ui_dir), ros=ros)
-    print(f"talos-servo web: http://{host}:{http_port} ({source})")
+    url = f"http://{host}:{http_port}"
+    print(f"talos-servo web: {url} ({source}), per-motor page {url}/debug")
     uvicorn.run(app, host=host, port=http_port, log_level="warning")
