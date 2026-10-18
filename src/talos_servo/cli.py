@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[port_opts, ros_opts],
         help=(
             "drive the mecanum base with the keyboard (W/A/S/D, Q/E, X; "
-            "with --ros also N wall nearby, L release)"
+            "with --ros also N wall nearby, L release, Enter release STOP)"
         ),
     )
     drive.add_argument(
