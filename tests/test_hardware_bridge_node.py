@@ -323,3 +323,37 @@ def test_hinge_reading_far_outside_its_range_is_unknown(
     # A wrap past flat reads near 0, not a real fold.
     hinge_robot.joints["bend"].position = 3
     assert math.isnan(bend_state(hinge_node)[0])
+
+
+def test_hinge_goals_are_dropped_while_the_reading_is_wrapped(
+    hinge_node, hinge_robot
+):
+    # From step 3 the servo would turn the long way round to any goal.
+    hold(hinge_node, math.pi)
+    hinge_robot.joints["bend"].position = 3
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target is None
+    hinge_robot.joints["bend"].position = START_STEPS
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_quiet_commands_disarm_position_joints(hinge_node, hinge_robot, clock):
+    hold(hinge_node, math.pi)
+    hinge_node.on_commands(commands(["bend"], position=[2.0]))
+    target = hinge_robot.joints["bend"].target
+    # controller_manager restarts: quiet, then its initial value again.
+    clock.now += hinge_robot.config.command_timeout_s + 0.1
+    for _ in range(3):
+        hold(hinge_node, math.pi)
+    assert hinge_robot.joints["bend"].target == target
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_steady_commands_stay_armed(hinge_node, hinge_robot, clock):
+    hold(hinge_node, math.pi)
+    hinge_node.on_commands(commands(["bend"], position=[2.0]))
+    clock.now += hinge_robot.config.command_timeout_s / 2
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
