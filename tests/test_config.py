@@ -242,3 +242,61 @@ def test_wheel_radius_is_required():
     del data["base"]["wheel_radius_m"]
     with pytest.raises(ConfigError, match="wheel_radius_m"):
         parse_config(data)
+
+
+def test_modes_parse_hinge_motion_controllers():
+    modes = parse_config(
+        {
+            **SMALL,
+            "modes": {
+                "controllers": {"free": ["drive"]},
+                "hinge_motion": ["wheels"],
+            },
+        }
+    ).modes
+    assert modes is not None
+    assert modes.hinge_motion == ("wheels",)
+    assert modes.managed == {"drive", "wheels"}
+
+
+def test_invalid_hinge_motion_is_rejected():
+    with pytest.raises(ConfigError, match="hinge_motion"):
+        parse_config({**SMALL, "modes": {"hinge_motion": "wheels"}})
+
+
+def test_expansion_defaults_without_a_section():
+    expansion = parse_config(SMALL).expansion
+    assert 0 < expansion.max_rate_rad_s < 0.3
+    assert expansion.command_timeout_s == 0.5
+
+
+def test_expansion_is_parsed():
+    expansion = parse_config(
+        {**hinge_data(bend_flat_steps=4000), "expansion": {"rate_hz": 25}}
+    ).expansion
+    assert expansion.rate_hz == 25
+
+
+@pytest.mark.parametrize(
+    ("expansion", "message"),
+    [
+        ([], "mapping"),
+        ({"max_rate_rad_s": 0}, "positive"),
+        ({"max_lead_rad": -1}, "positive"),
+        # The bridge moves the hinge servo at about 0.31 rad/s.
+        ({"max_rate_rad_s": 0.5}, "below the hinge servo speed"),
+    ],
+)
+def test_invalid_expansion_is_rejected(expansion, message):
+    data = {**hinge_data(bend_flat_steps=4000), "expansion": expansion}
+    with pytest.raises(ConfigError, match=message):
+        parse_config(data)
+
+
+def test_repo_config_moves_the_hinge_in_clamping():
+    config = load_config(ROBOT_CONFIG)
+    assert config.modes is not None
+    assert config.modes.hinge_motion
+    assert set(config.modes.hinge_motion) <= set(
+        config.modes.for_mode("clamping")
+    )
