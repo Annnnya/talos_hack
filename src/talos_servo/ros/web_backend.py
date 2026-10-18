@@ -77,7 +77,7 @@ SERVICE_POLL_INTERVAL = 0.01
 STATUS_STALE_AFTER = 2.0
 # Diagnostics entries from the robot node are named "<node name>: <joint>".
 STATUS_PREFIX = f"{ROBOT_NODE_NAME}: "
-HINT = "start it with `pixi run -e ros robot-node`"
+HINT = "start it with `pixi run -e ros robot`"
 MODE_HINT = "start it with `pixi run -e ros mode-node`"
 # Status lags our own commands. A command the robot reports with a frame this
 # backend sends, and no newer than this after our last send, is our own echo

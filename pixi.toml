@@ -106,8 +106,11 @@ check-model = "xacro description/talos.urdf.xacro -o .pixi/talos.urdf && check_u
 # Web UI through the running robot node, so it can share the robot
 # with other ROS nodes
 web-ros = "talos-servo web --ros"
-# Web and keyboard share /cmd_vel through one mux, with a STOP lock
+# Web and keyboard share the base through one mux, with a STOP lock.
+# twist-mux feeds robot-node on /cmd_vel; twist-mux-control feeds
+# mecanum_drive_controller from ros2-control. `robot` starts the right one
 twist-mux = "ros2 run twist_mux twist_mux --ros-args --params-file config/twist_mux.yaml -r cmd_vel_out:=/cmd_vel"
+twist-mux-control = "ros2 run twist_mux twist_mux --ros-args --params-file config/twist_mux.yaml -r cmd_vel_out:=/mecanum_drive_controller/reference"
 # Publishes which mux input drives the base on /robot/active_input
 mux-status = "talos-mux-status-ros --ros-args --params-file config/twist_mux.yaml"
 
