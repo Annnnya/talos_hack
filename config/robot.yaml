@@ -28,7 +28,8 @@ base:
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel, rear_right_wheel]
   wheelbase_m: 0.31
   track_width_m: 0.128
-  steps_per_meter: 1000.0
+  # Steps per metre of wheel travel are 4096 / (2 * pi * wheel_radius_m).
+  wheel_radius_m: 0.03
   # m/s and rad/s; /cmd_vel and `talos-servo drive` are clamped to these.
   max_linear_speed: 0.1
   max_angular_speed: 0.5
@@ -37,7 +38,6 @@ base:
 # The robot is an inverted V: the bend hinge on top, a leg down to each wheel
 # pair. bend is the opening angle between the legs: 180 flat, smaller folded.
 model:
-  wheel_radius_m: 0.03
   # Hinge to wheel axle. Flat, the wheelbase is 2 * leg_length_m and must
   # match base.wheelbase_m.
   leg_length_m: 0.155

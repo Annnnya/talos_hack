@@ -70,7 +70,6 @@ def test_base_is_optional():
 
 
 MODEL = {
-    "wheel_radius_m": 0.03,
     "leg_length_m": 0.15,
     "leg_gear_ratio": 0.5,
     "bend_min_deg": 90,
@@ -95,7 +94,7 @@ def test_model_is_optional():
         ({"leg_length_m": 0.2}, "base.wheelbase_m"),
         ({"bend_min_deg": 180}, "bend_min_deg < bend_max_deg"),
         ({"bend_max_deg": 200}, "bend_max_deg <= 180"),
-        ({"wheel_radius_m": 0}, "positive"),
+        ({"leg_gear_ratio": 0}, "positive"),
     ],
 )
 def test_invalid_model_is_rejected(change, message):
@@ -107,3 +106,17 @@ def test_repo_config_is_valid():
     config = load_config(ROBOT_CONFIG)
     assert config.model is not None
     assert config.base is not None
+
+
+def test_steps_per_meter_follow_the_wheel_radius():
+    data = copy.deepcopy(BASE)
+    data["base"]["wheel_radius_m"] = 0.03
+    base = parse_config(data).base
+    assert base.steps_per_meter == pytest.approx(4096 / (2 * math.pi * 0.03))
+
+
+def test_wheel_radius_is_required():
+    data = copy.deepcopy(BASE)
+    del data["base"]["wheel_radius_m"]
+    with pytest.raises(ConfigError, match="wheel_radius_m"):
+        parse_config(data)

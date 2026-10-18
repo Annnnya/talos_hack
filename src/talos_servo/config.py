@@ -10,7 +10,12 @@ from pathlib import Path
 
 import yaml
 
-from talos_servo.bus import MAX_POSITION, MAX_SERVO_ID, MAX_SPEED
+from talos_servo.bus import (
+    MAX_POSITION,
+    MAX_SERVO_ID,
+    MAX_SPEED,
+    STEPS_PER_TURN,
+)
 
 SPEED = "speed"
 POSITION = "position"
@@ -59,9 +64,14 @@ class BaseConfig:
     wheels: tuple[str, str, str, str]
     wheelbase_m: float
     track_width_m: float
-    steps_per_meter: float
+    wheel_radius_m: float
     max_linear_speed: float = DEFAULT_MAX_LINEAR_SPEED
     max_angular_speed: float = DEFAULT_MAX_ANGULAR_SPEED
+
+    @property
+    def steps_per_meter(self) -> float:
+        """Servo steps for one metre of wheel travel."""
+        return STEPS_PER_TURN / (2 * math.pi * self.wheel_radius_m)
 
 
 @dataclass(frozen=True)
@@ -72,7 +82,6 @@ class ModelConfig:
     when folded. Each leg gear turns `leg_gear_ratio` times the servo.
     """
 
-    wheel_radius_m: float
     leg_length_m: float
     leg_gear_ratio: float
     bend_min_deg: float
@@ -197,7 +206,7 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
         wheels=(wheels[0], wheels[1], wheels[2], wheels[3]),
         wheelbase_m=_positive(raw, "wheelbase_m"),
         track_width_m=_positive(raw, "track_width_m"),
-        steps_per_meter=_positive(raw, "steps_per_meter"),
+        wheel_radius_m=_positive(raw, "wheel_radius_m"),
         max_linear_speed=_positive(
             raw, "max_linear_speed", DEFAULT_MAX_LINEAR_SPEED
         ),
@@ -209,7 +218,6 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
 
 def _parse_model(raw: dict, base: BaseConfig | None) -> ModelConfig:
     model = ModelConfig(
-        wheel_radius_m=_positive(raw, "wheel_radius_m"),
         leg_length_m=_positive(raw, "leg_length_m"),
         leg_gear_ratio=_positive(raw, "leg_gear_ratio"),
         bend_min_deg=_positive(raw, "bend_min_deg"),

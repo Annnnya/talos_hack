@@ -21,7 +21,7 @@
   <xacro:property name="base" value="${cfg['base']}"/>
 
   <!-- Named parameters shared with #60 and the controllers. -->
-  <xacro:property name="r" value="${model['wheel_radius_m']}"/>
+  <xacro:property name="r" value="${base['wheel_radius_m']}"/>
   <xacro:property name="l" value="${model['leg_length_m']}"/>
   <xacro:property name="track" value="${base['track_width_m']}"/>
   <!-- bend is the hinge opening angle alpha: pi flat, bend_min at max
