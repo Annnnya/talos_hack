@@ -22,13 +22,13 @@
         timeout: 0.5
         priority: 10
     locks:
-      # STOP from any interface: publish true to stop the base, false to
-      # release it. Timeout 0 keeps the lock until it is released. It only
-      # lives in twist_mux's memory, so a twist_mux restart clears STOP
-      # (#103).
+      # STOP, owned by the mode node: set it with /robot/set_stop. The mode
+      # node repeats the STOP state every 0.1 s. A lock that goes quiet for
+      # the timeout counts as on: a dead mode node stops the base, and a
+      # restarted twist_mux starts locked and the beats keep it so (#103).
       stop:
         topic: /robot/stop_lock
-        timeout: 0.0
+        timeout: 0.5
         # Above every input, so the lock masks all of them.
         priority: 100
 

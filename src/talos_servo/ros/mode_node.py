@@ -5,6 +5,12 @@
   changed, or the last fault reported while the mode was kept
 - `/robot/wall_nearby` (std_srvs/Trigger): free -> aligning
 - `/robot/release` (std_srvs/Trigger): any mode -> free
+- `/robot/set_stop` (std_srvs/SetBool): true turns STOP on, false releases
+  it. STOP starts on, so a restarted mode node never releases it
+- `/robot/stop_lock` (std_msgs/Bool): the STOP state, repeated every
+  `STOP_LOCK_PERIOD_S` for twist_mux. Its lock has a timeout, so a quiet
+  lock (this node is down) also stops the base, and a restarted twist_mux
+  is locked again by the next beat (#103)
 
 On every mode change the node asks controller_manager which controllers are
 active (`list_controllers`) and switches (`switch_controller`) so that
@@ -38,11 +44,16 @@ from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String
-from std_srvs.srv import Trigger
+from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.config import ModesConfig, load_config
-from talos_servo.defaults import DEFAULT_CONFIG, ROBOT_NS
+from talos_servo.defaults import (
+    DEFAULT_CONFIG,
+    QUEUE_DEPTH,
+    ROBOT_NS,
+    STOP_LOCK_PERIOD_S,
+)
 from talos_servo.modes import (
     Event,
     InvalidTransition,
@@ -61,6 +72,8 @@ MODE_TOPIC = f"{ROBOT_NS}/mode"
 MODE_REASON_TOPIC = f"{ROBOT_NS}/mode_reason"
 WALL_NEARBY_SERVICE = f"{ROBOT_NS}/wall_nearby"
 RELEASE_SERVICE = f"{ROBOT_NS}/release"
+SET_STOP_SERVICE = f"{ROBOT_NS}/set_stop"
+STOP_LOCK_TOPIC = f"{ROBOT_NS}/stop_lock"
 DEFAULT_CONTROLLER_MANAGER = "/controller_manager"
 SWITCH_POLL_INTERVAL = 0.05
 RECONCILE_PERIOD_S = 1.0
@@ -223,6 +236,15 @@ class ModeNode(Node):
             self.declare_parameter("require_controller_manager", False).value
         )
         group = ReentrantCallbackGroup()
+        # Separate from self._lock, which a controller switch holds: STOP
+        # must never wait for a switch.
+        self._stop_lock = threading.Lock()
+        self._stopped = True
+        # Default volatile QoS, like twist_mux's lock subscription; the
+        # beats, not latching, reach a twist_mux that starts later.
+        self.stop_lock_pub = self.create_publisher(
+            Bool, STOP_LOCK_TOPIC, QUEUE_DEPTH
+        )
         self.mode_pub = self.create_publisher(String, MODE_TOPIC, LATCHED)
         self.reason_pub = self.create_publisher(
             String, MODE_REASON_TOPIC, LATCHED
@@ -246,8 +268,18 @@ class ModeNode(Node):
         self.create_timer(
             RECONCILE_PERIOD_S, self.reconcile, callback_group=group
         )
+        self.create_service(
+            SetBool, SET_STOP_SERVICE, self.on_set_stop, callback_group=group
+        )
+        self.create_timer(
+            STOP_LOCK_PERIOD_S, self.publish_stop_lock, callback_group=group
+        )
         self.publish_mode()
-        self.get_logger().info(f"mode {self.machine.mode.value}")
+        self.publish_stop_lock()
+        self.get_logger().info(
+            f"mode {self.machine.mode.value}, STOP on until /robot/set_stop "
+            "false"
+        )
 
     @property
     def mode(self) -> Mode:
@@ -272,6 +304,31 @@ class ModeNode(Node):
             f"mode {old.value} -> {new.value}: {transition.reason}"
         )
         return transition
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
+
+    def set_stopped(self, stopped: bool) -> None:
+        """Turn STOP on or off and tell twist_mux right away."""
+        with self._stop_lock:
+            changed = stopped != self._stopped
+            self._stopped = stopped
+            self.stop_lock_pub.publish(Bool(data=stopped))
+        if changed:
+            self.get_logger().info("STOP on" if stopped else "STOP released")
+
+    def publish_stop_lock(self) -> None:
+        with self._stop_lock:
+            self.stop_lock_pub.publish(Bool(data=self._stopped))
+
+    def on_set_stop(
+        self, request: SetBool.Request, response: SetBool.Response
+    ) -> SetBool.Response:
+        self.set_stopped(bool(request.data))
+        response.success = True
+        response.message = "stopped" if request.data else "released"
+        return response
 
     def reconcile(self) -> None:
         """Bring the active controllers back to the current mode's set."""
