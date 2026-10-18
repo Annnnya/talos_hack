@@ -10,6 +10,7 @@ import type {
   ServerMessage,
   ServoSettings,
   ServoState,
+  TiltState,
 } from "./protocol";
 
 export type ConnStatus = "connecting" | "connected" | "disconnected";
@@ -40,6 +41,7 @@ export function useBridge() {
   const [activeInput, setActiveInput] = useState<string | null>(null);
   const [hinge, setHinge] = useState<HingeState | null>(null);
   const [hold, setHold] = useState<HoldState | null>(null);
+  const [tilt, setTilt] = useState<TiltState | null>(null);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -68,6 +70,7 @@ export function useBridge() {
           setActiveInput(msg.active_input);
           setHinge(msg.hinge ?? null);
           setHold(msg.hinge_hold ?? null);
+          setTilt(msg.tilt ?? null);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -105,6 +108,7 @@ export function useBridge() {
     activeInput,
     hinge,
     hold,
+    tilt,
     settings,
     clientId,
     lastError,

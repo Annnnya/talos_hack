@@ -13,7 +13,8 @@ from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import TwistStamped
 from rclpy.context import Context
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
@@ -25,6 +26,7 @@ from talos_servo.ros.names import (
     HOLD_ENABLE_SERVICE,
     HOLD_SETPOINT_TOPIC,
     HOLD_STATE_TOPIC,
+    IMU_DATA_TOPIC,
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
@@ -59,6 +61,7 @@ class WebClientNode(Node):
         on_mode_reason: Callable[[String], None] = _ignore,
         on_active_input: Callable[[String], None] = _ignore,
         on_hold_state: Callable[[String], None] = _ignore,
+        on_imu: Callable[[Imu], None] = _ignore,
         node_name: str = NODE_NAME,
         cmd_vel_topic: str = CMD_VEL_TOPIC,
         context: Context | None = None,
@@ -119,6 +122,10 @@ class WebClientNode(Node):
         )
         self.create_subscription(
             String, HOLD_STATE_TOPIC, on_hold_state, QUEUE_DEPTH
+        )
+        # Filtered IMU with orientation, for the platform tilt (#91).
+        self.create_subscription(
+            Imu, IMU_DATA_TOPIC, on_imu, qos_profile_sensor_data
         )
         self.torque_clients = {
             joint: self.create_client(SetBool, f"{ROBOT_NS}/{joint}/set_torque")

@@ -242,6 +242,8 @@ def create_app(
             "hinge": controller.hinge_state(),
             # Hinge current hold (#142); None without the expansion node.
             "hinge_hold": controller.hold_state(),
+            # Platform roll and pitch from the IMU (#91); None without it.
+            "tilt": controller.tilt(),
         }
 
     async def control_loop() -> None:

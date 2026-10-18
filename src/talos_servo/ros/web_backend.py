@@ -36,7 +36,7 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
@@ -52,6 +52,7 @@ from talos_servo.defaults import (
     STOP_LOCK_TIMEOUT_S,
 )
 from talos_servo.modes import RobotStatus
+from talos_servo.orientation import platform_tilt
 from talos_servo.robot import (
     SOURCE_WEB,
     CommandError,
@@ -69,6 +70,7 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.imu_convert import COVARIANCE_NOT_PROVIDED
 from talos_servo.ros.robot_node import BASE_FRAME, CMD_VEL_TOPIC
 from talos_servo.ros.web_client_node import WebClientNode
 
@@ -91,6 +93,9 @@ MODE_HINT = "start it with `pixi run -e ros mode-node`"
 # other senders are always applied.
 COMMAND_SETTLE_TIME = 1.0
 EXECUTOR_JOIN_TIMEOUT = 2.0
+# The Madgwick filter publishes at the IMU rate (100 Hz); this much silence
+# means the IMU chain is gone and the tilt is unknown.
+TILT_STALE_AFTER = 0.5
 
 
 class RosBackend:
@@ -143,6 +148,9 @@ class RosBackend:
         # Last /hinge_hold/state from the expansion node, and when it came.
         self._hold: dict[str, Any] | None = None
         self._hold_at: float | None = None
+        # Platform roll and pitch (rad) from the IMU, and when they came.
+        self._tilt: tuple[float, float] | None = None
+        self._tilt_at: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -159,6 +167,7 @@ class RosBackend:
                 on_mode_reason=self._on_mode_reason,
                 on_active_input=self._on_active_input,
                 on_hold_state=self._on_hold_state,
+                on_imu=self._on_imu,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -550,6 +559,29 @@ class RosBackend:
             if self._clock() - self._hold_at > STATUS_STALE_AFTER:
                 return None
             return dict(self._hold)
+
+    def _on_imu(self, msg: Imu) -> None:
+        # The raw IMU topic has no orientation; only the filtered one counts.
+        if msg.orientation_covariance[0] == COVARIANCE_NOT_PROVIDED:
+            return
+        q = msg.orientation
+        tilt = platform_tilt((q.x, q.y, q.z, q.w), self.config.imu.rpy)
+        with self._lock:
+            self._tilt, self._tilt_at = tilt, self._clock()
+
+    def tilt(self) -> dict[str, float] | None:
+        """Platform roll and pitch (deg) from the IMU, None while the IMU
+        chain is quiet."""
+        with self._lock:
+            if self._tilt_at is None or self._tilt is None:
+                return None
+            if self._clock() - self._tilt_at > TILT_STALE_AFTER:
+                return None
+            roll, pitch = self._tilt
+        return {
+            "roll_deg": math.degrees(roll),
+            "pitch_deg": math.degrees(pitch),
+        }
 
     def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
         """Set the hold setpoint (A), then turn the hold on or off."""

@@ -496,3 +496,22 @@ def test_hinge_is_refused_while_climbing_but_stops():
 def test_hinge_needs_ros():
     with pytest.raises(CommandError, match="--ros"):
         server._dispatch(HingeRecorder(), {"type": "hinge", "rate": 0.1})
+
+
+def test_state_reports_the_platform_tilt(robot, monkeypatch):
+    # The direct Robot has no IMU; a ROS backend fills it in (#91).
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        assert ws.receive_json()["tilt"] is None
+    monkeypatch.setattr(
+        robot, "tilt", lambda: {"roll_deg": -1.5, "pitch_deg": 2.0}
+    )
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        assert ws.receive_json()["tilt"] == {"roll_deg": -1.5, "pitch_deg": 2.0}

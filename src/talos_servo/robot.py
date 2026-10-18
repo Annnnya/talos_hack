@@ -440,6 +440,10 @@ class Robot:
         """The hinge readout comes from the hardware bridge, over ROS."""
         return None
 
+    def tilt(self) -> dict[str, float] | None:
+        """The platform tilt comes from the IMU chain, over ROS."""
+        return None
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)

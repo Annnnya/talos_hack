@@ -58,6 +58,10 @@ def calibrate_service(joint: str, step: str) -> str:
 # mux_status node
 ACTIVE_INPUT_TOPIC = f"{ROBOT_NS}/active_input"
 
+# IMU chain: the Madgwick filter turns the imu node's /imu/data_raw into
+# this, with an orientation quaternion (#91).
+IMU_DATA_TOPIC = "/imu/data"
+
 # Late subscribers (a UI that starts after the node) still get the last value.
 LATCHED = QoSProfile(
     depth=1,

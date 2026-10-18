@@ -29,7 +29,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
-from sensor_msgs.msg import JointState  # noqa: E402
+from sensor_msgs.msg import Imu, JointState  # noqa: E402
 from std_msgs.msg import Float64, String  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
@@ -39,12 +39,17 @@ from talos_servo.defaults import (  # noqa: E402
     KEYBOARD_CMD_VEL_TOPIC,
     WEB_CMD_VEL_TOPIC,
 )
+from talos_servo.orientation import from_rpy  # noqa: E402
 from talos_servo.robot import SOURCE_CLI, CommandError, Robot  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
+from talos_servo.ros.imu_convert import (  # noqa: E402
+    not_provided_covariance,
+)
 from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.names import (  # noqa: E402
     ACTIVE_INPUT_TOPIC,
     EXPANSION_RATE_TOPIC,
+    IMU_DATA_TOPIC,
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
@@ -54,6 +59,7 @@ from talos_servo.ros.names import (  # noqa: E402
 from talos_servo.ros.robot_node import RobotNode  # noqa: E402
 from talos_servo.ros.web_backend import (  # noqa: E402
     STATUS_STALE_AFTER,
+    TILT_STALE_AFTER,
     RosBackend,
 )
 from talos_servo.web.server import create_app  # noqa: E402
@@ -301,6 +307,80 @@ def test_nan_joint_states_keep_the_last_reading():
         before["position"],
         before["speed"],
     )
+
+
+# --- platform tilt from the IMU (#91) --------------------------------------
+
+
+def imu_msg(roll: float, pitch: float, *, raw: bool = False) -> Imu:
+    msg = Imu()
+    x, y, z, w = from_rpy(roll, pitch, 0.0)
+    msg.orientation.x, msg.orientation.y = x, y
+    msg.orientation.z, msg.orientation.w = z, w
+    if raw:
+        msg.orientation_covariance = not_provided_covariance()
+    return msg
+
+
+def test_tilt_comes_from_the_filtered_imu():
+    backend = make_backend()
+    assert backend.tilt() is None
+    backend._on_imu(imu_msg(math.radians(-2.0), math.radians(5.0)))
+    tilt = backend.tilt()
+    assert tilt["roll_deg"] == pytest.approx(-2.0)
+    assert tilt["pitch_deg"] == pytest.approx(5.0)
+
+
+def test_raw_imu_without_an_orientation_is_ignored():
+    backend = make_backend()
+    backend._on_imu(imu_msg(0.1, 0.2, raw=True))
+    assert backend.tilt() is None
+
+
+def test_tilt_goes_stale_when_the_imu_chain_stops():
+    clock = FakeClock()
+    backend = make_backend(clock=clock)
+    backend._on_imu(imu_msg(0.1, 0.0))
+    assert backend.tilt() is not None
+    clock.now += TILT_STALE_AFTER + 0.1
+    assert backend.tilt() is None
+
+
+def test_tilt_takes_the_mount_off():
+    from dataclasses import replace
+
+    from talos_servo.config import ImuMountConfig
+
+    mount = ImuMountConfig(rpy=(0.0, 0.0, math.pi / 2))
+    backend = RosBackend(
+        replace(CONFIG, imu=mount), context=rclpy.get_default_context()
+    )
+    # The board is turned a quarter turn: its own pitch is the platform's
+    # roll, with the sign from the rotation.
+    from talos_servo.orientation import multiply
+
+    x, y, z, w = multiply(from_rpy(0.2, 0.0, 0.0), from_rpy(*mount.rpy))
+    msg = Imu()
+    msg.orientation.x, msg.orientation.y = x, y
+    msg.orientation.z, msg.orientation.w = z, w
+    backend._on_imu(msg)
+    tilt = backend.tilt()
+    assert tilt["roll_deg"] == pytest.approx(math.degrees(0.2))
+    assert tilt["pitch_deg"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_tilt_arrives_over_the_imu_topic(backend):
+    node = rclpy.create_node("imu_for_web_backend")
+    pub = node.create_publisher(Imu, IMU_DATA_TOPIC, 10)
+    try:
+        wait_for(lambda: pub.get_subscription_count() > 0, WAIT)
+        deadline = time.monotonic() + WAIT
+        while backend.tilt() is None and time.monotonic() < deadline:
+            pub.publish(imu_msg(0.0, math.radians(3.0)))
+            time.sleep(0.05)
+        assert backend.tilt()["pitch_deg"] == pytest.approx(3.0)
+    finally:
+        node.destroy_node()
 
 
 def test_silent_robot_node_marks_joints_offline():
