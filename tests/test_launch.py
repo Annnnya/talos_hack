@@ -41,6 +41,36 @@ def test_flags_add_the_camera_and_the_imu_chain(launch):
     assert list(cmds) == [*DRIVE, "camera_node", *IMU]
 
 
+def test_viz_adds_the_ekf_without_the_imu(launch):
+    # The EKF alone publishes odom -> base_link, which RViz needs.
+    cmds = launch.processes("/dev/ttyX", "robot.yaml", web=False, viz=True)
+    assert list(cmds) == [*DRIVE, "ekf"]
+
+
+def test_viz_with_the_imu_starts_one_ekf(launch):
+    cmds = launch.processes(
+        "/dev/ttyX", "robot.yaml", web=False, imu=True, viz=True
+    )
+    assert list(cmds) == [*DRIVE, *IMU]
+
+
+def test_viz_needs_ros2_control(launch):
+    from launch import LaunchContext
+
+    context = LaunchContext()
+    context.launch_configurations.update(
+        {
+            "port": "/dev/ttyX",
+            "config": str(ROOT / "config" / "robot.yaml"),
+            "web": "false",
+            "ros2_control": "false",
+            "viz": "true",
+        }
+    )
+    with pytest.raises(RuntimeError, match="viz"):
+        launch._robot(context)
+
+
 def test_robot_node_instead_of_ros2_control(launch):
     cmds = launch.processes("/dev/ttyX", "robot.yaml", ros2_control=False)
     assert list(cmds) == [*ROBOT_NODE_DRIVE, "web"]
