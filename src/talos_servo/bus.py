@@ -23,6 +23,7 @@ from scservo_sdk import (
     SMS_STS_PRESENT_TEMPERATURE,
     SMS_STS_PRESENT_VOLTAGE,
     SMS_STS_TORQUE_ENABLE,
+    GroupSyncRead,
     PortHandler,
     sms_sts,
 )
@@ -79,6 +80,9 @@ POSITION_SIGN_BIT = 15
 # One read covers every present-state register, from position through current.
 TELEMETRY_START = SMS_STS_PRESENT_POSITION_L
 TELEMETRY_LENGTH = SMS_STS_PRESENT_CURRENT_H - SMS_STS_PRESENT_POSITION_L + 1
+# Present position and speed: two words from SMS_STS_PRESENT_POSITION_L.
+POSITION_SPEED_LENGTH = SMS_STS_PRESENT_SPEED_L + 2 - SMS_STS_PRESENT_POSITION_L
+WORD = 2
 
 
 @dataclass(frozen=True)
@@ -409,6 +413,42 @@ class ServoBus:
         position, speed, comm, error = self._handler.ReadPosSpeed(servo_id)
         self._check(comm, error, f"read position/speed of servo {servo_id}")
         return position, speed
+
+    def read_positions_speeds(
+        self, servo_ids: Sequence[int]
+    ) -> dict[int, tuple[int, int]]:
+        """Present position and speed of several servos in one sync-read
+        packet, by servo id.
+
+        A servo that does not answer, or answers with an error, is left out;
+        `read_telemetry` reports why. Raises ServoError when none answers.
+        """
+        if not servo_ids:
+            return {}
+        group = GroupSyncRead(
+            self._handler, SMS_STS_PRESENT_POSITION_L, POSITION_SPEED_LENGTH
+        )
+        for servo_id in servo_ids:
+            group.addParam(servo_id)
+        comm = group.txRxPacket()
+        readings = {}
+        for servo_id in servo_ids:
+            ok, error = group.isAvailable(
+                servo_id, SMS_STS_PRESENT_POSITION_L, POSITION_SPEED_LENGTH
+            )
+            if not ok or error:
+                continue
+            position = group.getData(servo_id, SMS_STS_PRESENT_POSITION_L, WORD)
+            speed = group.getData(servo_id, SMS_STS_PRESENT_SPEED_L, WORD)
+            readings[servo_id] = (
+                _signed(position, POSITION_SIGN_BIT),
+                _signed(speed, SPEED_SIGN_BIT),
+            )
+        if not readings:
+            operation = f"sync read of servos {list(servo_ids)}"
+            self._check(comm, 0, operation)
+            raise ServoError(f"{operation} failed: no servo answered")
+        return readings
 
     def read_telemetry(self, servo_id: int) -> ServoTelemetry:
         """Read position, speed and status in one request instead of six."""

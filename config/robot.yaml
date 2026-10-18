@@ -3,10 +3,13 @@
 # Changes take effect on restart (`talos.service`, or the command you ran).
 
 # Speed cap in steps/s for every joint. Low on purpose; the STS3215 tops out near 3000.
+# Under ros2_control the base wheels skip it: mecanum_drive_controller limits them
+# to max_linear_speed / max_angular_speed below.
 max_speed: 1000
 # How often joint state goes to the web UI and ROS.
 telemetry_hz: 20
-# How often the robot sends wheel speeds and reads one servo.
+# How often the robot sends wheel speeds, reads every wheel's position and speed
+# (one sync read) and reads one servo in full.
 control_hz: 50
 # Speed commands from ROS (/cmd_vel, velocity_cmd) stop the wheel if not repeated this often.
 command_timeout_s: 0.5
@@ -39,13 +42,15 @@ base:
 
 modes:
   # ros2_control controllers active in each robot mode. The mode node switches
-  # them through controller_manager. Placeholders until the controllers exist
-  # (#65, #76, #92); with no controller_manager running the switch is skipped.
+  # them through controller_manager; with no controller_manager running the
+  # switch is skipped. List only controllers in config/ros2_control.yaml: a
+  # missing one fails the switch, and so the mode change. Clamping and
+  # climbing stay empty (base stopped) until #76 and #92 add theirs.
   controllers:
     free: [mecanum_drive_controller]
     aligning: [mecanum_drive_controller]
-    clamping: [expansion_controller]
-    climbing: [wall_drive_controller]
+    clamping: []
+    climbing: []
   # Seconds to wait for controller_manager to answer a switch.
   switch_timeout_s: 2.0
 

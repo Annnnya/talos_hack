@@ -17,10 +17,18 @@ two topics; this node answers them with the `Robot` on the servo bus. See
   restarted). So starting or restarting either side never moves the hinge.
   A NaN position is no goal
 - `/talos/joint_states` (sensor_msgs/JointState, out): position (rad, wheels
-  keep counting past a full turn), velocity (rad/s), effort = current (A)
+  keep counting past a full turn), velocity (rad/s), effort = current (A).
+  Sent after every `Robot.tick` (`control_hz`), which reads every wheel's
+  position and speed, so the mecanum odometry gets fresh wheel states
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
   `moving`: readouts the plugin cannot carry, see `talos_servo.ros.readouts`
 - `/hardware_bridge/stop_all` (std_srvs/Trigger)
+- `/diagnostics` (diagnostic_msgs/DiagnosticArray): one entry per joint named
+  `<node name>: <joint>`, the same as the robot node's. Run as node `robot`
+  (`--ros-args -r __node:=robot`, as launch/robot.launch.py does) and the web
+  server reads it like the robot node: status, `/robot/stop_all` and the
+  `/robot/<joint>/*` readouts. Per-joint commands from `/debug` are not
+  served: the controllers own the joints
 
 The hinge (`model.hinge_joint`, `bend`) is the opening angle alpha in rad, pi
 flat, converted by `talos_servo.hinge.Hinge` from the fixed flat position
@@ -51,6 +59,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -68,6 +77,7 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.diagnostics import DIAGNOSTICS_TOPIC, joint_diagnostics
 from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
 from talos_servo.ros.topic_bridge import Unwrapper, unpack_commands
@@ -95,6 +105,13 @@ class HardwareBridgeNode(Node):
             self.declare_parameter("status_hz", DEFAULT_STATUS_HZ).value
         )
         self._controls = {name: j.control for name, j in robot.joints.items()}
+        # mecanum_drive_controller limits the body velocity from the base
+        # limits, so the per-joint max_speed cap does not apply to these.
+        self._uncapped = (
+            frozenset(config.base.wheels)
+            if config.base is not None
+            else frozenset()
+        )
         self._unwrappers = {
             name: Unwrapper()
             for name, control in self._controls.items()
@@ -121,12 +138,14 @@ class HardwareBridgeNode(Node):
             JointState, STATES_TOPIC, qos_profile_sensor_data
         )
         self.readouts = JointReadoutPublishers(self, "~", robot.joints)
+        self.status_pub = self.create_publisher(
+            DiagnosticArray, DIAGNOSTICS_TOPIC, QUEUE_DEPTH
+        )
         self.create_subscription(
             JointState, COMMANDS_TOPIC, self.on_commands, QUEUE_DEPTH
         )
         self.create_service(Trigger, "~/stop_all", self.on_stop_all)
         self.create_timer(1.0 / config.control_hz, self.tick)
-        self.create_timer(1.0 / config.telemetry_hz, self.publish_states)
         self.create_timer(1.0 / status_hz, self.publish_readouts)
         self.get_logger().info(
             f"bridging joints {sorted(robot.joints)} on {COMMANDS_TOPIC} and "
@@ -150,6 +169,7 @@ class HardwareBridgeNode(Node):
                 f"tick failed: {exc}", throttle_duration_sec=1.0
             )
         self._report_fault()
+        self.publish_states()
 
     def _report_fault(self) -> None:
         """Log once when the safe state latches and once when it clears."""
@@ -193,8 +213,11 @@ class HardwareBridgeNode(Node):
         return steps_to_rad(j["position"]), step_speed_to_rad(j["speed"])
 
     def publish_readouts(self) -> None:
-        self.readouts.publish_snapshot(
-            self.robot.snapshot(), self.get_clock().now().to_msg()
+        snapshot = self.robot.snapshot()
+        stamp = self.get_clock().now().to_msg()
+        self.readouts.publish_snapshot(snapshot, stamp)
+        self.status_pub.publish(
+            joint_diagnostics(self.get_name(), snapshot, stamp)
         )
 
     # --- commands --------------------------------------------------------
@@ -215,6 +238,7 @@ class HardwareBridgeNode(Node):
                     rad_speed_to_steps(velocity),
                     source=SOURCE_ROS,
                     expires=True,
+                    capped=joint not in self._uncapped,
                 ),
             )
         for joint, position in positions.items():

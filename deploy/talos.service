@@ -1,6 +1,7 @@
-# Start the whole robot on boot: `pixi run -e ros robot`, which runs the robot
-# node (the only program on the servo port), the mode node, twist_mux,
-# mux_status and the web UI on :8000 (launch/robot.launch.py). Edit User,
+# Start the whole robot on boot: `pixi run -e ros robot`, which runs
+# ros2_control with the hardware bridge (the only program on the servo port),
+# the mode node, twist_mux, mux_status and the web UI on :8000
+# (launch/robot.launch.py). Edit User,
 # paths and the serial port, then:
 #   sudo systemctl disable --now talos-robot talos-web   # older setup only
 #   sudo cp deploy/talos.service /etc/systemd/system/
@@ -11,7 +12,7 @@
 # stop any hand-started `talos-servo` command on the port.
 
 [Unit]
-Description=Talos robot (robot node, mode, twist_mux and web UI)
+Description=Talos robot (ros2_control, mode, twist_mux and web UI)
 After=network-online.target
 Wants=network-online.target
 

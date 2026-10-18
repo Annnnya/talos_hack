@@ -1,7 +1,7 @@
 """ROS 2 node that owns the robot: the only program on the servo serial port.
 
-- `/cmd_vel` (geometry_msgs/Twist, in): drive the mecanum base. Stops unless
-  repeated within `command_timeout_s` from the config
+- `/cmd_vel` (geometry_msgs/TwistStamped, in): drive the mecanum base. Stops
+  unless repeated within `command_timeout_s` from the config
 - `/odom` (nav_msgs/Odometry): wheel odometry in frame `odom`, child
   `base_link`, no TF (the EKF publishes odom -> base_link)
 - `/joint_states` (sensor_msgs/JointState): position rad, velocity rad/s, effort
@@ -29,8 +29,8 @@ import sys
 from collections.abc import Callable, Sequence
 
 import rclpy
-from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import Quaternion, Twist
+from diagnostic_msgs.msg import DiagnosticArray
+from geometry_msgs.msg import Quaternion, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -54,11 +54,11 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.diagnostics import DIAGNOSTICS_TOPIC, joint_diagnostics
 from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
 
 JOINT_STATES_TOPIC = "/joint_states"
-DIAGNOSTICS_TOPIC = "/diagnostics"
 CMD_VEL_TOPIC = "/cmd_vel"
 ODOM_TOPIC = "/odom"
 ODOM_FRAME = "odom"
@@ -69,25 +69,6 @@ ODOM_VELOCITY_VARIANCE = 0.01
 # Index of each fused field in a row-major 6x6 covariance.
 COVARIANCE_DIAGONAL = (0, 7, 14, 21, 28, 35)
 VX, VY, WZ = 0, 1, 5
-# Joint fields reported as key/values on /diagnostics.
-STATUS_KEYS = (
-    "control",
-    "torque",
-    "position",
-    "speed",
-    "load",
-    "voltage",
-    "temp",
-    "current",
-    "moving",
-    # Last command, so clients such as the web UI can show who moved a joint and
-    # when.
-    "target",
-    "target_speed",
-    "command_source",
-    "command_client",
-    "command_age",
-)
 
 
 class RobotNode(Node):
@@ -109,7 +90,7 @@ class RobotNode(Node):
         )
         self.readouts = JointReadoutPublishers(self, "~", robot.joints)
         self.create_subscription(
-            Twist, CMD_VEL_TOPIC, self.on_cmd_vel, QUEUE_DEPTH
+            TwistStamped, CMD_VEL_TOPIC, self.on_cmd_vel, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, "~/position_cmd", self.on_position_cmd, QUEUE_DEPTH
@@ -196,41 +177,20 @@ class RobotNode(Node):
         )
 
     def status_msg(self) -> DiagnosticArray:
-        msg = DiagnosticArray()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        for j in self.robot.snapshot():
-            status = DiagnosticStatus()
-            status.name = f"{self.get_name()}: {j['name']}"
-            status.hardware_id = f"feetech id {j['id']}"
-            if not j["online"]:
-                status.level, status.message = (
-                    DiagnosticStatus.ERROR,
-                    j["error"] or "offline",
-                )
-            elif j["error"]:
-                status.level, status.message = DiagnosticStatus.WARN, j["error"]
-            else:
-                status.level, status.message = DiagnosticStatus.OK, "ok"
-            last = j["last_command"] or {}
-            fields = {
-                **j,
-                "command_source": last.get("source"),
-                "command_client": last.get("client"),
-                "command_age": last.get("age"),
-            }
-            for key in STATUS_KEYS:
-                value = fields[key]
-                status.values.append(
-                    KeyValue(key=key, value="" if value is None else str(value))
-                )
-            msg.status.append(status)
-        return msg
+        return joint_diagnostics(
+            self.get_name(),
+            self.robot.snapshot(),
+            self.get_clock().now().to_msg(),
+        )
 
     # --- commands --------------------------------------------------------
-    def on_cmd_vel(self, msg: Twist) -> None:
+    def on_cmd_vel(self, msg: TwistStamped) -> None:
+        twist = msg.twist
         self._safely(
             "cmd_vel",
-            lambda: self.robot.drive(msg.linear.x, msg.linear.y, msg.angular.z),
+            lambda: self.robot.drive(
+                twist.linear.x, twist.linear.y, twist.angular.z
+            ),
         )
 
     def on_position_cmd(self, msg: JointState) -> None:

@@ -1,10 +1,10 @@
-"""The whole robot through ros2_control (#85).
+"""The whole robot through ros2_control (#85), without the teleop nodes.
 
 Starts robot_state_publisher with description/talos.urdf.xacro, the
 controller_manager with the topic based hardware plugin, a joint state
-broadcaster, forward command controllers for the wheels and the hinge, and
-our hardware bridge node on the servo port. Stop talos-robot (the robot node)
-first: only one program may own the port.
+broadcaster, mecanum_drive_controller for the base (#65), a forward command
+controller for the hinge, and our hardware bridge node on the servo port.
+Stop talos-robot (the robot node) first: only one program may own the port.
 
     pixi run -e ros ros2-control port:=/dev/ttyACM0
 
@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import xacro
 from launch import LaunchContext, LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -26,68 +25,30 @@ from launch.actions import (
     Shutdown,
 )
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
-from talos_servo.config import load_config
+from talos_servo.ros.control_launch import (  # noqa: F401 (tests use them)
+    BASE_CONTROLLER,
+    HINGE_CONTROLLER,
+    control_nodes,
+    spawned,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
-XACRO = ROOT / "description" / "talos.urdf.xacro"
-CONTROLLERS = ROOT / "config" / "ros2_control.yaml"
 ROBOT_CONFIG = ROOT / "config" / "robot.yaml"
 PORT_ENV_VAR = "TALOS_SERVO_PORT"
-SPAWNED = ("joint_state_broadcaster", "wheel_velocity_controller")
-# Only spawned while the hinge is enabled: it claims the hinge joint.
-HINGE_CONTROLLER = "bend_position_controller"
-
-
-def spawned(config_path: str) -> tuple[str, ...]:
-    """Controllers to spawn for this robot config."""
-    config = load_config(config_path)
-    model = config.model
-    enabled = {j.name for j in config.enabled_joints}
-    if model is not None and model.hinge_joint in enabled:
-        return (*SPAWNED, HINGE_CONTROLLER)
-    return SPAWNED
 
 
 def _robot(context: LaunchContext) -> list:
     port = LaunchConfiguration("port").perform(context)
-    # Forward slashes: xacro reads the path inside a Python string literal.
-    config = (
-        Path(LaunchConfiguration("config").perform(context))
-        .resolve()
-        .as_posix()
-    )
+    config = str(Path(LaunchConfiguration("config").perform(context)).resolve())
     # Without a port the bridge exits at once while controller_manager and
     # the spawners keep running, which is confusing on the bench.
     if not port:
         raise RuntimeError(
             f"no servo port: pass port:=/dev/ttyACM0 or set {PORT_ENV_VAR}"
         )
-    description = xacro.process_file(
-        str(XACRO), mappings={"robot_config": config}
-    ).toxml()
     return [
-        Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            parameters=[{"robot_description": description}],
-        ),
-        Node(
-            package="controller_manager",
-            executable="ros2_control_node",
-            parameters=[str(CONTROLLERS)],
-            remappings=[("~/robot_description", "/robot_description")],
-            output="screen",
-        ),
-        *(
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                arguments=[name],
-            )
-            for name in spawned(config)
-        ),
+        *control_nodes(ROOT, config),
         ExecuteProcess(
             cmd=[
                 "talos-hardware-bridge-ros",
