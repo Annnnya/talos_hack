@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 from conftest import BASE, SMALL
 
 from talos_servo.config import (
     ConfigError,
+    load_config,
     parse_config,
 )
 
@@ -62,3 +64,48 @@ def test_invalid_base_is_rejected(change, message):
 
 def test_base_is_optional():
     assert parse_config(SMALL).base is None
+
+
+def test_modes_are_optional():
+    assert parse_config(SMALL).modes is None
+
+
+def test_modes_parse_controllers_per_mode():
+    modes = parse_config(
+        {
+            **SMALL,
+            "modes": {
+                "controllers": {"free": ["drive"], "clamping": None},
+                "switch_timeout_s": 1.5,
+            },
+        }
+    ).modes
+    assert modes is not None
+    assert modes.for_mode("free") == ("drive",)
+    assert modes.for_mode("clamping") == ()
+    assert modes.for_mode("climbing") == ()
+    assert modes.switch_timeout_s == 1.5
+
+
+@pytest.mark.parametrize(
+    ("modes", "message"),
+    [
+        ([], "mapping"),
+        ({"controllers": ["drive"]}, "map a mode"),
+        ({"controllers": {"flying": ["drive"]}}, "unknown modes"),
+        ({"controllers": {"free": "drive"}}, "list of controller names"),
+        ({"controllers": {"free": [""]}}, "list of controller names"),
+        ({"switch_timeout_s": 0}, "positive"),
+    ],
+)
+def test_invalid_modes_are_rejected(modes, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config({**SMALL, "modes": modes})
+
+
+def test_repo_config_loads_modes():
+    config = load_config(
+        Path(__file__).resolve().parents[1] / "config" / "robot.yaml"
+    )
+    assert config.modes is not None
+    assert config.modes.for_mode("free")

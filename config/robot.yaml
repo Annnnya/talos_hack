@@ -32,3 +32,15 @@ base:
   # m/s and rad/s; /cmd_vel and `talos-servo drive` are clamped to these.
   max_linear_speed: 0.1
   max_angular_speed: 0.5
+
+modes:
+  # ros2_control controllers active in each robot mode. The mode node switches
+  # them through controller_manager. Placeholders until the controllers exist
+  # (#65, #76, #92); with no controller_manager running the switch is skipped.
+  controllers:
+    free: [mecanum_drive_controller]
+    aligning: [mecanum_drive_controller]
+    clamping: [expansion_controller]
+    climbing: [wall_drive_controller]
+  # Seconds to wait for controller_manager to answer a switch.
+  switch_timeout_s: 2.0

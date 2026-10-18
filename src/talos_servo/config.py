@@ -24,6 +24,10 @@ DEFAULT_COMMAND_TIMEOUT_S = 0.5
 DEFAULT_MAX_LINEAR_SPEED = 0.1
 DEFAULT_MAX_ANGULAR_SPEED = 0.5
 WHEEL_COUNT = 4
+DEFAULT_SWITCH_TIMEOUT_S = 2.0
+# Robot modes in `talos_servo.modes`; plain strings here so the config does
+# not depend on the state machine.
+MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 
 # Joint names are ROS names too (topics, services, JointState), so keep them
 # plain.
@@ -61,9 +65,25 @@ class BaseConfig:
 
 
 @dataclass(frozen=True)
+class ModesConfig:
+    """ros2_control controllers that are active in each robot mode.
+
+    The mode node deactivates the old mode's controllers and activates the
+    new ones on every mode change.
+    """
+
+    controllers: dict[str, tuple[str, ...]]
+    switch_timeout_s: float = DEFAULT_SWITCH_TIMEOUT_S
+
+    def for_mode(self, mode: str) -> tuple[str, ...]:
+        return self.controllers.get(mode, ())
+
+
+@dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
+    modes: ModesConfig | None = None
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -98,11 +118,14 @@ def parse_config(data: dict) -> RobotConfig:
         ),
     )
     raw_base = data.get("base")
-    if raw_base is None:
-        return config
-    return replace(
-        config, base=_parse_base(raw_base, {j.name: j for j in joints})
-    )
+    if raw_base is not None:
+        config = replace(
+            config, base=_parse_base(raw_base, {j.name: j for j in joints})
+        )
+    raw_modes = data.get("modes")
+    if raw_modes is not None:
+        config = replace(config, modes=_parse_modes(raw_modes))
+    return config
 
 
 def load_config(path: str | Path) -> RobotConfig:
@@ -172,6 +195,36 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
         ),
         max_angular_speed=_positive(
             raw, "max_angular_speed", DEFAULT_MAX_ANGULAR_SPEED
+        ),
+    )
+
+
+def _parse_modes(raw: dict) -> ModesConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("modes must be a mapping")
+    raw_controllers = raw.get("controllers") or {}
+    if not isinstance(raw_controllers, dict):
+        raise ConfigError("modes.controllers must map a mode to a list")
+    unknown = set(raw_controllers) - set(MODE_NAMES)
+    if unknown:
+        raise ConfigError(
+            f"modes.controllers: unknown modes {sorted(unknown)}, expected "
+            f"some of {MODE_NAMES}"
+        )
+    controllers: dict[str, tuple[str, ...]] = {}
+    for mode, names in raw_controllers.items():
+        names = [] if names is None else names
+        if not isinstance(names, list) or not all(
+            isinstance(n, str) and n for n in names
+        ):
+            raise ConfigError(
+                f"modes.controllers.{mode} must be a list of controller names"
+            )
+        controllers[mode] = tuple(names)
+    return ModesConfig(
+        controllers=controllers,
+        switch_timeout_s=_positive(
+            raw, "switch_timeout_s", DEFAULT_SWITCH_TIMEOUT_S
         ),
     )
 
