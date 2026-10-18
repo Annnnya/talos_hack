@@ -260,10 +260,15 @@ Python in `talos_servo.modes`.
 | any | release (`/robot/release`) | `free` |
 
 - Controllers per mode come from `modes.controllers` in `config/robot.yaml`.
-  Only the ones that differ are swapped, and a switch that controller_manager
-  rejects keeps the old mode.
+  The node diffs the new mode's set against the controllers
+  controller_manager reports as active, and a switch that controller_manager
+  rejects keeps the old mode. Every second it also puts the active
+  controllers back to the current mode's set (late start, restart, a switch
+  applied after a timeout).
 - While controller_manager is not running the switch is skipped with a
-  warning, so the mode node works before the controllers exist.
+  warning, so the mode node works before the controllers exist. Set
+  `-p require_controller_manager:=true` to make the mode change fail
+  instead.
 - In `clamping` and `climbing` STOP stops the wheels but the hinge keeps
   holding the walls.
 
