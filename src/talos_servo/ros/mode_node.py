@@ -7,6 +7,10 @@
 - `/robot/release` (std_srvs/Trigger): any mode -> free
 - `/robot/set_stop` (std_srvs/SetBool): true turns STOP on, false releases
   it. STOP starts on, so a restarted mode node never releases it
+- `/robot/hinge_motion` (std_srvs/SetBool): the expansion node (#76) sets it
+  while the hinge opens or closes. In free mode the `modes.hinge_motion`
+  controllers then replace the free ones. Refused outside free and
+  clamping and while STOP is on. A mode change or STOP clears it
 - `/robot/stop_lock` (std_msgs/Bool): the STOP state, repeated every
   `STOP_LOCK_PERIOD_S` for twist_mux. Its lock has a timeout, so a quiet
   lock (this node is down) also stops the base, and a restarted twist_mux
@@ -53,6 +57,7 @@ from talos_servo.defaults import (
     STOP_LOCK_PERIOD_S,
 )
 from talos_servo.modes import (
+    HINGE_MODES,
     Event,
     InvalidTransition,
     Mode,
@@ -60,6 +65,7 @@ from talos_servo.modes import (
     Transition,
 )
 from talos_servo.ros.names import (
+    HINGE_MOTION_SERVICE,
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
@@ -235,6 +241,8 @@ class ModeNode(Node):
         # must never wait for a switch.
         self._stop_lock = threading.Lock()
         self._stopped = True
+        # Set through /robot/hinge_motion while the expansion node moves.
+        self._hinge_motion = False
         # Default volatile QoS, like twist_mux's lock subscription; the
         # beats, not latching, reach a twist_mux that starts later.
         self.stop_lock_pub = self.create_publisher(
@@ -266,6 +274,12 @@ class ModeNode(Node):
         self.create_service(
             SetBool, SET_STOP_SERVICE, self.on_set_stop, callback_group=group
         )
+        self.create_service(
+            SetBool,
+            HINGE_MOTION_SERVICE,
+            self.on_hinge_motion,
+            callback_group=group,
+        )
         self.create_timer(
             STOP_LOCK_PERIOD_S, self.publish_stop_lock, callback_group=group
         )
@@ -290,15 +304,26 @@ class ModeNode(Node):
         with self._lock:
             old = self.machine.mode
             new = self.machine.peek(event)
-            self.switcher.sync(
-                self.modes.for_mode(new.value), self.modes.managed
-            )
+            # A mode change ends any hinge motion; the expansion node sees
+            # the new mode and asks again if it may.
+            self._hinge_motion = False
+            self.switcher.sync(self.target(new), self.modes.managed)
             transition = self.machine.handle(event, reason)
             self.publish_mode()
         self.get_logger().info(
             f"mode {old.value} -> {new.value}: {transition.reason}"
         )
         return transition
+
+    @property
+    def hinge_motion(self) -> bool:
+        return self._hinge_motion
+
+    def target(self, mode: Mode) -> tuple[str, ...]:
+        """Controllers that should be active in `mode` right now."""
+        if mode is Mode.FREE and self._hinge_motion and self.modes.hinge_motion:
+            return self.modes.hinge_motion
+        return self.modes.for_mode(mode.value)
 
     @property
     def stopped(self) -> bool:
@@ -310,6 +335,10 @@ class ModeNode(Node):
             changed = stopped != self._stopped
             self._stopped = stopped
             self.stop_lock_pub.publish(Bool(data=stopped))
+        if stopped:
+            # No switch here (STOP never waits for one): the next reconcile
+            # brings the free controllers back.
+            self._hinge_motion = False
         if changed:
             self.get_logger().info("STOP on" if stopped else "STOP released")
 
@@ -325,6 +354,32 @@ class ModeNode(Node):
         response.message = "stopped" if request.data else "released"
         return response
 
+    def on_hinge_motion(
+        self, request: SetBool.Request, response: SetBool.Response
+    ) -> SetBool.Response:
+        wanted = bool(request.data)
+        with self._lock:
+            mode = self.machine.mode
+            error = None
+            if wanted and mode not in HINGE_MODES:
+                error = f"the hinge cannot move while {mode.value}"
+            elif wanted and self._stopped:
+                error = "STOP is on"
+            if error is None:
+                self._hinge_motion = wanted
+                try:
+                    self.switcher.sync(self.target(mode), self.modes.managed)
+                except SwitchError as exc:
+                    self._hinge_motion = False
+                    error = str(exc)
+        if error is not None:
+            self.get_logger().warning(f"hinge motion: {error}")
+            response.success, response.message = False, error
+            return response
+        response.success = True
+        response.message = "hinge motion on" if wanted else "hinge motion off"
+        return response
+
     def reconcile(self) -> None:
         """Bring the active controllers back to the current mode's set."""
         if not self.switcher.ready:
@@ -333,11 +388,11 @@ class ModeNode(Node):
         if not self._lock.acquire(blocking=False):
             return
         try:
-            mode = self.machine.mode.value
-            if self.switcher.sync(
-                self.modes.for_mode(mode), self.modes.managed
-            ):
-                self.get_logger().info(f"controllers reconciled to {mode}")
+            mode = self.machine.mode
+            if self.switcher.sync(self.target(mode), self.modes.managed):
+                self.get_logger().info(
+                    f"controllers reconciled to {mode.value}"
+                )
         except SwitchError as exc:
             self.get_logger().warning(
                 f"reconcile: {exc}", throttle_duration_sec=5.0
