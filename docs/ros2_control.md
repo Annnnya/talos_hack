@@ -249,6 +249,30 @@ ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: false}"
 ros2 topic pub -r 10 /expansion/rate std_msgs/msg/Float64 "{data: 0.1}"
 ```
 
+## Clamping onto the walls (#78)
+
+Entering `clamping` makes the expansion node open the hinge by itself, at
+`expansion.clamp_rate_rad_s` (0.05 rad/s) with the wheels rolling along,
+until the wheels press on both walls. The logic is in `talos_servo.clamp`.
+
+- **Contact:** the hinge current or any wheel current (the `effort` of
+  `/joint_states`, in A) stays over `expansion.hinge_contact_current_a` or
+  `expansion.wheel_contact_current_a` for `expansion.contact_hold_s`. The
+  first `expansion.contact_grace_s` of each motion are ignored, since
+  starting draws current too. Current is read about 10 Hz per joint (see
+  below), so the hold time spans about two readings. The thresholds are
+  placeholders until tuned on the bench.
+- **On contact:** the wheels stop, the hinge goal goes to the measured angle
+  so it holds instead of pushing on, and the node calls
+  `/robot/wall_contact`: the mode node moves to `climbing`. The hold force
+  that keeps the walls pressed is #79.
+- **No wall:** if the hinge opens fully first, the node stops and calls
+  `/robot/no_wall`. The mode stays `clamping`, `/robot/mode_reason` says no
+  wall was found, and the operator releases or closes the hinge.
+- **STOP** pauses the clamp, and releasing STOP goes on, with a new grace
+  time. A rate on `/expansion/rate` (R or F) cancels the clamp and the
+  operator takes over until `clamping` is entered again.
+
 ## Open points
 
 - **State rate:** every `Robot.tick` (`control_hz`, 50 Hz, the same as

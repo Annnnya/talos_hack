@@ -358,6 +358,8 @@ base:
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
 | `/robot/hinge_motion` | `std_srvs/SetBool` | free: wheels to the expansion node |
+| `/robot/wall_contact` | `std_srvs/Trigger` | clamping -> climbing (expansion node) |
+| `/robot/no_wall` | `std_srvs/Trigger` | clamping: no wall found, mode kept |
 | `/expansion/rate` | `std_msgs/Float64` | in: open (+) or close (-) the hinge, rad/s |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
@@ -464,7 +466,7 @@ Python in `talos_servo.modes`.
 | --- | --- | --- |
 | `free` | wall nearby (`/robot/wall_nearby`) | `aligning` |
 | `aligning` | aligned with the walls | `clamping` |
-| `clamping` | wheels press on both walls | `climbing` |
+| `clamping` | wheels press on both walls (`/robot/wall_contact`) | `climbing` |
 | `climbing` | not moving up | `clamping` |
 | any | release (`/robot/release`) | `free` |
 
@@ -483,6 +485,11 @@ Python in `talos_servo.modes`.
   instead.
 - In `clamping` and `climbing` STOP stops the wheels but the hinge keeps
   holding the walls.
+- Entering `clamping` makes the expansion node open the hinge by itself
+  until the hinge or a wheel current shows wall contact (#78), then it
+  calls `/robot/wall_contact`. If the hinge opens fully first it calls
+  `/robot/no_wall`: the mode stays `clamping` and the reason says no wall
+  was found. Holding R or F while clamping takes over from it.
 - `/robot/hinge_motion` (`std_srvs/SetBool`) is for the expansion node: in
   `free` it swaps `mecanum_drive_controller` for `wheel_velocity_controller`
   while the hinge moves. Refused outside `free` and `clamping` and while
