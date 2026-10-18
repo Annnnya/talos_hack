@@ -148,6 +148,9 @@ class RosBackend:
         # Last /hinge_hold/state from the expansion node, and when it came.
         self._hold: dict[str, Any] | None = None
         self._hold_at: float | None = None
+        # Last /level/state from the expansion node, and when it came.
+        self._level: dict[str, Any] | None = None
+        self._level_at: float | None = None
         # Platform roll and pitch (rad) from the IMU, and when they came.
         self._tilt: tuple[float, float] | None = None
         self._tilt_at: float | None = None
@@ -168,6 +171,7 @@ class RosBackend:
                 on_active_input=self._on_active_input,
                 on_hold_state=self._on_hold_state,
                 on_imu=self._on_imu,
+                on_level_state=self._on_level_state,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -559,6 +563,31 @@ class RosBackend:
             if self._clock() - self._hold_at > STATUS_STALE_AFTER:
                 return None
             return dict(self._hold)
+
+    def _on_level_state(self, msg: String) -> None:
+        try:
+            state = json.loads(msg.data)
+        except ValueError:
+            return
+        with self._lock:
+            self._level, self._level_at = state, self._clock()
+
+    def level_state(self) -> dict[str, Any] | None:
+        """Level loop state from the expansion node, None when it has gone
+        quiet."""
+        with self._lock:
+            if self._level_at is None:
+                return None
+            if self._clock() - self._level_at > STATUS_STALE_AFTER:
+                return None
+            return dict(self._level)
+
+    def set_level(self, enabled: bool) -> None:
+        """Turn the level loop on or off."""
+        client = self._require_node().level_enable_client
+        if not client.service_is_ready():
+            raise CommandError("level: the expansion node is not running")
+        self._call(client, SetBool.Request(data=enabled), "level")
 
     def _on_imu(self, msg: Imu) -> None:
         # The raw IMU topic has no orientation; only the filtered one counts.

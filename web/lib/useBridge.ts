@@ -5,6 +5,7 @@ import type {
   ClientMessage,
   HingeState,
   HoldState,
+  LevelState,
   Limits,
   Mode,
   ServerMessage,
@@ -42,6 +43,7 @@ export function useBridge() {
   const [hinge, setHinge] = useState<HingeState | null>(null);
   const [hold, setHold] = useState<HoldState | null>(null);
   const [tilt, setTilt] = useState<TiltState | null>(null);
+  const [level, setLevel] = useState<LevelState | null>(null);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -71,6 +73,7 @@ export function useBridge() {
           setHinge(msg.hinge ?? null);
           setHold(msg.hinge_hold ?? null);
           setTilt(msg.tilt ?? null);
+          setLevel(msg.level ?? null);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -109,6 +112,7 @@ export function useBridge() {
     hinge,
     hold,
     tilt,
+    level,
     settings,
     clientId,
     lastError,

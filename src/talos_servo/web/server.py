@@ -156,6 +156,11 @@ def _dispatch(
             raise CommandError(f"setpoint must be 0 or more, got {setpoint}")
         setpoint = min(setpoint, controller.config.hinge_hold.max_current_a)
         return lambda: controller.hinge_hold(enabled, setpoint)
+    if kind == "level":
+        if not ros:
+            raise CommandError("the level loop needs `talos-servo web --ros`")
+        enabled = bool(msg["enabled"])
+        return lambda: controller.set_level(enabled)
     if kind == "wall_side":
         if not ros:
             raise CommandError(
@@ -244,6 +249,8 @@ def create_app(
             "hinge_hold": controller.hold_state(),
             # Platform roll and pitch from the IMU (#91); None without it.
             "tilt": controller.tilt(),
+            # Level loop (#82); None without the expansion node.
+            "level": controller.level_state(),
         }
 
     async def control_loop() -> None:

@@ -440,6 +440,12 @@ class Robot:
         """The hinge readout comes from the hardware bridge, over ROS."""
         return None
 
+    def set_level(self, enabled: bool) -> None:
+        raise CommandError("the level loop needs `talos-servo web --ros`")
+
+    def level_state(self) -> dict[str, Any] | None:
+        return None
+
     def tilt(self) -> dict[str, float] | None:
         """The platform tilt comes from the IMU chain, over ROS."""
         return None
