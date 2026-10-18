@@ -22,7 +22,7 @@ from talos_servo.bus import (
     ServoError,
 )
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, WEB_CMD_VEL_TOPIC
-from talos_servo.modes import drive_error
+from talos_servo.modes import drive_error, hinge_error
 from talos_servo.robot import SOURCE_WEB, CommandError, clamp
 from talos_servo.web.backend import RobotBackend
 
@@ -96,7 +96,7 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
 
 # Client messages that change nothing the UI shows. The browser re-sends drive
 # while a button is held, so a state broadcast per message would flood it.
-QUIET_COMMANDS = frozenset({"drive"})
+QUIET_COMMANDS = frozenset({"drive", "hinge"})
 # Client messages that ask the mode node for a mode change -> backend method.
 MODE_COMMANDS = {"wall_nearby": "wall_nearby", "release": "release_walls"}
 
@@ -139,6 +139,14 @@ def _dispatch(
         if error:
             raise CommandError(error)
         return lambda: controller.drive(vx, vy, wz, **who)
+    if kind == "hinge":
+        if not ros:
+            raise CommandError("the hinge buttons need `talos-servo web --ros`")
+        rate = _finite(msg, "rate")
+        error = hinge_error(controller.robot_status().mode, rate)
+        if error:
+            raise CommandError(error)
+        return lambda: controller.move_hinge(rate)
     if kind in MODE_COMMANDS:
         if not ros:
             raise CommandError(f"{kind} needs `talos-servo web --ros`")
@@ -201,6 +209,8 @@ def create_app(
             "mode": status.mode,
             "mode_reason": status.mode_reason,
             "active_input": status.active_input,
+            # Angle and raw servo step for calibration; None without ROS.
+            "hinge": controller.hinge_state(),
         }
 
     async def control_loop() -> None:

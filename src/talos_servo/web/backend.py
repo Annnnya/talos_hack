@@ -57,6 +57,14 @@ class RobotBackend(Protocol):
         """Ask the mode node to release the walls and go back to free. Over
         ROS only."""
 
+    def move_hinge(self, rate: float) -> None:
+        """Hinge opening speed (rad/s, + opens). Stops unless repeated. Over
+        ROS only."""
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """Hinge angle and raw servo step for calibration; None without ROS
+        or without a hinge."""
+
     def drive(
         self,
         linear_x: float,

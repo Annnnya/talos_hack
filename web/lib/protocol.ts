@@ -47,6 +47,21 @@ export interface Limits {
   angular_max: number | null;
 }
 
+/** Hinge readout for calibrating model.bend_flat_steps (ROS only). */
+export interface HingeState {
+  joint: string;
+  /** Opening angle, 180 flat; null while the bridge cannot tell. */
+  angle_deg: number | null;
+  /** Raw servo position as `talos-servo monitor` shows it; null while unknown. */
+  raw_steps: number | null;
+  /** model.bend_flat_steps in config/robot.yaml. */
+  flat_steps: number | null;
+  min_deg: number;
+  max_deg: number;
+  /** Opening speed of the hold buttons, rad/s. */
+  max_rate: number;
+}
+
 /** Shared by every browser, kept by the server until it restarts. */
 export interface ServoSettings {
   move_speed: number;
@@ -68,6 +83,8 @@ export type ServerMessage =
       mode_reason: string | null;
       /** twist_mux input driving now: "web", "keyboard", "none" or "locked". */
       active_input: string | null;
+      /** Null without ROS or without a hinge. */
+      hinge: HingeState | null;
     }
   | { type: "error"; message: string };
 
@@ -85,6 +102,8 @@ export type ClientMessage =
   | { type: "release" }
   /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
   | { type: "drive"; vx: number; vy: number; wz: number }
+  /** Hinge opening speed (rad/s, + opens, 0 stops), ROS only. Re-send while held. */
+  | { type: "hinge"; rate: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;

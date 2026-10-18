@@ -76,5 +76,9 @@ class Hinge:
             raise ValueError(f"{self.joint}: angle must be finite, got {alpha}")
         return self._raw_steps(min(self.max_rad, max(self.min_rad, alpha)))
 
+    def steps_at(self, alpha: float) -> int:
+        """Joint steps at an opening angle, not clamped: for readouts."""
+        return self._raw_steps(alpha)
+
     def _raw_steps(self, alpha: float) -> int:
         return self.flat_steps + round((alpha - FLAT_RAD) / self._rad_per_step)

@@ -39,7 +39,11 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
-from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
+from talos_servo.bus import (
+    DEFAULT_ACCELERATION,
+    ServoError,
+    joint_position,
+)
 from talos_servo.config import SPEED, RobotConfig
 from talos_servo.defaults import (
     ROBOT_NODE_NAME,
@@ -130,6 +134,8 @@ class RosBackend:
         self._own_frames: set[str] = set()
         # Last STOP state from the mode node and when it came.
         self._stop_beat: tuple[bool, float] | None = None
+        # Hinge opening angle (rad) from /joint_states, None while unknown.
+        self._hinge_alpha: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -225,8 +231,13 @@ class RosBackend:
     def _on_joint_states(self, msg: JointState) -> None:
         # The bridge sends NaN while a reading is unknown (the hinge offline or
         # out of range): keep the last value instead of crashing the executor.
+        hinge = self.config.hinge
         with self._lock:
             for i, name in enumerate(msg.name):
+                if hinge is not None and name == hinge.joint:
+                    alpha = msg.position[i] if i < len(msg.position) else None
+                    finite = alpha is not None and math.isfinite(alpha)
+                    self._hinge_alpha = alpha if finite else None
                 j = self.joints.get(name)
                 if j is None:
                     continue
@@ -455,6 +466,30 @@ class RosBackend:
         self._require_node().expansion_pub.publish(
             Float64(data=finite_clamp(rate, limit))
         )
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """Hinge readout for calibrating `model.bend_flat_steps`, or None
+        without a hinge. `angle_deg` and `raw_steps` are None while the
+        angle is unknown; `raw_steps` is the servo position as
+        `talos-servo monitor` shows it."""
+        hinge, model = self.config.hinge, self.config.model
+        if hinge is None or model is None:
+            return None
+        joint = next(j for j in self.config.joints if j.name == hinge.joint)
+        with self._lock:
+            alpha = self._hinge_alpha
+        raw = None
+        if alpha is not None:
+            raw = joint_position(hinge.steps_at(alpha), joint.inverted)
+        return {
+            "joint": hinge.joint,
+            "angle_deg": None if alpha is None else math.degrees(alpha),
+            "raw_steps": raw,
+            "flat_steps": model.bend_flat_steps,
+            "min_deg": math.degrees(hinge.min_rad),
+            "max_deg": math.degrees(hinge.max_rad),
+            "max_rate": self.config.expansion.max_rate_rad_s,
+        }
 
     def stop(
         self, joint: str, *, source: str = SOURCE_WEB, client: str | None = None

@@ -87,6 +87,23 @@ def drive_error(
     return f"cannot drive while {mode}"
 
 
+def hinge_error(mode: str | None, rate: float) -> str | None:
+    """Why a hinge move is refused in `mode`, or None if it is allowed.
+
+    Zero always passes, so stopping works in every mode. An unknown mode
+    passes too: the expansion node still refuses without a mode.
+    """
+    if not rate:
+        return None
+    try:
+        known = Mode(mode)
+    except ValueError:
+        return None
+    if known in HINGE_MODES:
+        return None
+    return f"cannot move the hinge while {mode}"
+
+
 class RobotStatus(NamedTuple):
     """Shared robot state from the mode node and mux_status, as clients see
     it. Each field is None until heard, and always None without ROS."""

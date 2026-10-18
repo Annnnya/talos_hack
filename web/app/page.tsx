@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo } from "react";
+import HingePanel from "@/components/HingePanel";
 import Joystick from "@/components/Joystick";
 import ReleaseStopButton from "@/components/ReleaseStopButton";
 import { useStopKey } from "@/components/StopAllButton";
@@ -39,9 +40,12 @@ function useActionKeys(actions: Record<string, (() => void) | null>) {
 }
 
 export default function Home() {
-  const { status, limits, ros, stopped, mode, modeReason, activeInput, lastError, clearError, send } =
+  const { status, limits, ros, stopped, mode, modeReason, activeInput, hinge, lastError, clearError, send } =
     useBridge();
   const connected = status === "connected";
+  // Same modes as HINGE_MODES in modes.py; an unknown mode is left to the
+  // expansion node, which refuses without one.
+  const canHinge = connected && ros && !stopped && (mode === null || mode === "free" || mode === "clamping");
   // Driving goes through twist_mux, so it needs the ROS server and a base.
   const canDrive = connected && ros && limits.linear_max !== null && limits.angular_max !== null;
   const { active, start, end, release } = useJoystick(send, {
@@ -137,6 +141,8 @@ export default function Home() {
         />
       </div>
 
+      {hinge && <HingePanel hinge={hinge} send={send} enabled={canHinge} />}
+
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
@@ -159,7 +165,8 @@ export default function Home() {
       </div>
 
       <p className="hidden text-center text-xs text-black/50 sm:block dark:text-white/50">
-        Hold W/S/A/D to move, Q/E to turn. Space stops, Enter releases STOP. N wall nearby, L release.
+        Hold W/S/A/D to move, Q/E to turn, R/F to open/close the hinge. Space stops, Enter releases STOP. N wall
+        nearby, L release.
       </p>
     </main>
   );

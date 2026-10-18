@@ -417,6 +417,13 @@ class Robot:
     def release_walls(self) -> None:
         raise CommandError("release needs `talos-servo web --ros`")
 
+    def move_hinge(self, rate: float) -> None:
+        raise CommandError("the hinge buttons need `talos-servo web --ros`")
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """The hinge readout comes from the hardware bridge, over ROS."""
+        return None
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)

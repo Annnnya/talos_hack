@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, Limits, Mode, ServerMessage, ServoSettings, ServoState } from "./protocol";
+import type {
+  ClientMessage,
+  HingeState,
+  Limits,
+  Mode,
+  ServerMessage,
+  ServoSettings,
+  ServoState,
+} from "./protocol";
 
 export type ConnStatus = "connecting" | "connected" | "disconnected";
 
@@ -28,6 +36,7 @@ export function useBridge() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [modeReason, setModeReason] = useState<string | null>(null);
   const [activeInput, setActiveInput] = useState<string | null>(null);
+  const [hinge, setHinge] = useState<HingeState | null>(null);
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -54,6 +63,7 @@ export function useBridge() {
           setMode(msg.mode);
           setModeReason(msg.mode_reason);
           setActiveInput(msg.active_input);
+          setHinge(msg.hinge ?? null);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -89,6 +99,7 @@ export function useBridge() {
     mode,
     modeReason,
     activeInput,
+    hinge,
     settings,
     clientId,
     lastError,

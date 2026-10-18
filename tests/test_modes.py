@@ -8,6 +8,7 @@ from talos_servo.modes import (
     Mode,
     ModeMachine,
     drive_error,
+    hinge_error,
     next_mode,
     stop_keeps_hinge,
 )
@@ -130,3 +131,22 @@ def test_a_zero_twist_is_allowed_in_every_mode(mode):
 @pytest.mark.parametrize("mode", [None, "flying"])
 def test_unknown_mode_allows_every_axis(mode):
     assert drive_error(mode, 0.1, 0.1, 0.5) is None
+
+
+@pytest.mark.parametrize(
+    ("mode", "allowed"),
+    [
+        ("free", True),
+        ("clamping", True),
+        ("aligning", False),
+        ("climbing", False),
+        (None, True),
+    ],
+)
+def test_hinge_moves_only_in_hinge_modes(mode, allowed):
+    assert (hinge_error(mode, 0.1) is None) is allowed
+
+
+@pytest.mark.parametrize("mode", [*list(Mode), None])
+def test_stopping_the_hinge_passes_in_every_mode(mode):
+    assert hinge_error(mode, 0.0) is None
