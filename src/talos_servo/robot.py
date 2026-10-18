@@ -98,6 +98,8 @@ class Joint:
     target: int | None = None
     target_speed: int = 0
     error: str | None = None
+    # The servo's own protection flag (e.g. overload) while it still answers.
+    fault: str | None = None
     command_source: str | None = None
     command_client: str | None = None
     # Monotonic time of the last command, local to this process; never sent as
@@ -245,12 +247,13 @@ class Robot:
     # --- control loop ----------------------------------------------------
     def tick(self) -> None:
         """One control step: watchdog, all wheel speeds, all wheel positions
-        and speeds, one full servo read."""
+        and speeds, the hinge in full, one other full servo read."""
         with self._lock:
             self._ticks += 1
             self._expire(self.clock())
             self._write_speeds()
             self._read_wheels()
+            self._read_hinge()
             self._read_next()
             self._update_fault()
 
@@ -417,6 +420,25 @@ class Robot:
     def release_walls(self) -> None:
         raise CommandError("release needs `talos-servo web --ros`")
 
+    def move_hinge(self, rate: float) -> None:
+        raise CommandError("the hinge buttons need `talos-servo web --ros`")
+
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        raise CommandError("the hinge hold needs `talos-servo web --ros`")
+
+    def hold_state(self) -> dict[str, Any] | None:
+        return None
+
+    def wall_side(self, speed: float) -> None:
+        raise CommandError("moving on the wall needs `talos-servo web --ros`")
+
+    def climb(self, speed: float) -> None:
+        raise CommandError("climbing needs `talos-servo web --ros`")
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """The hinge readout comes from the hardware bridge, over ROS."""
+        return None
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)
@@ -513,12 +535,30 @@ class Robot:
             j.position = self._position_from_bus(j, position)
             j.speed = self._speed_to_bus(j, speed)
 
+    def _fast_hinge(self) -> Joint | None:
+        """The hinge joint while online: read in full every tick, since the
+        hinge current hold (#142) runs on its current."""
+        hinge = self.config.hinge
+        if hinge is None:
+            return None
+        j = self.joints.get(hinge.joint)
+        return j if j is not None and j.online else None
+
+    def _read_hinge(self) -> None:
+        j = self._fast_hinge()
+        if j is not None:
+            self._try(j, lambda: self._read(j))
+
     def _read_next(self) -> None:
         """Read one joint, round robin, skipping offline joints except on retry
-        ticks."""
-        names = list(self.joints)
+        ticks. An online hinge is read every tick instead."""
+        fast = self._fast_hinge()
+        names = [n for n in self.joints if fast is None or n != fast.name]
+        if not names:
+            return
         retry = self._ticks % RETRY_OFFLINE_EVERY == 0
         for _ in names:
+            self._next_read %= len(names)
             j = self.joints[names[self._next_read]]
             self._next_read = (self._next_read + 1) % len(names)
             if j.online:
@@ -549,6 +589,12 @@ class Robot:
         j.load = self._speed_to_bus(j, t.status.load)
         j.voltage, j.temp = t.status.voltage, t.status.temperature
         j.current, j.moving = t.status.current, t.status.moving
+        if t.fault != j.fault:
+            if t.fault:
+                log.warning("%s reports %s", j.name, t.fault)
+            else:
+                log.info("%s fault cleared", j.name)
+        j.fault = t.fault
 
     def _stop_speed_joints(
         self, source: str | None = None, client: str | None = None

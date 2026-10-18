@@ -33,7 +33,7 @@ def model(table: dict) -> ModelConfig:
         hinge_joint="bend",
         leg_length_m=table["leg_length_m"],
         leg_gear_ratio=0.5,
-        bend_min_deg=90,
+        bend_min_deg=36,
         bend_max_deg=180,
     )
 
@@ -73,7 +73,7 @@ def test_step_follows_the_test_vectors(table):
             rate, alpha, DT
         )
         at_limit = (rate > 0 and row["alpha_deg"] >= 180) or (
-            rate < 0 and row["alpha_deg"] <= 90
+            rate < 0 and row["alpha_deg"] <= 36
         )
         if rate == 0 or at_limit:
             assert step.wheels == STILL
@@ -124,7 +124,7 @@ def test_refuses_to_expand_when_fully_open(expansion):
 
 
 def test_refuses_to_collapse_at_max_fold(expansion):
-    step = expansion.step(-RATE, math.radians(90), DT)
+    step = expansion.step(-RATE, math.radians(36), DT)
     assert (step.goal, step.wheels) == (None, STILL)
     assert step.held == "hinge fully folded"
 

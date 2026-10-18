@@ -44,6 +44,8 @@ MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 FLAT_DEG = 180.0
 # Expansion (#76): low on purpose, well below the hinge servo speed.
 DEFAULT_EXPANSION_RATE_RAD_S = 0.15
+# Low on purpose; the wheels top out near 0.15 m/s.
+DEFAULT_CLIMB_SPEED_M_S = 0.05
 DEFAULT_EXPANSION_HZ = 50.0
 DEFAULT_EXPANSION_LEAD_RAD = 0.05
 
@@ -159,9 +161,33 @@ class ExpansionConfig:
     """
 
     max_rate_rad_s: float = DEFAULT_EXPANSION_RATE_RAD_S
+    # Wheel surface speed cap (m/s) for climbing.
+    max_climb_speed_m_s: float = DEFAULT_CLIMB_SPEED_M_S
     rate_hz: float = DEFAULT_EXPANSION_HZ
     max_lead_rad: float = DEFAULT_EXPANSION_LEAD_RAD
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
+
+
+@dataclass(frozen=True)
+class HingeHoldConfig:
+    """Holding the hinge at a current setpoint (`talos_servo.hinge_hold`).
+
+    `max_current_a` caps the setpoint. `ki` (rad/s per A) and `kp` (rad per
+    A) move the goal lead from the current error, `filter_s` smooths the
+    measured current, `max_offset_rad` caps how far the goal may lead the
+    measured angle and `no_contact_rad` is how far the hinge may open with
+    hardly any current before the hold gives up.
+    """
+
+    max_current_a: float = 1.0
+    ki: float = 0.3
+    kp: float = 0.0
+    filter_s: float = 0.1
+    max_offset_rad: float = 0.25
+    no_contact_rad: float = 0.3
+    # Back the goal off above this servo load (%); the servo cuts its drive
+    # after 2 s above 50 %.
+    max_load_pct: float = 40.0
 
 
 @dataclass(frozen=True)
@@ -171,6 +197,7 @@ class RobotConfig:
     modes: ModesConfig | None = None
     model: ModelConfig | None = None
     expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
+    hinge_hold: HingeHoldConfig = field(default_factory=HingeHoldConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -224,6 +251,9 @@ def parse_config(data: dict) -> RobotConfig:
             ),
         )
         config = _clamp_hinge(config)
+    raw_hold = data.get("hinge_hold")
+    if raw_hold is not None:
+        config = replace(config, hinge_hold=_parse_hinge_hold(raw_hold))
     raw_expansion = data.get("expansion")
     if raw_expansion is not None:
         config = replace(
@@ -380,6 +410,9 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
             max_rate_rad_s=_positive(
                 raw, "max_rate_rad_s", DEFAULT_EXPANSION_RATE_RAD_S
             ),
+            max_climb_speed_m_s=_positive(
+                raw, "max_climb_speed_m_s", DEFAULT_CLIMB_SPEED_M_S
+            ),
             rate_hz=_positive(raw, "rate_hz", DEFAULT_EXPANSION_HZ),
             max_lead_rad=_positive(
                 raw, "max_lead_rad", DEFAULT_EXPANSION_LEAD_RAD
@@ -404,6 +437,27 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
                 f"speed {servo:.3f} rad/s, got {expansion.max_rate_rad_s}"
             )
     return expansion
+
+
+def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("hinge_hold must be a mapping")
+    d = HingeHoldConfig()
+    try:
+        kp = float(raw.get("kp", d.kp))
+        if not math.isfinite(kp) or kp < 0:
+            raise ConfigError(f"kp must be 0 or more, got {kp}")
+        return HingeHoldConfig(
+            max_current_a=_positive(raw, "max_current_a", d.max_current_a),
+            ki=_positive(raw, "ki", d.ki),
+            kp=kp,
+            filter_s=_positive(raw, "filter_s", d.filter_s),
+            max_offset_rad=_positive(raw, "max_offset_rad", d.max_offset_rad),
+            no_contact_rad=_positive(raw, "no_contact_rad", d.no_contact_rad),
+            max_load_pct=_positive(raw, "max_load_pct", d.max_load_pct),
+        )
+    except ConfigError as exc:
+        raise ConfigError(f"hinge_hold: {exc}") from exc
 
 
 def _parse_model(

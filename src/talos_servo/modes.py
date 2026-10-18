@@ -38,8 +38,19 @@ TRANSITIONS: dict[tuple[Mode, Event], Mode] = {
 # robot, so STOP only stops the wheels.
 HOLDING_MODES = frozenset({Mode.CLAMPING, Mode.CLIMBING})
 # Modes where the expansion node may open and close the hinge (#76). In
-# free the mode node first swaps the base controller for per-wheel speeds.
-HINGE_MODES = frozenset({Mode.FREE, Mode.CLAMPING})
+# free and aligning the mode node first swaps the base controller for
+# per-wheel speeds. Aligning is in until it is automated, so the user can
+# clamp by hand after wall nearby.
+HINGE_MODES = frozenset({Mode.FREE, Mode.ALIGNING, Mode.CLAMPING})
+# Modes where the wheels may climb (front pair one way, rear pair the
+# other): only after wall nearby.
+CLIMB_MODES = frozenset({Mode.ALIGNING, Mode.CLAMPING, Mode.CLIMBING})
+# Modes where the hinge may hold a current setpoint (#142): the walls are
+# near.
+HOLD_MODES = CLIMB_MODES
+# Modes whose own controllers do not turn the wheels one by one, so hinge
+# and climb motions swap them in (`modes.hinge_motion`).
+SWAP_MODES = frozenset({Mode.FREE, Mode.ALIGNING})
 
 # Body velocity axes a driver may use in each mode, for every interface.
 # Climbing cannot turn on the walls, and aligning and clamping move the robot
@@ -85,6 +96,36 @@ def drive_error(
     if allowed:
         return f"cannot rotate while {mode}"
     return f"cannot drive while {mode}"
+
+
+def hinge_error(mode: str | None, rate: float) -> str | None:
+    """Why a hinge move is refused in `mode`, or None if it is allowed.
+
+    Zero always passes, so stopping works in every mode. An unknown mode
+    passes too: the expansion node still refuses without a mode.
+    """
+    if not rate:
+        return None
+    try:
+        known = Mode(mode)
+    except ValueError:
+        return None
+    if known in HINGE_MODES:
+        return None
+    return f"cannot move the hinge while {mode}"
+
+
+def climb_error(mode: str | None, speed: float) -> str | None:
+    """Why a climb is refused in `mode`, or None. Zero always passes."""
+    if not speed:
+        return None
+    try:
+        known = Mode(mode)
+    except ValueError:
+        return "cannot climb without a robot mode"
+    if known in CLIMB_MODES:
+        return None
+    return f"cannot climb while {mode}: press wall nearby first"
 
 
 class RobotStatus(NamedTuple):

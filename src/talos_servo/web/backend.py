@@ -57,6 +57,30 @@ class RobotBackend(Protocol):
         """Ask the mode node to release the walls and go back to free. Over
         ROS only."""
 
+    def move_hinge(self, rate: float) -> None:
+        """Hinge opening speed (rad/s, + opens). Stops unless repeated. Over
+        ROS only."""
+
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        """Set the hinge current hold setpoint (A) and turn it on or off.
+        Over ROS only."""
+
+    def hold_state(self) -> dict[str, Any] | None:
+        """Hinge current hold state, None without ROS or the expansion
+        node."""
+
+    def wall_side(self, speed: float) -> None:
+        """Sideways speed on the wall (m/s, + left). Stops unless repeated.
+        Over ROS only."""
+
+    def climb(self, speed: float) -> None:
+        """Climb speed (m/s, + up): front wheels one way, rear the other.
+        Stops unless repeated. Over ROS only."""
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """Hinge angle and raw servo step for calibration; None without ROS
+        or without a hinge."""
+
     def drive(
         self,
         linear_x: float,

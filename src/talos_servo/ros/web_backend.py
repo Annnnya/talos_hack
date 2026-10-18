@@ -22,7 +22,9 @@ Differences from driving the bus directly:
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -38,7 +40,11 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
-from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
+from talos_servo.bus import (
+    DEFAULT_ACCELERATION,
+    ServoError,
+    joint_position,
+)
 from talos_servo.config import SPEED, RobotConfig
 from talos_servo.defaults import (
     ROBOT_NODE_NAME,
@@ -129,6 +135,12 @@ class RosBackend:
         self._own_frames: set[str] = set()
         # Last STOP state from the mode node and when it came.
         self._stop_beat: tuple[bool, float] | None = None
+        # Hinge opening angle (rad) from /joint_states, None while unknown.
+        self._hinge_alpha: float | None = None
+        self._hinge_current: float | None = None
+        # Last /hinge_hold/state from the expansion node, and when it came.
+        self._hold: dict[str, Any] | None = None
+        self._hold_at: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -144,6 +156,7 @@ class RosBackend:
                 on_mode=self._on_mode,
                 on_mode_reason=self._on_mode_reason,
                 on_active_input=self._on_active_input,
+                on_hold_state=self._on_hold_state,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -222,14 +235,23 @@ class RosBackend:
             self._publish_velocity(speeds, frame)
 
     def _on_joint_states(self, msg: JointState) -> None:
+        # The bridge sends NaN while a reading is unknown (the hinge offline or
+        # out of range): keep the last value instead of crashing the executor.
+        hinge = self.config.hinge
         with self._lock:
             for i, name in enumerate(msg.name):
+                if hinge is not None and name == hinge.joint:
+                    alpha = msg.position[i] if i < len(msg.position) else None
+                    finite = alpha is not None and math.isfinite(alpha)
+                    self._hinge_alpha = alpha if finite else None
+                    if i < len(msg.effort) and math.isfinite(msg.effort[i]):
+                        self._hinge_current = msg.effort[i]
                 j = self.joints.get(name)
                 if j is None:
                     continue
-                if i < len(msg.position):
+                if i < len(msg.position) and math.isfinite(msg.position[i]):
                     j.position = rad_to_steps(msg.position[i])
-                if i < len(msg.velocity):
+                if i < len(msg.velocity) and math.isfinite(msg.velocity[i]):
                     j.speed = rad_speed_to_steps(msg.velocity[i])
 
     def _on_status(self, msg: DiagnosticArray) -> None:
@@ -305,6 +327,7 @@ class RosBackend:
             float(values["voltage"]),
             float(values["current"]),
         )
+        j.fault = values.get("fault") or None
         self._apply_last_command(j, values, now)
 
     def _apply_last_command(
@@ -452,6 +475,87 @@ class RosBackend:
         self._require_node().expansion_pub.publish(
             Float64(data=finite_clamp(rate, limit))
         )
+
+    def climb(self, speed: float) -> None:
+        """Publish one climb speed (m/s, + up, 0 stops) for the expansion
+        node, clamped to `expansion.max_climb_speed_m_s`. Stops unless
+        repeated."""
+        limit = self.config.expansion.max_climb_speed_m_s
+        self._require_node().climb_pub.publish(
+            Float64(data=finite_clamp(speed, limit))
+        )
+
+    def wall_side(self, speed: float) -> None:
+        """Publish one sideways speed on the wall (m/s, + left, 0 stops),
+        clamped to the climb cap. Stops unless repeated."""
+        limit = self.config.expansion.max_climb_speed_m_s
+        self._require_node().side_pub.publish(
+            Float64(data=finite_clamp(speed, limit))
+        )
+
+    def hinge_state(self) -> dict[str, Any] | None:
+        """Hinge readout for calibrating `model.bend_flat_steps`, or None
+        without a hinge. `angle_deg` and `raw_steps` are None while the
+        angle is unknown; `raw_steps` is the servo position as
+        `talos-servo monitor` shows it."""
+        hinge, model = self.config.hinge, self.config.model
+        if hinge is None or model is None:
+            return None
+        joint = next(j for j in self.config.joints if j.name == hinge.joint)
+        with self._lock:
+            alpha = self._hinge_alpha
+        raw = None
+        if alpha is not None:
+            raw = joint_position(hinge.steps_at(alpha), joint.inverted)
+        return {
+            "joint": hinge.joint,
+            "angle_deg": None if alpha is None else math.degrees(alpha),
+            "raw_steps": raw,
+            "flat_steps": model.bend_flat_steps,
+            "min_deg": math.degrees(hinge.min_rad),
+            "max_deg": math.degrees(hinge.max_rad),
+            "max_rate": self.config.expansion.max_rate_rad_s,
+            "current_a": self._hinge_current,
+            "wheel_currents": self._wheel_currents(),
+        }
+
+    def _wheel_currents(self) -> dict[str, float] | None:
+        base = self.config.base
+        if base is None:
+            return None
+        with self._lock:
+            return {
+                w: self.joints[w].current
+                for w in base.wheels
+                if w in self.joints and self.joints[w].online
+            }
+
+    def _on_hold_state(self, msg: String) -> None:
+        try:
+            state = json.loads(msg.data)
+        except ValueError:
+            return
+        with self._lock:
+            self._hold, self._hold_at = state, self._clock()
+
+    def hold_state(self) -> dict[str, Any] | None:
+        """Hinge current hold state from the expansion node, None when it
+        has gone quiet."""
+        with self._lock:
+            if self._hold_at is None:
+                return None
+            if self._clock() - self._hold_at > STATUS_STALE_AFTER:
+                return None
+            return dict(self._hold)
+
+    def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
+        """Set the hold setpoint (A), then turn the hold on or off."""
+        node = self._require_node()
+        node.hold_setpoint_pub.publish(Float64(data=float(setpoint_a)))
+        client = node.hold_enable_client
+        if not client.service_is_ready():
+            raise CommandError("hinge hold: the expansion node is not running")
+        self._call(client, SetBool.Request(data=enabled), "hinge hold")
 
     def stop(
         self, joint: str, *, source: str = SOURCE_WEB, client: str | None = None

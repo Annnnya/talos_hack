@@ -22,7 +22,7 @@ from talos_servo.bus import (
     ServoError,
 )
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, WEB_CMD_VEL_TOPIC
-from talos_servo.modes import drive_error
+from talos_servo.modes import climb_error, drive_error, hinge_error
 from talos_servo.robot import SOURCE_WEB, CommandError, clamp
 from talos_servo.web.backend import RobotBackend
 
@@ -96,7 +96,7 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
 
 # Client messages that change nothing the UI shows. The browser re-sends drive
 # while a button is held, so a state broadcast per message would flood it.
-QUIET_COMMANDS = frozenset({"drive"})
+QUIET_COMMANDS = frozenset({"drive", "hinge", "climb", "wall_side"})
 # Client messages that ask the mode node for a mode change -> backend method.
 MODE_COMMANDS = {"wall_nearby": "wall_nearby", "release": "release_walls"}
 
@@ -139,6 +139,41 @@ def _dispatch(
         if error:
             raise CommandError(error)
         return lambda: controller.drive(vx, vy, wz, **who)
+    if kind == "hinge":
+        if not ros:
+            raise CommandError("the hinge buttons need `talos-servo web --ros`")
+        rate = _finite(msg, "rate")
+        error = hinge_error(controller.robot_status().mode, rate)
+        if error:
+            raise CommandError(error)
+        return lambda: controller.move_hinge(rate)
+    if kind == "hinge_hold":
+        if not ros:
+            raise CommandError("the hinge hold needs `talos-servo web --ros`")
+        enabled = bool(msg["enabled"])
+        setpoint = _finite(msg, "setpoint")
+        if setpoint < 0:
+            raise CommandError(f"setpoint must be 0 or more, got {setpoint}")
+        setpoint = min(setpoint, controller.config.hinge_hold.max_current_a)
+        return lambda: controller.hinge_hold(enabled, setpoint)
+    if kind == "wall_side":
+        if not ros:
+            raise CommandError(
+                "moving on the wall needs `talos-servo web --ros`"
+            )
+        speed = _finite(msg, "speed")
+        error = climb_error(controller.robot_status().mode, speed)
+        if error:
+            raise CommandError(error)
+        return lambda: controller.wall_side(speed)
+    if kind == "climb":
+        if not ros:
+            raise CommandError("climbing needs `talos-servo web --ros`")
+        speed = _finite(msg, "speed")
+        error = climb_error(controller.robot_status().mode, speed)
+        if error:
+            raise CommandError(error)
+        return lambda: controller.climb(speed)
     if kind in MODE_COMMANDS:
         if not ros:
             raise CommandError(f"{kind} needs `talos-servo web --ros`")
@@ -184,6 +219,8 @@ def create_app(
         # m/s and rad/s for drive; None when the config has no base.
         "linear_max": base.max_linear_speed if base else None,
         "angular_max": base.max_angular_speed if base else None,
+        # m/s cap of the Up and Down buttons.
+        "climb_max": config.expansion.max_climb_speed_m_s,
     }
 
     def state() -> dict[str, Any]:
@@ -201,6 +238,10 @@ def create_app(
             "mode": status.mode,
             "mode_reason": status.mode_reason,
             "active_input": status.active_input,
+            # Angle and raw servo step for calibration; None without ROS.
+            "hinge": controller.hinge_state(),
+            # Hinge current hold (#142); None without the expansion node.
+            "hinge_hold": controller.hold_state(),
         }
 
     async def control_loop() -> None:
