@@ -24,14 +24,17 @@ QUIT_KEY = "x"
 STOP_KEY = " "
 WALL_NEARBY_KEY = "n"
 RELEASE_KEY = "l"
+# Enter releases STOP; terminals send either character for it.
+RELEASE_STOP_KEYS = frozenset({"\n", "\r"})
 # R and F stay free for expanding and collapsing the hinge (#95).
 HELP = (
     "W/S forward/back, A/D left/right, Q/E turn, space stops, X quits. Hold a "
     "key to keep going."
 )
 ROS_HELP = (
-    f"{HELP} N wall nearby, L release from the walls. Q/E are off while "
-    "climbing, the drive keys while aligning or clamping."
+    f"{HELP} Space also turns STOP on for every input, Enter releases it. "
+    "N wall nearby, L release from the walls. Q/E are off while climbing, "
+    "the drive keys while aligning or clamping."
 )
 
 # key -> (vx, vy, wz) as fractions of the linear and angular speed
@@ -75,6 +78,8 @@ def allowed_keys(mode: str | None) -> frozenset[str]:
     """Drive keys allowed in `mode`.
 
     An unknown mode (no mode node running) allows every key, like free.
+    That fails open on purpose: without the mode node its stop lock goes
+    quiet, so twist_mux is locked and no key moves the robot anyway.
     """
     try:
         return DRIVE_KEYS_BY_MODE[Mode(mode)]
@@ -91,6 +96,7 @@ def run(
     tick: Callable[[], None] = lambda: None,
     actions: Mapping[str, Callable[[], None]] | None = None,
     allowed: Callable[[], Collection[str]] | None = None,
+    on_stop: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Drive from keys until X.
@@ -103,6 +109,8 @@ def run(
     `actions` maps keys to one-shot callables that leave driving alone.
     `allowed` returns the drive keys allowed right now; a drive key it leaves
     out stops this input, like any other key that does not drive.
+    `on_stop` runs after the stop that Space sends, e.g. to turn STOP on
+    for every input.
     """
     actions = actions or {}
     command = STOPPED
@@ -131,6 +139,8 @@ def run(
                 # moved some wheels, so `finally` must still stop them.
                 sent = command
                 drive(*command)
+            if stop_now and on_stop is not None:
+                on_stop()
             tick()
     finally:
         if sent != STOPPED:

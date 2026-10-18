@@ -9,15 +9,18 @@ else is driving.
 
 from __future__ import annotations
 
+import queue
+import threading
 import time
 from collections.abc import Callable, Sequence
 
 from talos_servo import teleop
 from talos_servo.bus import ServoError
 from talos_servo.robot import SOURCE_CLI, CommandError
-from talos_servo.ros.web_backend import RosBackend
+from talos_servo.ros.web_backend import SERVICE_TIMEOUT, RosBackend
 
 Output = Callable[[str], None]
+LISTENER_POLL_S = 0.05
 # How long stop commands are re-sent before the node goes away. If they are all
 # lost anyway, the robot's command timeout stops the wheel.
 STOP_FLUSH_TIME = 0.2
@@ -80,14 +83,17 @@ def drive_over_ros(
 ) -> None:
     """Keyboard driving on the keyboard input of twist_mux.
 
-    N and L ask the mode node for wall nearby and release. The mode decides
-    which drive keys work, and a status line shows the mode, why it changed
-    and which input drives. Quitting stops only this input, so the web keeps
+    N and L ask the mode node for wall nearby and release. Space also turns
+    STOP on for every input and Enter releases it. The mode decides which
+    drive keys work, and a status line shows the mode, why it changed and
+    which input drives. Quitting stops only this input, so the web keeps
     driving.
     """
     backend.open()
+    calls = _ModeCalls(out)
+    release_stop = calls.stop_call(backend.release_stop)
     try:
-        if not backend.has_cmd_vel_listener():
+        if not _wait_for_listener(backend):
             out(
                 f"note: nothing reads {backend.cmd_vel_topic}, start "
                 "`pixi run -e ros twist-mux` or the keys will not move the "
@@ -100,25 +106,91 @@ def drive_over_ros(
             angular=angular,
             tick=teleop.StatusPrinter(backend.robot_status, out),
             actions={
-                teleop.WALL_NEARBY_KEY: _reporting(backend.wall_nearby, out),
-                teleop.RELEASE_KEY: _reporting(backend.release_walls, out),
+                teleop.WALL_NEARBY_KEY: calls.mode_call(
+                    backend.wall_nearby, "wall nearby"
+                ),
+                teleop.RELEASE_KEY: calls.mode_call(
+                    backend.release_walls, "release"
+                ),
+                **dict.fromkeys(teleop.RELEASE_STOP_KEYS, release_stop),
             },
             allowed=lambda: teleop.allowed_keys(backend.robot_status().mode),
+            on_stop=calls.stop_call(lambda: backend.set_stop(True)),
         )
     finally:
+        calls.close(SERVICE_TIMEOUT)
         backend.release()
 
 
-def _reporting(action: Callable[[], None], out: Output) -> Callable[[], None]:
-    """Run `action`, printing a failure instead of ending the drive loop."""
+def _wait_for_listener(backend: RosBackend) -> bool:
+    """True once something reads our cmd_vel topic.
 
-    def run() -> None:
+    Discovery takes a moment after open(), so give twist_mux up to
+    `wait_timeout` to show up before saying nobody listens.
+    """
+    deadline = time.monotonic() + backend.wait_timeout
+    while not backend.has_cmd_vel_listener():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(LISTENER_POLL_S)
+    return True
+
+
+class _ModeCalls:
+    """Mode node calls off the key loop, so a slow controller switch does
+    not freeze the keys. A failure is printed and driving goes on.
+
+    STOP and release STOP go through one queue in key order and never wait
+    for a mode change. Wall nearby and release run one at a time; a press
+    while one is running is ignored with a note.
+    """
+
+    def __init__(self, out: Output) -> None:
+        self._out = out
+        self._stops: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._stop_thread = threading.Thread(
+            target=self._drain, name="keyboard-stop", daemon=True
+        )
+        self._stop_thread.start()
+        self._mode_thread: threading.Thread | None = None
+
+    def stop_call(self, action: Callable[[], None]) -> Callable[[], None]:
+        return lambda: self._stops.put(action)
+
+    def mode_call(
+        self, action: Callable[[], None], what: str
+    ) -> Callable[[], None]:
+        def start() -> None:
+            if self._mode_thread is not None and self._mode_thread.is_alive():
+                self._out(f"note: mode node still busy, {what} ignored")
+                return
+            self._mode_thread = threading.Thread(
+                target=self._report,
+                args=(action,),
+                name="keyboard-mode-call",
+                daemon=True,
+            )
+            self._mode_thread.start()
+
+        return start
+
+    def close(self, timeout: float) -> None:
+        """Let queued STOP calls finish, then wait for a running mode
+        call, at most `timeout` each."""
+        self._stops.put(None)
+        self._stop_thread.join(timeout)
+        if self._mode_thread is not None:
+            self._mode_thread.join(timeout)
+
+    def _drain(self) -> None:
+        while (action := self._stops.get()) is not None:
+            self._report(action)
+
+    def _report(self, action: Callable[[], None]) -> None:
         try:
             action()
         except (CommandError, ServoError) as exc:
-            out(f"error: {exc}")
-
-    return run
+            self._out(f"error: {exc}")
 
 
 def _check_joints(backend: RosBackend, joints: Sequence[str]) -> None:

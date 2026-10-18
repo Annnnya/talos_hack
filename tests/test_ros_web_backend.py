@@ -58,6 +58,7 @@ from talos_servo.web.server import create_app  # noqa: E402
 
 CONFIG = config(SMALL)
 WAIT = 3.0
+SHORT_WAIT = 1.0
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -378,7 +379,7 @@ def recording_backend(sent: list, **kwargs) -> RosBackend:
         BASE_CONFIG,
         context=rclpy.get_default_context(),
         cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC,
-        **kwargs,
+        **{"wait_timeout": SHORT_WAIT, **kwargs},
     )
     real_drive = backend.drive
 
@@ -426,13 +427,103 @@ def listener():
 def test_drive_over_ros_warns_without_twist_mux(robot_node):
     lines: list[str] = []
     cli_commands.drive_over_ros(
-        make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC),
+        # Short: the twist_mux note waits up to wait_timeout.
+        make_backend(
+            cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC, wait_timeout=SHORT_WAIT
+        ),
         scripted_keys([]),
         linear=0.1,
         angular=0.5,
         out=lines.append,
     )
     assert any("twist-mux" in line for line in lines)
+
+
+def test_drive_over_ros_waits_for_twist_mux_before_warning(base_node):
+    # twist_mux shows up only after open(), like DDS discovery settling.
+    late = rclpy.create_node("late_twist_mux")
+    backend = recording_backend([])
+    original_open = backend.open
+
+    def open_then_listen() -> None:
+        original_open()
+        late.create_subscription(
+            Twist, KEYBOARD_CMD_VEL_TOPIC, lambda _m: None, 10
+        )
+
+    backend.open = open_then_listen
+    lines: list[str] = []
+    try:
+        cli_commands.drive_over_ros(
+            backend,
+            scripted_keys([]),
+            linear=0.1,
+            angular=0.5,
+            out=lines.append,
+        )
+    finally:
+        late.destroy_node()
+    assert not any("twist-mux" in line for line in lines)
+
+
+def test_space_turns_stop_on_and_enter_releases_it(base_node, mode_node):
+    backend = recording_backend([])
+
+    def until(stopped: bool) -> None:
+        wait_for(lambda: mode_node.stopped is stopped, WAIT)
+
+    cli_commands.drive_over_ros(
+        backend,
+        scripted_keys(
+            [
+                lambda: wait_for_mode_node(backend),
+                "\n",
+                lambda: until(False),
+                " ",
+                lambda: until(True),
+            ]
+        ),
+        linear=0.1,
+        angular=0.5,
+        out=lambda _line: None,
+    )
+    assert mode_node.stopped
+
+
+def test_mode_calls_run_off_the_key_loop_one_at_a_time():
+    lines: list[str] = []
+    calls = cli_commands._ModeCalls(lines.append)
+    gate = threading.Event()
+    ran: list[str] = []
+
+    def slow_wall_nearby() -> None:
+        gate.wait(WAIT)
+        ran.append("wall")
+
+    wall = calls.mode_call(slow_wall_nearby, "wall nearby")
+    release = calls.mode_call(lambda: ran.append("release"), "release")
+    stop = calls.stop_call(lambda: ran.append("stop"))
+    wall()  # returns at once although the call is still running
+    release()  # busy: ignored with a note
+    stop()  # STOP does not wait for the mode call
+    wait_for(lambda: "stop" in ran, WAIT)
+    assert ran == ["stop"]
+    assert lines == ["note: mode node still busy, release ignored"]
+    gate.set()
+    calls.close(WAIT)
+    assert ran == ["stop", "wall"]
+
+
+def test_mode_call_failures_are_printed():
+    lines: list[str] = []
+    calls = cli_commands._ModeCalls(lines.append)
+
+    def fail() -> None:
+        raise CommandError("release STOP: mode node is not running")
+
+    calls.stop_call(fail)()
+    calls.close(WAIT)
+    assert lines == ["error: release STOP: mode node is not running"]
 
 
 def test_drive_over_ros_publishes_on_the_keyboard_input(
@@ -532,7 +623,6 @@ def test_keyboard_follows_the_mode_from_any_interface(
     lines: list[str] = []
 
     def climb_from_the_web() -> None:
-        wait_for_status(backend, "aligning", "wall nearby", "none")
         fake.publish("climbing", "wall contact", "web")
         wait_for_status(backend, "climbing", "wall contact", "web")
 
@@ -542,6 +632,11 @@ def test_keyboard_follows_the_mode_from_any_interface(
             [
                 lambda: wait_for_status(backend, "free", "", "none"),
                 "n",
+                # N runs off the key loop; no key while it lands, so the
+                # status line prints it.
+                lambda: wait_for_status(
+                    backend, "aligning", "wall nearby", "none"
+                ),
                 climb_from_the_web,
                 None,
                 "q",  # turning is off while climbing
@@ -583,7 +678,10 @@ def test_rejected_release_is_printed_and_driving_goes_on(
 def test_wall_nearby_without_mode_node_says_so(robot_node):
     lines: list[str] = []
     cli_commands.drive_over_ros(
-        make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC),
+        # Short: the twist_mux note waits up to wait_timeout.
+        make_backend(
+            cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC, wait_timeout=SHORT_WAIT
+        ),
         scripted_keys(["n"]),
         linear=0.1,
         angular=0.5,

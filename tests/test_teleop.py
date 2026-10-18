@@ -126,6 +126,40 @@ def test_action_keys_run_once_and_do_not_drive():
     assert sent == []
 
 
+def test_space_runs_on_stop_after_its_stop():
+    events: list = []
+    sent: list = []
+    clock = FakeClock()
+
+    def drive(*v):
+        sent.append(v)
+        events.append("drive")
+
+    with contextlib.suppress(KeyboardInterrupt):
+        teleop.run(
+            drive,
+            Keys(["w", " ", None, "w", "x"], clock),
+            linear=0.1,
+            angular=0.5,
+            clock=clock,
+            on_stop=lambda: events.append("stop"),
+        )
+    # The local zero goes out first, then STOP for every input; other keys
+    # do not call it.
+    assert events == ["drive", "drive", "stop", "drive", "drive"]
+    assert sent[1] == teleop.STOPPED
+
+
+@pytest.mark.parametrize("enter", sorted(teleop.RELEASE_STOP_KEYS))
+def test_enter_is_an_action_key(enter):
+    pressed: list[str] = []
+    actions = dict.fromkeys(
+        teleop.RELEASE_STOP_KEYS, lambda: pressed.append("release stop")
+    )
+    assert drive_with([enter, "x"], actions=actions) == []
+    assert pressed == ["release stop"]
+
+
 def test_action_key_does_not_keep_a_held_key_going():
     # The held key times out as if the action key were no key at all.
     quiet = [None] * (round(teleop.KEY_TIMEOUT_S / teleop.LOOP_PERIOD_S) + 1)
