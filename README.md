@@ -113,6 +113,23 @@ flowchart TB
     WEB -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
+### Robot modes
+
+The mode node (`src/talos_servo/modes.py`) walks the robot through a climb.
+Release (L) goes back to Free from any of the wall modes.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free
+    Free --> Aligning: wall nearby
+    state "At the wall" as wall {
+        Aligning --> Clamping: aligned
+        Clamping --> Climbing: walls touched
+        Climbing --> Clamping: not moving up
+    }
+    wall --> Free: release
+```
+
 ### ros2_control (#62)
 
 The base drives through ros2_control: `mecanum_drive_controller` (#65) on
