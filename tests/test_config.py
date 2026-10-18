@@ -7,10 +7,13 @@ import pytest
 from conftest import BASE, SMALL
 
 from talos_servo.config import (
+    MODE_NAMES,
     ConfigError,
+    ModesConfig,
     load_config,
     parse_config,
 )
+from talos_servo.modes import Mode
 
 
 def with_changes(data: dict, **joint_changes: dict) -> dict:
@@ -85,6 +88,17 @@ def test_modes_parse_controllers_per_mode():
     assert modes.for_mode("clamping") == ()
     assert modes.for_mode("climbing") == ()
     assert modes.switch_timeout_s == 1.5
+
+
+def test_mode_names_match_the_state_machine():
+    assert set(MODE_NAMES) == {m.value for m in Mode}
+
+
+def test_mode_controllers_are_read_only():
+    modes = ModesConfig(controllers={"free": ("drive",)})
+    with pytest.raises(TypeError):
+        modes.controllers["free"] = ("wall",)  # type: ignore[index]
+    assert modes.managed == {"drive"}
 
 
 @pytest.mark.parametrize(

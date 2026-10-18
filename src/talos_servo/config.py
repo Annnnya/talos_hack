@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 
 import yaml
 
@@ -72,11 +74,24 @@ class ModesConfig:
     new ones on every mode change.
     """
 
-    controllers: dict[str, tuple[str, ...]]
+    controllers: Mapping[str, tuple[str, ...]]
     switch_timeout_s: float = DEFAULT_SWITCH_TIMEOUT_S
+
+    def __post_init__(self) -> None:
+        # Read-only like the rest of the frozen config.
+        object.__setattr__(
+            self, "controllers", MappingProxyType(dict(self.controllers))
+        )
 
     def for_mode(self, mode: str) -> tuple[str, ...]:
         return self.controllers.get(mode, ())
+
+    @property
+    def managed(self) -> frozenset[str]:
+        """Every controller named by any mode."""
+        return frozenset(
+            c for names in self.controllers.values() for c in names
+        )
 
 
 @dataclass(frozen=True)
