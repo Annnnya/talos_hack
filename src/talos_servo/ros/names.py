@@ -18,6 +18,8 @@ RELEASE_SERVICE = f"{ROBOT_NS}/release"
 SET_STOP_SERVICE = f"{ROBOT_NS}/set_stop"
 STOP_LOCK_TOPIC = f"{ROBOT_NS}/stop_lock"
 HINGE_MOTION_SERVICE = f"{ROBOT_NS}/hinge_motion"
+WALL_CONTACT_SERVICE = f"{ROBOT_NS}/wall_contact"
+NO_WALL_SERVICE = f"{ROBOT_NS}/no_wall"
 
 # Expansion node (#76) in, and the controllers it feeds
 # (config/ros2_control.yaml) out.

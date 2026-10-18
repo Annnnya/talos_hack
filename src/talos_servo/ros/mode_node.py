@@ -5,6 +5,11 @@
   changed, or the last fault reported while the mode was kept
 - `/robot/wall_nearby` (std_srvs/Trigger): free -> aligning
 - `/robot/release` (std_srvs/Trigger): any mode -> free
+- `/robot/wall_contact` (std_srvs/Trigger): clamping -> climbing. The
+  expansion node (#78) calls it when the hinge has pressed on both walls
+- `/robot/no_wall` (std_srvs/Trigger): the expansion node calls it when the
+  hinge opened fully without touching a wall. The mode stays clamping and
+  the reason says so. Refused outside clamping
 - `/robot/set_stop` (std_srvs/SetBool): true turns STOP on, false releases
   it. STOP starts on, so a restarted mode node never releases it
 - `/robot/hinge_motion` (std_srvs/SetBool): the expansion node (#76) sets it
@@ -50,6 +55,7 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
+from talos_servo.clamp import NO_WALL_REASON
 from talos_servo.config import ModesConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
@@ -69,9 +75,11 @@ from talos_servo.ros.names import (
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
+    NO_WALL_SERVICE,
     RELEASE_SERVICE,
     SET_STOP_SERVICE,
     STOP_LOCK_TOPIC,
+    WALL_CONTACT_SERVICE,
     WALL_NEARBY_SERVICE,
 )
 
@@ -261,6 +269,15 @@ class ModeNode(Node):
         self.create_service(
             Trigger, RELEASE_SERVICE, self.on_release, callback_group=group
         )
+        self.create_service(
+            Trigger,
+            WALL_CONTACT_SERVICE,
+            self.on_wall_contact,
+            callback_group=group,
+        )
+        self.create_service(
+            Trigger, NO_WALL_SERVICE, self.on_no_wall, callback_group=group
+        )
         self.switcher = ControllerSwitcher(
             self,
             controller_manager,
@@ -420,6 +437,24 @@ class ModeNode(Node):
     ) -> Trigger.Response:
         # Goes straight to free for now; the landing sequence is #86.
         return self._trigger(Event.RELEASE, "released", response)
+
+    def on_wall_contact(
+        self, _request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
+        return self._trigger(Event.WALL_CONTACT, "wall contact", response)
+
+    def on_no_wall(
+        self, _request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
+        mode = self.machine.mode
+        if mode is not Mode.CLAMPING:
+            response.success = False
+            response.message = f"no clamp to report while {mode.value}"
+            return response
+        self.report(NO_WALL_REASON)
+        self.get_logger().warning(NO_WALL_REASON)
+        response.success, response.message = True, NO_WALL_REASON
+        return response
 
     def _trigger(
         self, event: Event, reason: str, response: Trigger.Response
