@@ -42,8 +42,8 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
-from talos_servo.ros.robot_node import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.topic_bridge import Unwrapper, unpack_commands
 
 NODE_NAME = "hardware_bridge"
