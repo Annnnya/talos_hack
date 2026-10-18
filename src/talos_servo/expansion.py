@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 Wheels = tuple[float, float, float, float]
 STILL: Wheels = (0.0, 0.0, 0.0, 0.0)
+# Step.held reasons that mean the hinge cannot open any further.
+FULLY_OPEN = "hinge fully open"
+AT_LIMIT = "hinge at its limit"
 
 
 def wheel_speeds(
@@ -98,22 +101,25 @@ class Expansion:
         if not math.isfinite(alpha):
             return self._hold("hinge angle unknown")
         if rate > 0 and alpha >= self.max_rad:
-            return self._hold("hinge fully open")
+            return self._hold(FULLY_OPEN)
         if rate < 0 and alpha <= self.min_rad:
             return self._hold("hinge fully folded")
         if self._goal is None:
-            self._goal = self._clamp(alpha)
+            self._goal = self.clamp_angle(alpha)
         lead = (self._goal - alpha) * math.copysign(1.0, rate)
         if lead > self.max_lead:
             # The hinge is behind its goal: let it catch up before going on.
             return Step(goal=None, wheels=STILL, held="hinge lags its goal")
-        goal = self._clamp(self._goal + rate * dt)
+        goal = self.clamp_angle(self._goal + rate * dt)
         moved = (goal - self._goal) / dt
         self._goal = goal
         if moved == 0.0:
-            return Step(goal=goal, wheels=STILL, held="hinge at its limit")
+            return Step(goal=goal, wheels=STILL, held=AT_LIMIT)
         wheels = wheel_speeds(
-            self._clamp(alpha), moved, self.leg_length_m, self.wheel_radius_m
+            self.clamp_angle(alpha),
+            moved,
+            self.leg_length_m,
+            self.wheel_radius_m,
         )
         return Step(goal=goal, wheels=wheels, rate=moved)
 
@@ -121,5 +127,6 @@ class Expansion:
         self._goal = None
         return Step(goal=None, wheels=STILL, held=why)
 
-    def _clamp(self, alpha: float) -> float:
+    def clamp_angle(self, alpha: float) -> float:
+        """`alpha` limited to the hinge range."""
         return max(self.min_rad, min(self.max_rad, alpha))

@@ -277,12 +277,42 @@ def test_expansion_is_parsed():
     assert expansion.rate_hz == 25
 
 
+def test_clamp_settings_are_parsed():
+    expansion = parse_config(
+        {
+            **hinge_data(bend_flat_steps=4000),
+            "expansion": {
+                "clamp_rate_rad_s": 0.02,
+                "hinge_contact_current_a": 1.2,
+                "wheel_contact_current_a": 0.7,
+                "contact_hold_s": 0.2,
+                "contact_grace_s": 0.5,
+            },
+        }
+    ).expansion
+    assert (
+        expansion.clamp_rate_rad_s,
+        expansion.hinge_contact_current_a,
+        expansion.wheel_contact_current_a,
+        expansion.contact_hold_s,
+        expansion.contact_grace_s,
+    ) == (0.02, 1.2, 0.7, 0.2, 0.5)
+
+
+def test_clamp_opens_slower_than_the_cap_by_default():
+    expansion = parse_config(SMALL).expansion
+    assert 0 < expansion.clamp_rate_rad_s <= expansion.max_rate_rad_s
+
+
 @pytest.mark.parametrize(
     ("expansion", "message"),
     [
         ([], "mapping"),
         ({"max_rate_rad_s": 0}, "positive"),
         ({"max_lead_rad": -1}, "positive"),
+        ({"hinge_contact_current_a": 0}, "positive"),
+        ({"contact_grace_s": -0.1}, "positive"),
+        ({"clamp_rate_rad_s": 0.2}, "must not exceed max_rate_rad_s"),
         # The bridge moves the hinge servo at about 0.31 rad/s.
         ({"max_rate_rad_s": 0.5}, "below the hinge servo speed"),
     ],
