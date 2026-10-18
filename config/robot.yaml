@@ -98,9 +98,10 @@ imu:
 # sign (1 or -1) if a loop pushes the wrong way on the bench. Past
 # tilt_fault_rad the wheels stop and Level turns off.
 level:
-  pitch_gain_m_s_per_rad: 0.05
-  roll_gain_m_s_per_rad: 0.05
-  max_trim_m_s: 0.02
+  # 0.3 m/s per rad: a 10 deg tilt asks for about 4.6 cm/s, capped below.
+  pitch_gain_m_s_per_rad: 0.3
+  roll_gain_m_s_per_rad: 0.3
+  max_trim_m_s: 0.03
   deadband_rad: 0.02
   tilt_fault_rad: 0.35
   pitch_sign: 1

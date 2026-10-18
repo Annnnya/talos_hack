@@ -52,7 +52,7 @@ def test_right_side_low_roll_speeds_the_right_pair_up():
 
 def test_trims_add_to_the_climb_speed():
     trim = Trim(front_rear=0.01, left_right=0.0)
-    fl, fr, rl, rr = wheel_speeds(0.1, 0.0, R, CAP, trim)
+    fl, _fr, rl, _rr = wheel_speeds(0.1, 0.0, R, CAP, trim)
     assert fl == pytest.approx(0.11 / R)
     assert rl == pytest.approx(-0.09 / R)
 

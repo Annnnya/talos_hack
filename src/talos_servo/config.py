@@ -223,9 +223,9 @@ class LevelConfig:
     wrong way on the bench. Past `tilt_fault_rad` the wheels stop. The IMU
     orientation counts for `imu_timeout_s`."""
 
-    pitch_gain_m_s_per_rad: float = 0.05
-    roll_gain_m_s_per_rad: float = 0.05
-    max_trim_m_s: float = 0.02
+    pitch_gain_m_s_per_rad: float = 0.3
+    roll_gain_m_s_per_rad: float = 0.3
+    max_trim_m_s: float = 0.03
     deadband_rad: float = 0.02
     tilt_fault_rad: float = 0.35
     pitch_sign: float = 1.0
