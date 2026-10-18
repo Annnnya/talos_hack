@@ -105,7 +105,8 @@ Checked in the plugin source (0.3.0):
   clamped to it (robot node, `/debug` and the bridge alike).
 - **Unknown angle:** while the servo is offline, or reads more than 64
   steps outside the hinge range (a wrap past flat), `bend` reports NaN
-  position and velocity and logs an error.
+  position and velocity, logs an error and drops its goals: from a wrapped
+  reading the servo would take the long way round.
 - **No wrap:** position mode covers one servo turn and never crosses
   4095 -> 0, so there are no turns to count. The range from flat down to max
   fold must fit inside 0..4095; the config check and the bridge refuse a
@@ -116,9 +117,12 @@ Checked in the plugin source (0.3.0):
   when no controller claims `bend`, or the controller's last goal when only
   the bridge restarts. The bridge ignores the first goal each position
   joint gets and every repeat of it, then follows every goal from the first
-  different one. So starting or restarting the bridge never moves the
-  hinge; send a new goal to move it. A NaN position means no goal and never
-  blocks the wheel velocities in the same message.
+  different one. It starts over when the commands go quiet for
+  `command_timeout_s` (controller_manager restarted). So starting or
+  restarting either side never moves the hinge; send a new goal to move it.
+  A disabled hinge stays out of `<ros2_control>` and its controller is not
+  spawned, so the wheels still run without it. A NaN position means no
+  goal and never blocks the wheel velocities in the same message.
 - **Current and load:** `/dynamic_joint_states` shows position, velocity
   and effort only. Effort is the present current (A). Load stays on
   `/hardware_bridge/<joint>/load`.
