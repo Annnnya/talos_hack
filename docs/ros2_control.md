@@ -165,6 +165,29 @@ Its config is in `config/ros2_control.yaml`.
 `tests/test_ros2_control_config.py` checks the values against
 `config/robot.yaml`, and the wheel signs against the old kinematics.
 
+## Safe state (#94)
+
+Whenever control stops, the bridge leaves the servos so the robot can hang
+between two walls: wheels at speed 0 with torque on (braked) and the hinge on
+its last goal with torque on. Torque is never turned off on the way.
+`Robot.hold_safe(reason)` is the one function for it, so faults found
+elsewhere (#87) reuse it.
+
+- **Deactivate, or controller_manager gone:** the plugin does not tell the
+  bridge, the commands just stop. The wheels stop after
+  `command_timeout_s`, the hinge keeps its goal.
+- **Read or write error:** a failed wheel write, a failed command, or a
+  joint that was online and stops answering brakes the wheels at once and
+  latches. Commands that would move (a wheel speed, a hinge goal) are refused
+  and logged; stops always work. The latch frees itself once the lost joints
+  answer again and wheel writes work for `FAULT_CLEAR_S` (1 s). A servo that
+  is missing from the start does not latch, so bench tests with some servos
+  unplugged still work. A failed wheel sync read (odometry) does not latch
+  either: one lost request packet fails it, and braking for a second on that
+  would be worse. A wheel that really stops answering is caught by the
+  round-robin read within one cycle (one joint per tick, about 0.1 s).
+- **Shutdown:** `Robot.close()` runs in `finally`, also on Ctrl+C.
+
 ## Bench: the whole robot
 
 `config/ros2_control.yaml` and `launch/ros2_control.launch.py` run the base
