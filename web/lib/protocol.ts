@@ -39,6 +39,9 @@ export interface Limits {
   pos_max: number;
   speed_max: number;
   acc_max: number;
+  /** Base speed limits for drive (m/s, rad/s); null when the config has no base. */
+  linear_max: number | null;
+  angular_max: number | null;
 }
 
 /** Shared by every browser, kept by the server until it restarts. */
@@ -64,6 +67,8 @@ export type ClientMessage =
   | { type: "torque"; joint: string; enabled: boolean }
   | { type: "stop"; joint: string }
   | { type: "stop_all" }
+  /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
+  | { type: "drive"; vx: number; vy: number; wz: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;
