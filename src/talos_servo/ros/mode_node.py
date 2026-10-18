@@ -6,12 +6,19 @@
 - `/robot/wall_nearby` (std_srvs/Trigger): free -> aligning
 - `/robot/release` (std_srvs/Trigger): any mode -> free
 
-On every mode change the node deactivates the old mode's ros2_control
-controllers and activates the new ones through
-`/controller_manager/switch_controller`. Controller names come from `modes:`
-in the config. While controller_manager is not running (the controllers do
-not exist yet) the switch is skipped with a warning and the mode still
-changes. A switch that controller_manager rejects keeps the old mode.
+On every mode change the node asks controller_manager which controllers are
+active (`list_controllers`) and switches (`switch_controller`) so that
+exactly the new mode's controllers are active. Controller names come from
+`modes:` in the config; controllers no mode names (e.g. the joint state
+broadcaster) are never touched. A switch that controller_manager rejects
+keeps the old mode. A switch that times out but was applied anyway is
+accepted. Every `RECONCILE_PERIOD_S` the node also brings the active
+controllers back to the current mode's set, so a controller_manager that
+starts late, restarts or applies a timed out switch later is corrected.
+
+While controller_manager is not running (the controllers do not exist yet)
+the mode still changes with a warning, unless the
+`require_controller_manager` parameter is true: then the mode change fails.
 
 Run with `pixi run -e ros mode-node`.
 """
@@ -23,7 +30,7 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -45,9 +52,9 @@ from talos_servo.modes import (
 )
 
 try:
-    from controller_manager_msgs.srv import SwitchController
+    from controller_manager_msgs.srv import ListControllers, SwitchController
 except ImportError:  # not in every environment yet; switching is skipped
-    SwitchController = None
+    ListControllers = SwitchController = None
 
 MODE_NODE_NAME = "mode"
 MODE_TOPIC = f"{ROBOT_NS}/mode"
@@ -56,6 +63,8 @@ WALL_NEARBY_SERVICE = f"{ROBOT_NS}/wall_nearby"
 RELEASE_SERVICE = f"{ROBOT_NS}/release"
 DEFAULT_CONTROLLER_MANAGER = "/controller_manager"
 SWITCH_POLL_INTERVAL = 0.05
+RECONCILE_PERIOD_S = 1.0
+ACTIVE = "active"
 # Late subscribers (a UI that starts after us) still get the current mode.
 LATCHED = QoSProfile(
     depth=1,
@@ -68,8 +77,12 @@ class SwitchError(RuntimeError):
     """controller_manager refused or did not answer a controller switch."""
 
 
+class SwitchTimeout(SwitchError):
+    """controller_manager did not answer in time."""
+
+
 class ControllerSwitcher:
-    """Calls controller_manager's switch_controller service."""
+    """Makes controller_manager run exactly a given set of controllers."""
 
     def __init__(
         self,
@@ -77,66 +90,107 @@ class ControllerSwitcher:
         controller_manager: str,
         timeout_s: float,
         callback_group: ReentrantCallbackGroup,
+        *,
+        required: bool = False,
     ) -> None:
         self._node = node
         self._timeout_s = timeout_s
-        self._client = None
+        self._required = required
+        self._switch_client = None
+        self._list_client = None
         if SwitchController is not None:
-            self._client = node.create_client(
+            self._switch_client = node.create_client(
                 SwitchController,
                 f"{controller_manager}/switch_controller",
+                callback_group=callback_group,
+            )
+            self._list_client = node.create_client(
+                ListControllers,
+                f"{controller_manager}/list_controllers",
                 callback_group=callback_group,
             )
 
     @property
     def ready(self) -> bool:
-        """True once controller_manager's service is reachable."""
-        return self._client is not None and self._client.service_is_ready()
+        """True once controller_manager's services are reachable."""
+        return (
+            self._switch_client is not None
+            and self._list_client is not None
+            and self._switch_client.service_is_ready()
+            and self._list_client.service_is_ready()
+        )
 
-    def switch(
-        self, deactivate: Sequence[str], activate: Sequence[str]
-    ) -> None:
-        """Swap controllers or raise SwitchError. Skipped (with a warning)
-        when there is nothing to swap or no controller_manager to ask."""
+    def sync(self, target: Iterable[str], managed: Iterable[str]) -> bool:
+        """Make the `managed` controllers that are active exactly `target`.
+
+        Diffs against what controller_manager reports as active, so it never
+        asks to (de)activate a controller already in that state (STRICT
+        rejects that). Returns True if a switch was sent. Raises SwitchError,
+        or warns and returns False when there is no controller_manager and
+        it is not required.
+        """
+        if not self.ready:
+            reason = (
+                "controller_manager_msgs is not installed"
+                if self._switch_client is None
+                else "controller_manager is not running"
+            )
+            if self._required:
+                raise SwitchError(reason)
+            self._node.get_logger().warning(
+                f"{reason}, not switching controllers",
+                throttle_duration_sec=5.0,
+            )
+            return False
+        want = set(target)
+        managed = set(managed)
+        active = self.active() & managed
+        deactivate = sorted(active - want)
+        activate = sorted(want - active)
         if not deactivate and not activate:
-            return
-        logger = self._node.get_logger()
-        if self._client is None:
-            logger.warning(
-                "controller_manager_msgs is not installed, not switching "
-                "controllers"
-            )
-            return
-        if not self._client.service_is_ready():
-            logger.warning(
-                "controller_manager is not running, not switching "
-                f"controllers (deactivate {list(deactivate)}, activate "
-                f"{list(activate)})"
-            )
-            return
+            return False
+        self._node.get_logger().info(
+            f"switching controllers: deactivate {deactivate}, activate "
+            f"{activate}"
+        )
         request = SwitchController.Request()
-        request.deactivate_controllers = list(deactivate)
-        request.activate_controllers = list(activate)
+        request.deactivate_controllers = deactivate
+        request.activate_controllers = activate
         # Strict: a controller that fails to switch fails the whole mode
         # change, so the robot never runs half the controllers of a mode.
         request.strictness = SwitchController.Request.STRICT
         request.timeout = Duration(seconds=self._timeout_s).to_msg()
-        response = self._call(request)
+        try:
+            response = self._call(self._switch_client, request)
+        except SwitchTimeout:
+            # controller_manager may still have applied it.
+            if self.active() & managed == want:
+                self._node.get_logger().warning(
+                    "controller switch answered late but was applied"
+                )
+                return True
+            raise
         if not response.ok:
             message = getattr(response, "message", "") or "rejected"
             raise SwitchError(f"controller switch failed: {message}")
+        return True
 
-    def _call(self, request):
+    def active(self) -> set[str]:
+        """Names of the controllers controller_manager runs now."""
+        response = self._call(self._list_client, ListControllers.Request())
+        return {c.name for c in response.controller if c.state == ACTIVE}
+
+    def _call(self, client, request):
         """Wait for the answer; the executor's other threads deliver it."""
-        assert self._client is not None
-        future = self._client.call_async(request)
+        assert client is not None
+        future = client.call_async(request)
         done = threading.Event()
         future.add_done_callback(lambda _f: done.set())
         deadline = time.monotonic() + self._timeout_s
         while not future.done():
             if time.monotonic() > deadline:
-                self._client.remove_pending_request(future)
-                raise SwitchError(
+                client.remove_pending_request(future)
+                raise SwitchTimeout(
                     "controller_manager did not answer within "
                     f"{self._timeout_s} s"
                 )
@@ -165,6 +219,9 @@ class ModeNode(Node):
                 "controller_manager", DEFAULT_CONTROLLER_MANAGER
             ).value
         )
+        require_cm = bool(
+            self.declare_parameter("require_controller_manager", False).value
+        )
         group = ReentrantCallbackGroup()
         self.mode_pub = self.create_publisher(String, MODE_TOPIC, LATCHED)
         self.reason_pub = self.create_publisher(
@@ -180,7 +237,14 @@ class ModeNode(Node):
             Trigger, RELEASE_SERVICE, self.on_release, callback_group=group
         )
         self.switcher = ControllerSwitcher(
-            self, controller_manager, self.modes.switch_timeout_s, group
+            self,
+            controller_manager,
+            self.modes.switch_timeout_s,
+            group,
+            required=require_cm,
+        )
+        self.create_timer(
+            RECONCILE_PERIOD_S, self.reconcile, callback_group=group
         )
         self.publish_mode()
         self.get_logger().info(f"mode {self.machine.mode.value}")
@@ -199,11 +263,8 @@ class ModeNode(Node):
         with self._lock:
             old = self.machine.mode
             new = self.machine.peek(event)
-            old_set = self.modes.for_mode(old.value)
-            new_set = self.modes.for_mode(new.value)
-            self.switcher.switch(
-                [c for c in old_set if c not in new_set],
-                [c for c in new_set if c not in old_set],
+            self.switcher.sync(
+                self.modes.for_mode(new.value), self.modes.managed
             )
             transition = self.machine.handle(event, reason)
             self.publish_mode()
@@ -211,6 +272,26 @@ class ModeNode(Node):
             f"mode {old.value} -> {new.value}: {transition.reason}"
         )
         return transition
+
+    def reconcile(self) -> None:
+        """Bring the active controllers back to the current mode's set."""
+        if not self.switcher.ready:
+            return
+        # A mode change in progress syncs the controllers itself.
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            mode = self.machine.mode.value
+            if self.switcher.sync(
+                self.modes.for_mode(mode), self.modes.managed
+            ):
+                self.get_logger().info(f"controllers reconciled to {mode}")
+        except SwitchError as exc:
+            self.get_logger().warning(
+                f"reconcile: {exc}", throttle_duration_sec=5.0
+            )
+        finally:
+            self._lock.release()
 
     def report(self, reason: str) -> None:
         """Publish a reason (e.g. a fault) without changing the mode."""
