@@ -157,7 +157,7 @@ Find the servo adapter and set it once per shell (or pass `--port`):
 
 ```
 uv run talos-servo ports
-export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_...  # bash
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00  # bash
 $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 ```
 
