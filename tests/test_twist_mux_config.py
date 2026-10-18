@@ -11,7 +11,10 @@ from conftest import MUX_CONFIG, flatten
 
 yaml = pytest.importorskip("yaml")
 
-from talos_servo.defaults import STOP_LOCK_PERIOD_S  # noqa: E402
+from talos_servo.defaults import (  # noqa: E402
+    STOP_LOCK_PERIOD_S,
+    WEB_CMD_VEL_TOPIC,
+)
 from talos_servo.ros.mux_status import (  # noqa: E402
     LOCKS_PREFIX,
     TOPICS_PREFIX,
@@ -54,6 +57,10 @@ def test_web_and_keyboard_inputs(inputs):
         "keyboard": "/keyboard/cmd_vel",
         "web": "/web/cmd_vel",
     }
+
+
+def test_web_server_drives_on_the_web_input(inputs):
+    assert inputs["web"].topic == WEB_CMD_VEL_TOPIC
 
 
 def test_keyboard_overrides_web(inputs):

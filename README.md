@@ -268,6 +268,11 @@ locked while the mode node is not running, and a restarted twist_mux is
 locked again by the next beat. `mux-status` publishes `keyboard`, `web`,
 `none` or `locked` on `/robot/active_input` for the UIs.
 
+The web server (`web-ros`) sends the browser's `drive` messages on
+`/web/cmd_vel`. The browser re-sends them every 100 ms while a button is held
+and sends one stop on release, so a closed tab drops out of the mux within
+0.5 s.
+
 **`/robot/stop_lock` is not a working STOP yet.** The web UI and
 `drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
 them onto their mux inputs, so the lock does not stop them. Running
@@ -373,10 +378,11 @@ uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
 Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
-joint, and so does the last browser disconnecting. `/` has a STOP ALL button
-too and keeps its own connection. Leaving a page closes its connection: if no
-other browser is open, that runs STOP ALL, which also stops wheels the CLI or
-a ROS node is driving. For UI work with hot reload,
+joint, including wheels the CLI or a ROS node is driving. `/` has a STOP ALL
+button too and keeps its own connection. When the last browser disconnects,
+the server stops only what the web commanded: the joints it spins and its
+twist_mux input. Over ROS, keyboard driving carries on. For UI work with hot
+reload,
 run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
