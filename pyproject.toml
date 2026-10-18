@@ -14,6 +14,7 @@ talos-servo = "talos_servo.cli:main"
 # Needs rclpy, which only the pixi `ros` environment provides
 talos-robot-ros = "talos_servo.ros.robot_node:main"
 talos-imu-ros = "talos_servo.ros.imu_node:main"
+talos-hardware-bridge-ros = "talos_servo.ros.hardware_bridge_node:main"
 
 [project.optional-dependencies]
 imu = [
@@ -46,6 +47,10 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+# ROS launch packages, not our launch/ folder
+known-third-party = ["launch", "launch_ros"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
