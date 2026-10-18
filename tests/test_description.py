@@ -52,12 +52,27 @@ def test_legs_mimic_the_hinge(robot):
         assert joints(robot)[leg].find("mimic").get("joint") == HINGE
 
 
+def hardware_joints(robot: ET.Element) -> dict[str, ET.Element]:
+    return {j.get("name"): j for j in robot.findall("ros2_control/joint")}
+
+
+def test_ros2_control_has_only_enabled_joints_but_the_hinge(robot):
+    """The bridge drops a whole command naming a joint it does not drive,
+    and the hinge waits for the alpha to servo conversion (#85)."""
+    expected = {j.name for j in CONFIG.enabled_joints} - {HINGE}
+    assert set(hardware_joints(robot)) == expected
+    assert HINGE not in hardware_joints(robot)
+
+
 def test_command_interfaces_match_the_joint_control(robot):
-    hardware = robot.find("ros2_control")
     controls = {j.name: j.control for j in CONFIG.joints}
-    for joint in hardware.findall("joint"):
+    for name, joint in hardware_joints(robot).items():
         commands = [c.get("name") for c in joint.findall("command_interface")]
-        assert commands == [COMMAND_INTERFACE[controls[joint.get("name")]]]
+        assert commands == [COMMAND_INTERFACE[controls[name]]]
+
+
+def test_no_transmission_until_the_hinge_is_driven(robot):
+    assert robot.find("ros2_control/transmission") is None
 
 
 def _leg_angle(joint: ET.Element, alpha: float) -> float:
@@ -91,12 +106,3 @@ def test_model_wheelbase_matches_the_helper(robot, alpha_deg):
     assert front_z == pytest.approx(rear_z)
     # Folding lifts the hinge: the axles sit below it.
     assert front_z <= 0
-
-
-def test_transmission_follows_the_gear_ratio(robot):
-    reduction = robot.find(
-        "ros2_control/transmission/joint/mechanical_reduction"
-    )
-    assert float(reduction.text) == pytest.approx(
-        1 / (2 * CONFIG.model.leg_gear_ratio)
-    )

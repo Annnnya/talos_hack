@@ -29,10 +29,6 @@
   <xacro:property name="hinge" value="${model['hinge_joint']}"/>
   <xacro:property name="bend_min" value="${radians(model['bend_min_deg'])}"/>
   <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
-  <!-- Servo radians per radian of alpha. Each leg gear turns
-       leg_gear_ratio times the servo and both legs move. -->
-  <xacro:property name="bend_reduction"
-                  value="${1 / (2 * model['leg_gear_ratio'])}"/>
   <!-- Rough STS3215 figures: 2.9 N m stall, about 4.6 rad/s. -->
   <xacro:property name="bend_effort" value="2.9"/>
   <xacro:property name="bend_velocity" value="4.6"/>
@@ -183,25 +179,11 @@
     <xacro:wheel_interfaces name="${wheels[2]}"/>
     <xacro:wheel_interfaces name="${wheels[3]}"/>
 
-    <!-- Position in hinge radians (alpha). Before #85 starts this joint,
-         read the open point on unclaimed position joints in
-         docs/ros2_control.md: the plugin would otherwise command 0 rad. -->
-    <joint name="${hinge}">
-      <command_interface name="position"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
-
-    <!-- Servo angle = alpha * bend_reduction. The topic based plugin does
-         not apply transmissions, so the bridge converts (#63, #85). -->
-    <transmission name="bend_transmission">
-      <plugin>transmission_interface/SimpleTransmission</plugin>
-      <actuator name="bend_servo" role="actuator1"/>
-      <joint name="${hinge}" role="joint1">
-        <mechanical_reduction>${bend_reduction}</mechanical_reduction>
-      </joint>
-    </transmission>
+    <!-- The hinge is left out on purpose until #85. The bridge only knows
+         enabled joints and would drop every command naming it, and nothing
+         maps alpha to the servo yet. #85 adds it back with an initial_value,
+         the alpha to servo conversion (talos_servo.model) and the flat
+         offset calibrated in #84. See docs/ros2_control.md. -->
   </ros2_control>
 
 </robot>
