@@ -14,6 +14,7 @@ talos-servo = "talos_servo.cli:main"
 # Needs rclpy, which only the pixi `ros` environment provides
 talos-robot-ros = "talos_servo.ros.robot_node:main"
 talos-imu-ros = "talos_servo.ros.imu_node:main"
+talos-mode-ros = "talos_servo.ros.mode_node:main"
 
 [project.optional-dependencies]
 imu = [
