@@ -177,7 +177,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `talos-servo web` | Browser UI on port 8000 |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
-| `pixi run -e ros drive` | `talos-servo drive --ros` |
+| `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release |
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
@@ -189,6 +189,11 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
   node instead of the port, so these can run next to each other.
 - `ping`, `spin`, `monitor` and `set-id` without `--ros` are bench tools: they
   take servo ids and work without a config.
+- `drive --ros` publishes on `/keyboard/cmd_vel`, so it needs `twist-mux`.
+  N calls `/robot/wall_nearby` and L `/robot/release` on the mode node. It
+  prints the mode, why it changed and which input drives, also when the web
+  changes them. Q/E do nothing while climbing, and the drive keys do nothing
+  while aligning or clamping. Quitting stops only the keyboard input.
 - Every command stops what it started on exit, including Ctrl+C.
 - New servos ship with id 1. Connect them one at a time and give each its own
   id with `set-id` before chaining them.
