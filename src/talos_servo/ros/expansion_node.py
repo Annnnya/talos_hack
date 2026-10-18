@@ -20,6 +20,14 @@ When a motion stops (rate 0, timeout, STOP, mode change, a hinge limit) the
 wheels get zeros, since wheel_velocity_controller keeps its last command,
 and the hinge keeps its last goal, so a clamped robot keeps holding.
 
+Entering clamping opens the hinge by itself (#78, `talos_servo.clamp`)
+until the hinge or a wheel current (the `effort` of `/joint_states`) shows
+wall contact; then it calls `/robot/wall_contact` and the mode node moves on
+to climbing. If the hinge opens fully first it calls `/robot/no_wall` and
+holds. STOP pauses the clamp and releasing STOP goes on. A rate on
+`/expansion/rate` while clamping cancels the clamp: the operator takes over
+until clamping is entered again.
+
 Run with `pixi run -e ros expansion-node`.
 """
 
@@ -39,8 +47,9 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.task import Future
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Float64MultiArray, String
-from std_srvs.srv import SetBool
+from std_srvs.srv import SetBool, Trigger
 
+from talos_servo.clamp import Clamp, Outcome
 from talos_servo.config import ConfigError, RobotConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
@@ -55,13 +64,16 @@ from talos_servo.ros.names import (
     HINGE_MOTION_SERVICE,
     LATCHED,
     MODE_TOPIC,
+    NO_WALL_SERVICE,
     STOP_LOCK_TOPIC,
+    WALL_CONTACT_SERVICE,
     WHEEL_COMMANDS_TOPIC,
 )
 
 EXPANSION_NODE_NAME = "expansion"
 JOINT_STATES_TOPIC = "/joint_states"
-# Wait this long before asking the mode node again after a refusal.
+# Wait this long before asking the mode node again after a refusal (hinge
+# motion, wall contact, no wall).
 GRANT_RETRY_S = 1.0
 LOG_THROTTLE_S = 2.0
 
@@ -81,6 +93,7 @@ class ExpansionNode(Node):
         self.settings = config.expansion
         self.expansion = Expansion(config.model, config.base, self.settings)
         self.hinge = config.model.hinge_joint
+        self.wheels = tuple(config.base.wheels)
         # Free mode needs its controllers swapped only if the config names
         # some to swap in.
         self.needs_grant = bool(config.modes and config.modes.hinge_motion)
@@ -89,6 +102,13 @@ class ExpansionNode(Node):
         self._rate = 0.0
         self._rate_stamp: float | None = None
         self._alpha = math.nan
+        # Motor currents (A) by joint name, from the joint state effort.
+        self._currents: dict[str, float] = {}
+        # Set while clamping (#78) until a manual rate cancels it.
+        self._clamp: Clamp | None = None
+        self._clamp_told = False
+        self._clamp_pending: Future | None = None
+        self._clamp_retry_at = 0.0
         self._mode: Mode | None = None
         self._stopped = True
         self._stop_stamp: float | None = None
@@ -118,6 +138,10 @@ class ExpansionNode(Node):
         self.hinge_motion_client = self.create_client(
             SetBool, HINGE_MOTION_SERVICE
         )
+        self.clamp_clients = {
+            Outcome.CONTACT: self.create_client(Trigger, WALL_CONTACT_SERVICE),
+            Outcome.NO_WALL: self.create_client(Trigger, NO_WALL_SERVICE),
+        }
         self.create_timer(self.period_s, self.tick)
 
     @property
@@ -132,16 +156,36 @@ class ExpansionNode(Node):
     def granted(self) -> bool:
         return self._granted
 
+    @property
+    def clamp(self) -> Clamp | None:
+        return self._clamp
+
+    @property
+    def currents(self) -> dict[str, float]:
+        return self._currents
+
     def on_rate(self, msg: Float64) -> None:
         self._rate = self.expansion.clamp_rate(float(msg.data))
         self._rate_stamp = self._now()
+        if self._rate != 0.0 and self._clamp is not None:
+            self._clamp = None
+            self.expansion.stop()
+            self.get_logger().info("clamp cancelled: manual hinge motion")
 
     def on_joint_state(self, msg: JointState) -> None:
+        names = list(msg.name)
         try:
-            index = list(msg.name).index(self.hinge)
+            index = names.index(self.hinge)
             self._alpha = float(msg.position[index])
         except (ValueError, IndexError):
             pass
+        for joint in (self.hinge, *self.wheels):
+            try:
+                index = names.index(joint)
+                self._currents[joint] = float(msg.effort[index])
+            except (ValueError, IndexError):
+                # No reading: a stale current must not count as contact.
+                self._currents.pop(joint, None)
 
     def on_mode(self, msg: String) -> None:
         try:
@@ -151,6 +195,13 @@ class ExpansionNode(Node):
         if mode != self._mode:
             # The mode node ends any swap on a mode change.
             self._granted = False
+            self._clamp = None
+            if mode is Mode.CLAMPING:
+                self._clamp = Clamp(
+                    self.expansion, self.settings, self.hinge, self.wheels
+                )
+                self._clamp_told = False
+                self.get_logger().info("clamping: opening to the walls")
         self._mode = mode
 
     def on_stop_lock(self, msg: Bool) -> None:
@@ -182,6 +233,9 @@ class ExpansionNode(Node):
         return self._rate
 
     def tick(self) -> None:
+        if self._clamp is not None:
+            self.tick_clamp(self._clamp)
+            return
         rate = self.requested_rate()
         why = self.blocked() if rate else None
         if rate == 0.0 or why is not None:
@@ -197,6 +251,65 @@ class ExpansionNode(Node):
         self._send_wheels(step.wheels)
         self._moving = step.wheels != STILL
         self._note(step.held)
+
+    def tick_clamp(self, clamp: Clamp) -> None:
+        """Open to the walls, or hold once the clamp is over."""
+        why = self.blocked()
+        if why is not None:
+            clamp.pause()
+            self.halt(why)
+            return
+        if clamp.done:
+            self._still(clamp.reason)
+            self._tell(clamp)
+            return
+        step = clamp.step(
+            self._alpha, self._currents, self._now(), self.period_s
+        )
+        if step.goal is not None:
+            self.hinge_pub.publish(Float64MultiArray(data=[step.goal]))
+        if step.wheels != STILL or self._moving:
+            self._send_wheels(step.wheels)
+        self._moving = step.wheels != STILL
+        self._note(step.held)
+        if clamp.done:
+            self.get_logger().info(f"clamp over: {clamp.reason}")
+            self._tell(clamp)
+
+    def _tell(self, clamp: Clamp) -> None:
+        """Tell the mode node how the clamp ended, once."""
+        if self._clamp_told or self._clamp_pending is not None:
+            return
+        if self._now() < self._clamp_retry_at:
+            return
+        client = self.clamp_clients[clamp.outcome]
+        if not client.service_is_ready():
+            self.get_logger().warning(
+                f"mode node not reachable for {clamp.outcome.value}",
+                throttle_duration_sec=LOG_THROTTLE_S,
+            )
+            return
+        future = self.call_clamp_service(clamp.outcome)
+        self._clamp_pending = future
+        future.add_done_callback(lambda f: self._told(f, clamp))
+
+    def call_clamp_service(self, outcome: Outcome) -> Future:
+        return self.clamp_clients[outcome].call_async(Trigger.Request())
+
+    def _told(self, future: Future, clamp: Clamp) -> None:
+        self._clamp_pending = None
+        if clamp is not self._clamp:
+            return
+        response = future.result()
+        if response is not None and response.success:
+            self._clamp_told = True
+            return
+        message = response.message if response else "no answer"
+        self._clamp_retry_at = self._now() + GRANT_RETRY_S
+        self.get_logger().warning(
+            f"{clamp.outcome.value} refused: {message}",
+            throttle_duration_sec=LOG_THROTTLE_S,
+        )
 
     def halt(self, why: str | None = None) -> None:
         """Stop the wheels, keep the hinge goal and give the wheels back."""
