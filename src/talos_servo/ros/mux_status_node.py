@@ -30,9 +30,10 @@ from talos_servo.ros.mux_status import (
     MuxState,
     parse_entries,
 )
+from talos_servo.ros.names import ACTIVE_INPUT_TOPIC
 
 NODE_NAME = "mux_status"
-DEFAULT_ACTIVE_INPUT_TOPIC = "/robot/active_input"
+DEFAULT_ACTIVE_INPUT_TOPIC = ACTIVE_INPUT_TOPIC
 DEFAULT_RATE_HZ = 5.0
 NANOSECONDS_PER_SECOND = 1e9
 # rclpy's list_parameters depth for "every level".
