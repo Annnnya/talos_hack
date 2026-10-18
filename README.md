@@ -108,15 +108,18 @@ flowchart TB
 ### Robot modes
 
 The mode node (`src/talos_servo/modes.py`) walks the robot through a climb.
-Release (L) goes back to Free from any mode.
+Release (L) goes back to Free from any of the wall modes.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Free
     Free --> Aligning: wall nearby
-    Aligning --> Clamping: aligned
-    Clamping --> Climbing: walls touched
-    Climbing --> Clamping: not moving up
+    state "At the wall" as wall {
+        Aligning --> Clamping: aligned
+        Clamping --> Climbing: walls touched
+        Climbing --> Clamping: not moving up
+    }
+    wall --> Free: release
 ```
 
 ### ros2_control (in progress, #62)
