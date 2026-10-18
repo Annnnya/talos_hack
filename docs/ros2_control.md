@@ -97,9 +97,10 @@ Checked in the plugin source (0.3.0):
   `model.bend_min_deg`..`bend_max_deg`. There is no `<transmission>`: the
   plugin ignores them.
 - **Flat position:** `model.bend_flat_steps` in `config/robot.yaml`, the
-  raw servo position when the robot lies flat (4095). It is fixed by
-  aligning the servo horn to the leg, so the servo's absolute position is
-  the hinge angle and nothing is measured at startup. It is required while
+  raw servo position when the robot lies flat (4000, a margin before the
+  wrap at 4095). It is fixed by aligning the servo horn to the leg, so the
+  servo's absolute position is the hinge angle and nothing is measured at
+  startup. It is required while
   `bend` is enabled, and `joints.bend` `min_pos`/`max_pos` are narrowed on
   load to the `bend_min_deg`..`bend_max_deg` range, so every move is
   clamped to it (robot node, `/debug` and the bridge alike).

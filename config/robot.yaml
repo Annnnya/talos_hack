@@ -65,5 +65,6 @@ model:
   # Raw bend servo position (0-4095, as `talos-servo monitor` shows it) when
   # the robot lies flat, fixed by aligning the servo horn to the leg.
   # Required while bend is enabled. The range down to max fold must fit in
-  # one servo turn from here.
-  bend_flat_steps: 4095
+  # one servo turn from here. 4000 leaves about 8 deg past flat before the
+  # reading wraps to 0.
+  bend_flat_steps: 4000
