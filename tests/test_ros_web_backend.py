@@ -29,6 +29,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
+from sensor_msgs.msg import JointState  # noqa: E402
 from std_msgs.msg import Float64, String  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
@@ -284,6 +285,22 @@ def test_diagnostics_from_other_nodes_are_ignored():
     backend._on_status(status_msg(name="imu: bend", temp="99"))
     assert backend_state(backend, "bend")["temp"] == 0
     assert not backend._first_status.is_set()
+
+
+def test_nan_joint_states_keep_the_last_reading():
+    backend = make_backend()
+    backend._on_joint_states(
+        JointState(name=["bend"], position=[0.5], velocity=[0.1])
+    )
+    before = backend_state(backend, "bend")
+    backend._on_joint_states(
+        JointState(name=["bend"], position=[math.nan], velocity=[math.nan])
+    )
+    after = backend_state(backend, "bend")
+    assert (after["position"], after["speed"]) == (
+        before["position"],
+        before["speed"],
+    )
 
 
 def test_silent_robot_node_marks_joints_offline():

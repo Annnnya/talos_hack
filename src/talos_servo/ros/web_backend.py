@@ -23,6 +23,7 @@ Differences from driving the bus directly:
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -222,14 +223,16 @@ class RosBackend:
             self._publish_velocity(speeds, frame)
 
     def _on_joint_states(self, msg: JointState) -> None:
+        # The bridge sends NaN while a reading is unknown (the hinge offline or
+        # out of range): keep the last value instead of crashing the executor.
         with self._lock:
             for i, name in enumerate(msg.name):
                 j = self.joints.get(name)
                 if j is None:
                     continue
-                if i < len(msg.position):
+                if i < len(msg.position) and math.isfinite(msg.position[i]):
                     j.position = rad_to_steps(msg.position[i])
-                if i < len(msg.velocity):
+                if i < len(msg.velocity) and math.isfinite(msg.velocity[i]):
                     j.speed = rad_speed_to_steps(msg.velocity[i])
 
     def _on_status(self, msg: DiagnosticArray) -> None:
