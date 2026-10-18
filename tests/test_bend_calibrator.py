@@ -248,3 +248,16 @@ def test_jog_never_moves_the_other_way(calibrator, sdk):
     at(sdk, 3800)
     calibrator.jog(OPEN)
     assert moves(sdk)[-1][2] == 3811
+
+
+def test_save_refuses_when_the_hinge_servo_changed(
+    calibrator, sdk, robot, paths
+):
+    data = robot_data()
+    data["joints"]["bend"]["id"] = 9
+    paths[0].write_text(yaml.safe_dump(data), "utf-8")
+    record(calibrator, sdk, 4050, 3050)
+    with pytest.raises(CommandError, match="restart the robot"):
+        calibrator.save()
+    assert not paths[1].exists()
+    assert robot.config.hinge.flat_steps == FLAT

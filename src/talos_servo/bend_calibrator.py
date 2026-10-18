@@ -67,9 +67,8 @@ class BendCalibrator:
         self.path = calibration_path(config_path, calibration)
         self._source = source
         self._clock = clock or robot.clock
-        self._inverted = next(
-            j.inverted for j in robot.config.joints if j.name == self.joint
-        )
+        joint = _joint_config(robot.config, self.joint)
+        self._id, self._inverted = joint.id, joint.inverted
         self.jog_steps = max(
             1,
             round(
@@ -144,11 +143,19 @@ class BendCalibrator:
         cal = BendCalibration(self._flat, self._fold)
         new = parse_config(read_config_data(self.config_path), cal)
         assert new.model is not None and new.hinge is not None
+        joint = _joint_config(new, self.joint)
+        if (joint.id, joint.inverted) != (self._id, self._inverted):
+            # The points were measured with the servo the robot started
+            # with; they mean something else for another one.
+            raise CommandError(
+                f"joints.{self.joint} changed in {self.config_path} since "
+                "start: restart the robot and calibrate again"
+            )
         save_calibration(self.path, cal, new.model.bend_min_deg)
         self.robot.update_hinge(new)
         self._end()
         low, high = new.hinge.step_range
-        notes = warnings(cal, _joint_config(new, self.joint))
+        notes = warnings(cal, joint)
         notes += self._outside_note(new)
         return " ".join(
             [
