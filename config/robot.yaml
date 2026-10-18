@@ -26,6 +26,7 @@ joints:
 base:
   # Speed joints in FL, FR, RL, RR order.
   wheels: [front_left_wheel, front_right_wheel, rear_left_wheel, rear_right_wheel]
+  # Front to rear axle when flat. Each leg (hinge to axle) is half of it.
   wheelbase_m: 0.31
   track_width_m: 0.128
   # Steps per metre of wheel travel are 4096 / (2 * pi * wheel_radius_m).
@@ -38,9 +39,6 @@ base:
 # The robot is an inverted V: the bend hinge on top, a leg down to each wheel
 # pair. bend is the opening angle between the legs: 180 flat, smaller folded.
 model:
-  # Hinge to wheel axle. Flat, the wheelbase is 2 * leg_length_m and must
-  # match base.wheelbase_m.
-  leg_length_m: 0.155
   # Each leg gear turns this many times the servo. Both legs move, so the
   # opening angle changes 2 * 0.5 = 1 times the servo angle.
   leg_gear_ratio: 0.5

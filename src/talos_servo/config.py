@@ -31,8 +31,6 @@ DEFAULT_MAX_ANGULAR_SPEED = 0.5
 WHEEL_COUNT = 4
 # Hinge opening angle when the robot lies flat.
 FLAT_DEG = 180.0
-# How far 2 * leg_length_m may differ from base.wheelbase_m.
-WHEELBASE_TOLERANCE_M = 1e-6
 
 # Joint names are ROS names too (topics, services, JointState), so keep them
 # plain.
@@ -80,6 +78,7 @@ class ModelConfig:
 
     `bend` is the hinge opening angle between the legs: 180 deg flat, smaller
     when folded. Each leg gear turns `leg_gear_ratio` times the servo.
+    `leg_length_m` (hinge to wheel axle) is half the flat `base.wheelbase_m`.
     """
 
     leg_length_m: float
@@ -217,8 +216,12 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
 
 
 def _parse_model(raw: dict, base: BaseConfig | None) -> ModelConfig:
+    if base is None:
+        raise ConfigError(
+            "model needs a base section: the legs and wheels come from it"
+        )
     model = ModelConfig(
-        leg_length_m=_positive(raw, "leg_length_m"),
+        leg_length_m=base.wheelbase_m / 2,
         leg_gear_ratio=_positive(raw, "leg_gear_ratio"),
         bend_min_deg=_positive(raw, "bend_min_deg"),
         bend_max_deg=_positive(raw, "bend_max_deg", FLAT_DEG),
@@ -227,15 +230,6 @@ def _parse_model(raw: dict, base: BaseConfig | None) -> ModelConfig:
         raise ConfigError(
             "model: need 0 < bend_min_deg < bend_max_deg <= "
             f"{FLAT_DEG:g}, got {model.bend_min_deg}..{model.bend_max_deg}"
-        )
-    flat_wheelbase = 2 * model.leg_length_m
-    if (
-        base is not None
-        and abs(flat_wheelbase - base.wheelbase_m) > WHEELBASE_TOLERANCE_M
-    ):
-        raise ConfigError(
-            f"model: 2 * leg_length_m ({flat_wheelbase:g}) must equal the "
-            f"flat base.wheelbase_m ({base.wheelbase_m:g})"
         )
     return model
 

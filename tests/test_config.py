@@ -70,7 +70,6 @@ def test_base_is_optional():
 
 
 MODEL = {
-    "leg_length_m": 0.15,
     "leg_gear_ratio": 0.5,
     "bend_min_deg": 90,
     "bend_max_deg": 180,
@@ -84,6 +83,11 @@ def test_model_is_parsed():
     assert model.bend_max_rad == pytest.approx(math.pi)
 
 
+def test_model_needs_a_base():
+    with pytest.raises(ConfigError, match="base section"):
+        parse_config({**SMALL, "model": MODEL})
+
+
 def test_model_is_optional():
     assert parse_config(BASE).model is None
 
@@ -91,7 +95,6 @@ def test_model_is_optional():
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"leg_length_m": 0.2}, "base.wheelbase_m"),
         ({"bend_min_deg": 180}, "bend_min_deg < bend_max_deg"),
         ({"bend_max_deg": 200}, "bend_max_deg <= 180"),
         ({"leg_gear_ratio": 0}, "positive"),
