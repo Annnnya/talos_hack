@@ -109,6 +109,8 @@ mux-status = "talos-mux-status-ros --ros-args --params-file config/twist_mux.yam
 [feature.viz.dependencies]
 ros-jazzy-rviz2 = "*"
 ros-jazzy-joint-state-publisher-gui = "*"
+# Lets RViz decode the JPEG frames on /camera/*/compressed
+ros-jazzy-compressed-image-transport = "*"
 
 [feature.viz.tasks]
 view-model = "ros2 launch launch/view_model.launch.py"
