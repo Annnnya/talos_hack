@@ -73,6 +73,7 @@ flowchart LR
         IMUN["imu_node"]
         FILT["imu_filter_madgwick"]
         EKF["robot_localization<br/>ekf_node"]
+        MUX["twist_mux<br/>+ mux_status"]
     end
     SERVOS[("Servos")]
     MPU[("MPU6050")]
@@ -80,6 +81,7 @@ flowchart LR
     WEB -- "/robot/position_cmd · velocity_cmd · services" --> NODE
     CLI -- "/cmd_vel · /robot/velocity_cmd" --> NODE
     NODE -- "/joint_states · /diagnostics" --> WEB
+    MUX -- "/cmd_vel" --> NODE
     NODE <--> SERVOS
     NODE -- "/odom" --> EKF
     IMUN <--> MPU
@@ -175,6 +177,8 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros ekf` | Pose estimate from wheels and gyro |
+| `pixi run -e ros twist-mux` | Web and keyboard share `/cmd_vel` |
+| `pixi run -e ros mux-status` | Who drives, on `/robot/active_input` |
 
 - `--ros` (on `spin`, `monitor`, `drive`, `web`) goes through the running robot
   node instead of the port, so these can run next to each other.
@@ -234,10 +238,41 @@ base:
 | `/robot/<joint>/set_torque` | `std_srvs/SetBool` | torque on/off |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
+| `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
+| `/keyboard/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, keyboard |
+| `/robot/stop_lock` | `std_msgs/Bool` | in: true stops the mux |
+| `/robot/active_input` | `std_msgs/String` | out: who drives |
 
 `/cmd_vel` and `velocity_cmd` stop the wheels unless repeated within
 `command_timeout_s`. Every client on the robot must use the same
 `ROS_DOMAIN_ID`.
+
+### Web and keyboard through twist_mux
+
+`twist_mux` merges `/web/cmd_vel` and `/keyboard/cmd_vel` into `/cmd_vel`
+(`config/twist_mux.yaml`). The keyboard has the higher priority, so it wins
+while a key is held; an input that is quiet for 0.5 s stops counting and the
+other one takes over. `true` on `/robot/stop_lock` blocks both until someone
+publishes `false`. `mux-status` publishes `keyboard`, `web`, `none` or
+`locked` on `/robot/active_input` for the UIs.
+
+**`/robot/stop_lock` is not a working STOP yet.** The web UI and
+`drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
+them onto their mux inputs, so the lock does not stop them. Running
+`twist-mux` next to them also adds a second publisher on `/cmd_vel`. Use the
+STOP button or `/robot/stop_all` to stop the robot.
+
+The lock only lives in twist_mux's memory: if twist_mux restarts while STOP
+is on, it comes back unlocked and the next message drives again (#103).
+
+```
+pixi run -e ros twist-mux
+pixi run -e ros mux-status
+ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/Twist   "{linear: {x: 0.05}}"
+ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: true}"
+ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: false}"
+ros2 topic echo /robot/active_input
+```
 
 ### ROS commands
 

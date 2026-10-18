@@ -1,0 +1,40 @@
+# twist_mux settings: web and keyboard share the base through one mux
+# (pixi run -e ros twist-mux). Its output is remapped to /cmd_vel, which the
+# robot node drives from. The mux_status node reads the same file
+# (pixi run -e ros mux-status).
+#
+# twist_mux picks the highest priority input that is not timed out. With equal
+# priorities it does not pick the latest one, so every input gets its own.
+/**:
+  ros__parameters:
+    # The robot node takes geometry_msgs/Twist, not TwistStamped.
+    use_stamped: false
+    topics:
+      # Keyboard at the laptop overrides the web page while a key is held.
+      keyboard:
+        topic: /keyboard/cmd_vel
+        # Seconds without a message before the input stops counting, so a
+        # quiet input never blocks the other one for long.
+        timeout: 0.5
+        priority: 20
+      web:
+        topic: /web/cmd_vel
+        timeout: 0.5
+        priority: 10
+    locks:
+      # STOP from any interface: publish true to stop the base, false to
+      # release it. Timeout 0 keeps the lock until it is released. It only
+      # lives in twist_mux's memory, so a twist_mux restart clears STOP
+      # (#103).
+      stop:
+        topic: /robot/stop_lock
+        timeout: 0.0
+        # Above every input, so the lock masks all of them.
+        priority: 100
+
+mux_status:
+  ros__parameters:
+    # std_msgs/String: the input driving now, "none" or "locked".
+    active_input_topic: /robot/active_input
+    # How often to re-check timeouts and republish.
+    rate_hz: 5.0
