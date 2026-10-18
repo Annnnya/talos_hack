@@ -1,14 +1,16 @@
-# Wheel speeds that keep the wheels rolling while the bend hinge moves.
+# Wheel servo speeds that keep the wheels rolling while the bend hinge moves.
 # Derivation: docs/hinge_kinematics.md (#60). Loaded by the expansion
 # controller tests (#76) and checked in tests/test_hinge_kinematics.py.
 #
 # alpha_deg:        hinge opening angle, 180 flat, bend_min_deg at max fold
 # alpha_rate_rad_s: d(alpha)/dt, positive expands (opens), negative collapses
-# wheels_rad_s:     wheel angular speed in FL, FR, RL, RR order, positive
-#                   rolls forward (joints.*.inverted already applied)
+# wheels_rad_s:     wheel servo speed relative to its leg, in FL, FR, RL, RR
+#                   order, positive rolls forward (joints.*.inverted already
+#                   applied). Includes the leg's own turn, d(alpha)/dt / 2.
 #
 # Rows at 180 deg with a positive rate are past bend_max_deg. They only show
-# that the wheels stop rolling at flat; #76 refuses to expand there.
+# that at flat the wheels stop rolling and the servos just follow the legs;
+# #76 refuses to expand there.
 
 leg_length_m: 0.155
 wheel_radius_m: 0.03
@@ -16,30 +18,30 @@ wheel_radius_m: 0.03
 vectors:
   # max fold (bend_min_deg)
   - {alpha_deg: 90, alpha_rate_rad_s: 0.5,
-     wheels_rad_s: [0.913346, 0.913346, -0.913346, -0.913346]}
+     wheels_rad_s: [1.163346, 1.163346, -1.163346, -1.163346]}
   - {alpha_deg: 90, alpha_rate_rad_s: -0.5,
-     wheels_rad_s: [-0.913346, -0.913346, 0.913346, 0.913346]}
+     wheels_rad_s: [-1.163346, -1.163346, 1.163346, 1.163346]}
   - {alpha_deg: 90, alpha_rate_rad_s: 0.0,
      wheels_rad_s: [0.0, 0.0, 0.0, 0.0]}
   - {alpha_deg: 120, alpha_rate_rad_s: 0.5,
-     wheels_rad_s: [0.645833, 0.645833, -0.645833, -0.645833]}
+     wheels_rad_s: [0.895833, 0.895833, -0.895833, -0.895833]}
   - {alpha_deg: 120, alpha_rate_rad_s: -0.5,
-     wheels_rad_s: [-0.645833, -0.645833, 0.645833, 0.645833]}
+     wheels_rad_s: [-0.895833, -0.895833, 0.895833, 0.895833]}
   # half open
   - {alpha_deg: 135, alpha_rate_rad_s: 0.5,
-     wheels_rad_s: [0.494299, 0.494299, -0.494299, -0.494299]}
+     wheels_rad_s: [0.744299, 0.744299, -0.744299, -0.744299]}
   - {alpha_deg: 135, alpha_rate_rad_s: -0.5,
-     wheels_rad_s: [-0.494299, -0.494299, 0.494299, 0.494299]}
+     wheels_rad_s: [-0.744299, -0.744299, 0.744299, 0.744299]}
   - {alpha_deg: 135, alpha_rate_rad_s: 0.2,
-     wheels_rad_s: [0.19772, 0.19772, -0.19772, -0.19772]}
+     wheels_rad_s: [0.29772, 0.29772, -0.29772, -0.29772]}
   - {alpha_deg: 150, alpha_rate_rad_s: 0.5,
-     wheels_rad_s: [0.334308, 0.334308, -0.334308, -0.334308]}
+     wheels_rad_s: [0.584308, 0.584308, -0.584308, -0.584308]}
   - {alpha_deg: 150, alpha_rate_rad_s: -0.5,
-     wheels_rad_s: [-0.334308, -0.334308, 0.334308, 0.334308]}
-  # flat (bend_max_deg)
+     wheels_rad_s: [-0.584308, -0.584308, 0.584308, 0.584308]}
+  # flat (bend_max_deg): no roll, only the leg turn
   - {alpha_deg: 180, alpha_rate_rad_s: 0.5,
-     wheels_rad_s: [0.0, 0.0, 0.0, 0.0]}
+     wheels_rad_s: [0.25, 0.25, -0.25, -0.25]}
   - {alpha_deg: 180, alpha_rate_rad_s: -0.5,
-     wheels_rad_s: [0.0, 0.0, 0.0, 0.0]}
+     wheels_rad_s: [-0.25, -0.25, 0.25, 0.25]}
   - {alpha_deg: 180, alpha_rate_rad_s: 0.0,
      wheels_rad_s: [0.0, 0.0, 0.0, 0.0]}
