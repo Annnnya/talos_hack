@@ -269,11 +269,13 @@ The web server (`web-ros`) sends the browser's `drive` messages on
 and sends one stop on release, so a closed tab drops out of the mux within
 0.5 s.
 
-**`/robot/stop_lock` is not a working STOP yet.** The web UI and
-`drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
-them onto their mux inputs, so the lock does not stop them. Running
-`twist-mux` next to them also adds a second publisher on `/cmd_vel`. Use the
-STOP button or `/robot/stop_all` to stop the robot.
+**`/robot/stop_lock` is not a working STOP yet.** The web UI is on its mux
+input, but `drive --ros` still publishes straight to `/cmd_vel` until #73
+moves it, so the lock does not stop the keyboard. Running `twist-mux` next
+to it also adds a second publisher on `/cmd_vel`. The web STOP button calls
+the robot node's `stop_all`, which a browser still holding a drive button
+overrides on its next message; STOP from the UIs through the lock is #108.
+Use `/robot/stop_all` and let go of every button to stop the robot.
 
 ```
 pixi run -e ros mode-node
