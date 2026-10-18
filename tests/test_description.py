@@ -180,3 +180,11 @@ def test_model_wheelbase_matches_the_helper(robot, alpha_deg):
     assert front_z == pytest.approx(rear_z)
     # Folding lifts the hinge: the axles sit below it.
     assert front_z <= 0
+
+
+def test_calibrated_max_fold_sets_the_bend_limit():
+    # The launch files pass the max fold from config/bend_calibration.yaml.
+    urdf = xacro.process_file(str(XACRO), mappings={"bend_min_deg": "100.5"})
+    limit = joints(ET.fromstring(urdf.toxml()))[HINGE].find("limit")
+    assert float(limit.get("lower")) == pytest.approx(math.radians(100.5))
+    assert float(limit.get("upper")) == pytest.approx(CONFIG.model.bend_max_rad)

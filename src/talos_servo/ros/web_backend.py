@@ -135,6 +135,8 @@ class RosBackend:
         self._own_frames: set[str] = set()
         # Last STOP state from the mode node and when it came.
         self._stop_beat: tuple[bool, float] | None = None
+        # Trigger clients made on first use, by service name.
+        self._triggers: dict[str, Client] = {}
         # Hinge opening angle (rad) from /joint_states, None while unknown.
         self._hinge_alpha: float | None = None
         self._hinge_current: float | None = None
@@ -208,6 +210,7 @@ class RosBackend:
         if self._owns_context and self._context is not None:
             rclpy.try_shutdown(context=self._context)
         self._node = self._executor = self._thread = None
+        self._triggers.clear()
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -680,9 +683,19 @@ class RosBackend:
         msg.header.frame_id = frame
         self._require_node().velocity_pub.publish(msg)
 
-    def _call(self, client: Client, request: Any, what: str) -> None:
+    def trigger(self, service: str) -> str:
+        """Call a std_srvs/Trigger service by full name; its message."""
+        client = self._triggers.get(service)
+        if client is None:
+            client = self._require_node().create_client(Trigger, service)
+            self._triggers[service] = client
+        if not client.wait_for_service(timeout_sec=self.wait_timeout):
+            raise CommandError(f"no service {service}")
+        return self._call(client, Trigger.Request(), service)
+
+    def _call(self, client: Client, request: Any, what: str) -> str:
         """Call a robot service from a worker thread; the executor thread
-        delivers the answer.
+        delivers the answer, and its message is returned.
 
         Never hold `_lock` here: the subscription callbacks need it while we
         wait.
@@ -705,6 +718,7 @@ class RosBackend:
                 response.message if response is not None else "no response"
             )
             raise CommandError(f"{what}: {message}")
+        return response.message
 
     def _require_node(self) -> WebClientNode:
         if self._node is None:

@@ -80,6 +80,8 @@ robot = "ros2 launch launch/robot.launch.py"
 robot-node = "talos-robot-ros"
 # Keyboard driving through the robot node
 drive = "talos-servo drive --ros"
+# Measure the hinge flat and max fold through the running robot (#84)
+calibrate-bend = "talos-servo calibrate-bend"
 # CSI camera node: snapshots and a low-rate stream
 camera-node = "talos-camera-ros --ros-args --params-file config/camera.yaml"
 imu-node = "talos-imu-ros"

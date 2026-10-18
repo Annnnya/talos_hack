@@ -5,8 +5,14 @@ import math
 from pathlib import Path
 
 import pytest
+import yaml
 from conftest import BASE, SMALL
 
+from talos_servo.bend_calibration import (
+    CALIBRATION_ENV_VAR,
+    CALIBRATION_FILE,
+    BendCalibration,
+)
 from talos_servo.config import (
     MODE_NAMES,
     ConfigError,
@@ -300,3 +306,65 @@ def test_repo_config_moves_the_hinge_in_clamping():
     assert set(config.modes.hinge_motion) <= set(
         config.modes.for_mode("clamping")
     )
+
+
+def write_calibration(path: Path, flat: int, fold: int) -> Path:
+    path.write_text(f"flat_steps: {flat}\nfold_steps: {fold}\n", "utf-8")
+    return path
+
+
+def write_robot(tmp_path: Path) -> Path:
+    path = tmp_path / "robot.yaml"
+    path.write_text(yaml.safe_dump(hinge_data(bend_flat_steps=4000)), "utf-8")
+    return path
+
+
+def test_without_calibration_the_model_values_apply(tmp_path, monkeypatch):
+    monkeypatch.delenv(CALIBRATION_ENV_VAR, raising=False)
+    config = load_config(write_robot(tmp_path))
+    assert config.bend_calibration is None
+    assert config.hinge.flat_steps == 4000
+    assert config.model.bend_min_deg == 90
+
+
+def test_calibration_next_to_the_config_overrides_the_model(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(CALIBRATION_ENV_VAR, raising=False)
+    robot = write_robot(tmp_path)
+    write_calibration(tmp_path / CALIBRATION_FILE, 3900, 3000)
+    config = load_config(robot)
+    assert config.bend_calibration == BendCalibration(3900, 3000)
+    assert config.hinge.flat_steps == 3900
+    assert config.model.bend_min_deg == pytest.approx(180 - 900 * 360 / 4096)
+    assert config.hinge.step_range == (3000, 3900)
+    bend = next(j for j in config.joints if j.name == "bend")
+    assert (bend.min_pos, bend.max_pos) == (3000, 3900)
+
+
+def test_explicit_calibration_path_wins(tmp_path, monkeypatch):
+    monkeypatch.delenv(CALIBRATION_ENV_VAR, raising=False)
+    robot = write_robot(tmp_path)
+    write_calibration(tmp_path / CALIBRATION_FILE, 3900, 3000)
+    other = write_calibration(tmp_path / "other.yaml", 3800, 2900)
+    assert load_config(robot, other).hinge.flat_steps == 3800
+
+
+def test_invalid_calibration_names_the_file(tmp_path, monkeypatch):
+    monkeypatch.delenv(CALIBRATION_ENV_VAR, raising=False)
+    robot = write_robot(tmp_path)
+    write_calibration(tmp_path / CALIBRATION_FILE, 3000, 3500)
+    with pytest.raises(ConfigError, match=f"{CALIBRATION_FILE}.*Delete"):
+        load_config(robot)
+
+
+def test_calibration_needs_a_model():
+    with pytest.raises(ConfigError, match="model section"):
+        parse_config(BASE, BendCalibration(4000, 3000))
+
+
+def test_broken_yaml_is_a_config_error(tmp_path):
+    path = tmp_path / "robot.yaml"
+    path.write_text("joints: [unclosed", "utf-8")
+    with pytest.raises(ConfigError, match="not valid YAML"):
+        load_config(path)
