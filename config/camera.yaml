@@ -7,3 +7,4 @@
     stream_height: 360
     stream_fps: 15
     frame_id: camera_optical_frame
+    stream_on_start: true

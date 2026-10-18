@@ -60,6 +60,9 @@ class CameraNode(Node):
         self._video_command = str(
             self.declare_parameter("video_command", "rpicam-vid").value
         )
+        stream_on_start = bool(
+            self.declare_parameter("stream_on_start", False).value
+        )
         if self._camera_index < 0:
             raise ValueError("camera_index must be zero or greater")
         if (
@@ -100,8 +103,15 @@ class CameraNode(Node):
         self._latest_frame: bytes | None = None
         self._frame_sequence = 0
         self._published_sequence = 0
+        if stream_on_start:
+            try:
+                self._start_streaming()
+            except Exception as exc:
+                self.get_logger().error(f"Could not start stream: {exc}")
+        state = "on" if self._stream_process is not None else "off"
         self.get_logger().info(
-            "Camera ready; camera index 0 is the default, streaming is disabled"
+            f"Camera {self._camera_index} ready, stream {state}"
+            " (toggle with /camera/stream)"
         )
 
     def _take_snapshot(
@@ -205,7 +215,8 @@ class CameraNode(Node):
                 "-",
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            # Inherit stderr so rpicam-vid errors show in the node's log
+            stderr=None,
             bufsize=0,
         )
         self._reader = threading.Thread(
