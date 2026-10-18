@@ -122,6 +122,9 @@ class ModelConfig:
     bend_min_deg: float
     bend_max_deg: float = FLAT_DEG
     bend_flat_steps: int | None = None
+    # False opens the hinge range to the whole servo turn: no end stops in
+    # software, only the hard stops of the mechanism.
+    hinge_limits: bool = True
 
     @property
     def bend_min_rad(self) -> float:
@@ -329,6 +332,16 @@ def _clamp_hinge(config: RobotConfig) -> RobotConfig:
         hinge = Hinge(model, flat)
     except HingeRangeError as exc:
         raise ConfigError(f"model.bend_flat_steps: {exc}") from exc
+    if not model.hinge_limits:
+        hinge = hinge.unlimited()
+        config = replace(
+            config,
+            model=replace(
+                model,
+                bend_min_deg=math.degrees(hinge.min_rad),
+                bend_max_deg=math.degrees(hinge.max_rad),
+            ),
+        )
     low, high = hinge.step_range
     min_pos, max_pos = max(joint.min_pos, low), min(joint.max_pos, high)
     if min_pos > max_pos:
@@ -622,7 +635,12 @@ def _parse_model(
                 f"got {flat}"
             )
         model = replace(model, bend_flat_steps=flat)
-    return model
+    limits = raw.get("hinge_limits", True)
+    if not isinstance(limits, bool):
+        raise ConfigError(
+            f"model.hinge_limits must be true or false, got {limits!r}"
+        )
+    return replace(model, hinge_limits=limits)
 
 
 def _positive(raw: dict, key: str, default: float | None = None) -> float:

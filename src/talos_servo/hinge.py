@@ -22,6 +22,7 @@ No ROS here.
 
 from __future__ import annotations
 
+import copy
 import math
 from typing import TYPE_CHECKING
 
@@ -72,6 +73,15 @@ class Hinge:
                 "Turn the servo horn so flat sits further from the end"
             )
         self.step_range = (low, high)
+
+    def unlimited(self) -> Hinge:
+        """The same hinge with its range opened to the whole servo turn
+        (`model.hinge_limits: false`): no angle limit but the servo's own."""
+        wide = copy.copy(self)
+        wide.min_rad = self.alpha(0)
+        wide.max_rad = self.alpha(MAX_POSITION)
+        wide.step_range = (0, MAX_POSITION)
+        return wide
 
     def alpha(self, steps: int) -> float:
         """Opening angle (rad) at a servo position in joint steps."""

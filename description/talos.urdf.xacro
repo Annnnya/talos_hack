@@ -37,7 +37,8 @@
   <xacro:property name="bend_min" value="${radians(
       float(xacro.arg('bend_min_deg')) if xacro.arg('bend_min_deg')
       else model['bend_min_deg'])}"/>
-  <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
+  <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])
+      if model.get('hinge_limits', True) else 2 * pi}"/>
   <!-- Rough STS3215 figures: 2.9 N m stall, about 4.6 rad/s. -->
   <xacro:property name="bend_effort" value="2.9"/>
   <xacro:property name="bend_velocity" value="4.6"/>
