@@ -1,25 +1,41 @@
-import type { Direction } from "./joystick";
+import { DIRECTIONS, type Direction } from "./joystick";
 import type { Mode } from "./protocol";
 
-const ALL: ReadonlySet<Direction> = new Set(["up", "down", "left", "right", "ccw", "cw"]);
-const NO_TURN: ReadonlySet<Direction> = new Set(["up", "down", "left", "right"]);
-const NONE: ReadonlySet<Direction> = new Set();
+type Axis = "vx" | "vy" | "wz";
+/** Same order as the fractions in `DIRECTIONS`. */
+const AXES: readonly Axis[] = ["vx", "vy", "wz"];
+const ALL_AXES: ReadonlySet<Axis> = new Set(AXES);
 
 /**
- * Directions each mode allows, the same as `DRIVE_KEYS_BY_MODE` in
- * src/talos_servo/teleop.py. Climbing cannot turn on the walls; aligning and
- * clamping move the robot by themselves.
+ * Body velocity axes each mode allows, the same rule as `DRIVE_AXES_BY_MODE`
+ * in src/talos_servo/modes.py, which the keyboard and the web server use.
+ * Climbing cannot turn on the walls; aligning and clamping move the robot by
+ * themselves. The server refuses the rest anyway, this only greys buttons out.
  */
-const BY_MODE: Record<Mode, ReadonlySet<Direction>> = {
-  free: ALL,
-  climbing: NO_TURN,
-  aligning: NONE,
-  clamping: NONE,
+const AXES_BY_MODE: Record<Mode, ReadonlySet<Axis>> = {
+  free: ALL_AXES,
+  climbing: new Set(["vx", "vy"]),
+  aligning: new Set(),
+  clamping: new Set(),
 };
 
+/** Directions that only use `axes`. */
+function directionsWithin(axes: ReadonlySet<Axis>): ReadonlySet<Direction> {
+  return new Set(
+    (Object.keys(DIRECTIONS) as Direction[]).filter((dir) =>
+      DIRECTIONS[dir].every((f, i) => f === 0 || axes.has(AXES[i])),
+    ),
+  );
+}
+
+const ALL = directionsWithin(ALL_AXES);
+const BY_MODE = Object.fromEntries(
+  Object.entries(AXES_BY_MODE).map(([mode, axes]) => [mode, directionsWithin(axes)]),
+) as Record<Mode, ReadonlySet<Direction>>;
+
 /**
- * An unknown mode (no mode node) allows everything, like `allowed_keys` in
- * teleop.py. Fails open on purpose: without the mode node its stop lock goes
+ * An unknown mode (no mode node) allows everything, like `allowed_axes` in
+ * modes.py. Fails open on purpose: without the mode node its stop lock goes
  * quiet, so twist_mux is locked and nothing drives anyway.
  */
 export function allowedDirections(mode: Mode | null): ReadonlySet<Direction> {
