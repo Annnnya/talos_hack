@@ -14,12 +14,13 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("sensor_msgs")
 
 from conftest import BASE, SMALL, FakeClock, config  # noqa: E402
+from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_TORQUE_ENABLE  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
 from talos_servo.bus import ServoError  # noqa: E402
 from talos_servo.defaults import ROBOT_NODE_NAME  # noqa: E402
-from talos_servo.robot import Robot  # noqa: E402
+from talos_servo.robot import FAULT_CLEAR_S, Robot  # noqa: E402
 from talos_servo.ros.convert import (  # noqa: E402
     CENTER_STEP,
     RAD_PER_STEP,
@@ -414,3 +415,80 @@ def test_steady_commands_stay_armed(hinge_node, hinge_robot, clock):
     clock.now += hinge_robot.config.command_timeout_s / 2
     hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
     assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+# --- safe state (#94) --------------------------------------------------------
+
+
+def torque_writes(sdk) -> list[tuple]:
+    return [
+        c
+        for c in sdk.handler.calls
+        if c[0] == "write1" and c[2] == SMS_STS_TORQUE_ENABLE
+    ]
+
+
+def moves(sdk) -> list[tuple]:
+    return [c for c in sdk.handler.calls if c[0] == "move"]
+
+
+def drive_wheel_and_bend(node) -> None:
+    hold(node)
+    node.on_commands(
+        commands(["bend", "wheel"], position=[0.2], velocity=[1.0])
+    )
+    node.tick()
+    assert node.robot.joints["wheel"].target_speed != 0
+    assert node.robot.joints["bend"].target is not None
+
+
+def test_quiet_commands_brake_the_wheel_and_hold_bend(node, robot, sdk, clock):
+    drive_wheel_and_bend(node)
+    goal = robot.joints["bend"].target
+    sent = len(moves(sdk))
+    clock.now += robot.config.command_timeout_s + 0.1
+    node.tick()
+    assert robot.joints["wheel"].target_speed == 0
+    assert robot.joints["bend"].target == goal
+    assert len(moves(sdk)) == sent
+    assert torque_writes(sdk) == []
+
+
+def test_bus_error_brakes_and_refuses_commands(node, robot, sdk):
+    drive_wheel_and_bend(node)
+    sent = len(moves(sdk))
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    node.tick()
+    del sdk.fail[("sync_write", 254)]
+    assert node._fault is not None
+    node.on_commands(
+        commands(["bend", "wheel"], position=[0.3], velocity=[1.0])
+    )
+    node.tick()
+    assert robot.joints["wheel"].target_speed == 0
+    assert len(moves(sdk)) == sent
+    assert torque_writes(sdk) == []
+
+
+def test_bridge_follows_commands_once_the_fault_clears(node, robot, sdk, clock):
+    drive_wheel_and_bend(node)
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    node.tick()
+    del sdk.fail[("sync_write", 254)]
+    node.tick()
+    clock.now += FAULT_CLEAR_S
+    node.tick()
+    assert node._fault is None
+    node.on_commands(commands(["wheel"], velocity=[1.0]))
+    assert robot.joints["wheel"].target_speed != 0
+
+
+def test_shutdown_brakes_without_turning_torque_off(node, robot, sdk):
+    drive_wheel_and_bend(node)
+    sent = len(moves(sdk))
+    robot.close()
+    assert robot.joints["wheel"].target_speed == 0
+    packet = sdk.handler.sync_writes()[-1][2]
+    assert packet[5] | packet[6] << 8 == 0
+    assert len(moves(sdk)) == sent
+    assert torque_writes(sdk) == []

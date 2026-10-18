@@ -197,6 +197,22 @@ fold symmetrically and the platform stays level. Check the model with
 `pixi run -e ros check-model` (`check_urdf`) or print it with
 `pixi run -e ros model-urdf`.
 
+To watch the live robot instead (#127), start it with `viz:=true` on the Pi
+and open RViz on a laptop on the same network and `ROS_DOMAIN_ID`:
+
+```
+pixi run -e ros robot viz:=true    # on the Pi
+pixi run -e viz view-live          # on the laptop
+```
+
+The hinge and wheels follow the servos through ros2_control's
+`/joint_states`, and the model moves in the `odom` frame. Without the IMU the
+EKF runs on wheel odometry alone, so the pose drifts; it does not follow the
+robot up a chimney. `viz:=true` needs ros2_control (the default). Do not run
+`view-model` at the same time: its sliders publish `/joint_states` too. If
+the laptop sees no topics over Wi-Fi, multicast discovery is blocked: set up
+a Fast DDS discovery server or a CycloneDDS peer list.
+
 ## Quick start
 
 Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
@@ -238,6 +254,7 @@ Ctrl+C stops everything, and the wheels with it.
 | `camera:=` | `false` | camera node |
 | `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
 | `ros2_control:=` | `true` | `false`: the old robot node drives instead |
+| `viz:=` | `false` | EKF for the live robot in RViz (see below) |
 
 The per-motor `/debug` page needs `ros2_control:=false`: under ros2_control
 the controllers own the joints, so single-joint commands are not served.
@@ -541,8 +558,18 @@ with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
-Wire the MPU6050 to the Pi's I2C pins (VCC to 3.3 V on pin 1, GND pin 6, SDA
-pin 3, SCL pin 5, AD0 to GND for 0x68), enable I2C in `raspi-config`, and check
+Wire the MPU6050 to the Pi 5's I2C pins:
+
+| MPU6050 | Pi header |
+|---|---|
+| VCC | pin 1 (3.3 V) |
+| GND | pin 6 (GND) |
+| SDA | pin 3 (GPIO2) |
+| SCL | pin 5 (GPIO3) |
+| AD0 | GND for address 0x68 (or 3.3 V for 0x69) |
+
+Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
+`sudo raspi-config` (Interface Options, I2C), reboot, and check that
 `i2cdetect -y 1` shows `68`.
 
 ```

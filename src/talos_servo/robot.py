@@ -10,6 +10,16 @@ Speed joints are written from `tick()`: one sync-write packet with every wheel
 speed, one sync-read packet with every wheel's position and speed (fresh wheel
 odometry each tick), then one full servo read, round robin. Call it at
 `config.control_hz`.
+
+Safe state (`hold_safe`): every wheel at speed 0 with torque on, so it brakes,
+and every position joint keeps its last goal with torque on. Torque is never
+turned off on the way, so nothing goes limp while the robot hangs between two
+walls. A bus fault (a wheel write fails, or a joint that was online stops
+answering) puts the robot in the safe state and latches it: commands that
+would move refuse with `CommandError` until the lost joints answer again and
+wheel writes work for `FAULT_CLEAR_S`. Stops are always accepted. A failed
+wheel sync read does not latch on its own: a wheel that stops answering is
+caught by the round-robin read.
 """
 
 from __future__ import annotations
@@ -56,6 +66,10 @@ AGE_DECIMALS = 1
 
 # An offline servo costs a read timeout, so only retry it every Nth tick.
 RETRY_OFFLINE_EVERY = 25
+# How long the bus must stay healthy before a fault unlatches. Longer than
+# one offline retry period at the usual control rate, so a joint that answers
+# once and drops again keeps the brake on.
+FAULT_CLEAR_S = 1.0
 
 
 class CommandError(ValueError):
@@ -182,12 +196,19 @@ class Robot:
         # every tick.
         self._speed_error: str | None = None
         self._wheel_read_error: str | None = None
+        # Latched bus fault (see the module docstring): why, the joints that
+        # went offline and must answer again, and since when all is well.
+        self._fault: str | None = None
+        self._lost: set[str] = set()
+        self._healthy_since: float | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
         """Open the bus, put each joint in its configured mode and start from a
         stopped robot."""
         with self._lock:
+            self._fault, self._healthy_since = None, None
+            self._lost.clear()
             self.bus.open()
             for j in self.joints.values():
                 self._try(j, lambda j=j: self._setup(j))
@@ -195,15 +216,26 @@ class Robot:
             self._stop_speed_joints()
 
     def close(self) -> None:
-        """Stop every speed joint and close the bus.
+        """Leave the robot in the safe state and close the bus.
 
         Safe to call more than once.
         """
         with self._lock:
             try:
-                self._stop_speed_joints()
+                self._hold_safe("shutdown", level=logging.INFO)
             finally:
                 self.bus.close()
+
+    def hold_safe(self, reason: str) -> None:
+        """Brake every wheel, keep every position joint on its goal and latch
+        the fault. Never turns torque off and never raises."""
+        with self._lock:
+            self._hold_safe(reason)
+
+    @property
+    def fault(self) -> str | None:
+        """Why the robot holds the safe state, or None while it is free."""
+        return self._fault
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -220,6 +252,7 @@ class Robot:
             self._write_speeds()
             self._read_wheels()
             self._read_next()
+            self._update_fault()
 
     # --- commands --------------------------------------------------------
     def move(
@@ -237,6 +270,7 @@ class Robot:
             target, speed = check_move(
                 j, position, speed, self.config.max_speed
             )
+            self._refuse_while_faulted(j.name)
             acceleration = clamp(acceleration, 0, MAX_ACCELERATION)
 
             def apply() -> None:
@@ -272,6 +306,8 @@ class Robot:
         with self._lock:
             j = self._get(joint)
             speed = check_spin(j, speed, limit)
+            if speed:
+                self._refuse_while_faulted(j.name)
             self._acceleration[joint] = clamp(acceleration, 1, MAX_ACCELERATION)
             self._set_speed(j, speed, expires, source, client)
 
@@ -303,6 +339,8 @@ class Robot:
             max_speed=self.config.max_speed,
         )
         with self._lock:
+            if any(speeds):
+                self._refuse_while_faulted("the base")
             wheels = [self.joints[name] for name in base.wheels]
             previous = [j.target_speed for j in wheels]
             ramps = wheel_accelerations(previous, speeds, DEFAULT_ACCELERATION)
@@ -436,10 +474,12 @@ class Robot:
             self.bus.set_speeds(ids, ramps)
         except ServoError as exc:
             if str(exc) != self._speed_error:
-                log.warning("wheel speed write failed: %s", exc)
+                log.error("wheel speed write failed: %s", exc)
                 self._speed_error = str(exc)
             for n in names:
                 self.joints[n].error = str(exc)
+            if self._fault is None:
+                self._hold_safe(f"wheel write error: {exc}")
             return
         if self._speed_error is not None:
             log.info("wheel speed writes work again")
@@ -448,8 +488,8 @@ class Robot:
     def _read_wheels(self) -> None:
         """Position and speed of every online speed joint in one packet.
 
-        Online state and errors stay with the round robin full read, so a
-        servo missing here is only skipped.
+        Online state, errors and the safe state stay with the round robin
+        full read, so a servo missing here is only skipped.
         """
         wheels = {
             self.joints[n].id: self.joints[n]
@@ -526,14 +566,48 @@ class Robot:
             self.bus.stop_many([self.joints[n].id for n in names])
             return
         except Exception as exc:
-            log.warning("sync stop failed, stopping one by one: %s", exc)
+            log.error("sync stop failed, stopping one by one: %s", exc)
         for name in names:
             j = self.joints[name]
             try:
                 self.bus.stop(j.id)
             except Exception as exc:
-                log.warning("could not stop %s: %s", name, exc)
+                log.error("could not stop %s: %s", name, exc)
                 j.error = str(exc)
+
+    def _hold_safe(self, reason: str, *, level: int = logging.ERROR) -> None:
+        """Safe state, see the module docstring. Idempotent; only a new
+        fault is logged."""
+        if self._fault is None:
+            log.log(level, "safe state (%s): wheels braked, goals held", reason)
+            self._fault = reason
+        self._healthy_since = None
+        self._stop_speed_joints(SOURCE_ROBOT)
+
+    def _update_fault(self) -> None:
+        """Unlatch once the lost joints answer and wheel writes work for
+        FAULT_CLEAR_S."""
+        if self._fault is None:
+            return
+        healthy = self._speed_error is None and all(
+            self.joints[n].online for n in self._lost
+        )
+        now = self.clock()
+        if not healthy:
+            self._healthy_since = None
+        elif self._healthy_since is None:
+            self._healthy_since = now
+        elif now - self._healthy_since >= FAULT_CLEAR_S:
+            log.info("fault cleared (%s): commands work again", self._fault)
+            self._fault, self._healthy_since = None, None
+            self._lost.clear()
+
+    def _refuse_while_faulted(self, what: str) -> None:
+        if self._fault is not None:
+            raise CommandError(
+                f"{what} holds the safe state: {self._fault}. It frees "
+                f"itself {FAULT_CLEAR_S:g} s after the bus is healthy again"
+            )
 
     def _speed_to_bus(self, j: Joint, speed: int) -> int:
         return -speed if self._configs[j.name].inverted else speed
@@ -553,23 +627,28 @@ class Robot:
                 f"{sorted(self.joints)}"
             ) from None
 
-    @staticmethod
-    def _try(j: Joint, action: Callable[[], None]) -> None:
+    def _try(self, j: Joint, action: Callable[[], None]) -> None:
+        """Run a background bus access; a joint that was online and fails
+        goes offline and puts the robot in the safe state."""
         try:
             action()
         except ServoError as exc:
+            was_online = j.online
             j.online, j.error = False, str(exc)
+            if was_online:
+                self._lost.add(j.name)
+                self._hold_safe(f"{j.name} stopped answering: {exc}")
             return
         j.online, j.error = True, None
 
-    @staticmethod
-    def _command(j: Joint, action: Callable[[], None]) -> None:
-        """Run a user command; on failure record it on the joint and re-raise
-        for the caller."""
+    def _command(self, j: Joint, action: Callable[[], None]) -> None:
+        """Run a user command; on failure record it on the joint, put the
+        robot in the safe state and re-raise for the caller."""
         try:
             action()
         except ServoError as exc:
             j.error = str(exc)
+            self._hold_safe(f"{j.name}: {exc}")
             raise
         j.online, j.error = True, None
 
