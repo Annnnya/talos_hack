@@ -35,6 +35,18 @@ base:
   max_linear_speed: 0.1
   max_angular_speed: 0.5
 
+modes:
+  # ros2_control controllers active in each robot mode. The mode node switches
+  # them through controller_manager. Placeholders until the controllers exist
+  # (#65, #76, #92); with no controller_manager running the switch is skipped.
+  controllers:
+    free: [mecanum_drive_controller]
+    aligning: [mecanum_drive_controller]
+    clamping: [expansion_controller]
+    climbing: [wall_drive_controller]
+  # Seconds to wait for controller_manager to answer a switch.
+  switch_timeout_s: 2.0
+
 # Body geometry, read by the Python core and description/talos.urdf.xacro.
 # The robot is an inverted V: the bend hinge on top, a leg down to each wheel
 # pair. bend is the opening angle between the legs: 180 flat, smaller folded.

@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 
 import yaml
 
@@ -29,6 +31,10 @@ DEFAULT_COMMAND_TIMEOUT_S = 0.5
 DEFAULT_MAX_LINEAR_SPEED = 0.1
 DEFAULT_MAX_ANGULAR_SPEED = 0.5
 WHEEL_COUNT = 4
+DEFAULT_SWITCH_TIMEOUT_S = 2.0
+# Robot modes in `talos_servo.modes`; plain strings here so the config does
+# not depend on the state machine.
+MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 # Hinge opening angle when the robot lies flat.
 FLAT_DEG = 180.0
 
@@ -98,9 +104,38 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class ModesConfig:
+    """ros2_control controllers that are active in each robot mode.
+
+    The mode node deactivates the old mode's controllers and activates the
+    new ones on every mode change.
+    """
+
+    controllers: Mapping[str, tuple[str, ...]]
+    switch_timeout_s: float = DEFAULT_SWITCH_TIMEOUT_S
+
+    def __post_init__(self) -> None:
+        # Read-only like the rest of the frozen config.
+        object.__setattr__(
+            self, "controllers", MappingProxyType(dict(self.controllers))
+        )
+
+    def for_mode(self, mode: str) -> tuple[str, ...]:
+        return self.controllers.get(mode, ())
+
+    @property
+    def managed(self) -> frozenset[str]:
+        """Every controller named by any mode."""
+        return frozenset(
+            c for names in self.controllers.values() for c in names
+        )
+
+
+@dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
+    modes: ModesConfig | None = None
     model: ModelConfig | None = None
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
@@ -140,6 +175,9 @@ def parse_config(data: dict) -> RobotConfig:
         config = replace(
             config, base=_parse_base(raw_base, {j.name: j for j in joints})
         )
+    raw_modes = data.get("modes")
+    if raw_modes is not None:
+        config = replace(config, modes=_parse_modes(raw_modes))
     raw_model = data.get("model")
     if raw_model is not None:
         config = replace(
@@ -218,6 +256,36 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
         ),
         max_angular_speed=_positive(
             raw, "max_angular_speed", DEFAULT_MAX_ANGULAR_SPEED
+        ),
+    )
+
+
+def _parse_modes(raw: dict) -> ModesConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("modes must be a mapping")
+    raw_controllers = raw.get("controllers") or {}
+    if not isinstance(raw_controllers, dict):
+        raise ConfigError("modes.controllers must map a mode to a list")
+    unknown = set(raw_controllers) - set(MODE_NAMES)
+    if unknown:
+        raise ConfigError(
+            f"modes.controllers: unknown modes {sorted(unknown)}, expected "
+            f"some of {MODE_NAMES}"
+        )
+    controllers: dict[str, tuple[str, ...]] = {}
+    for mode, names in raw_controllers.items():
+        names = [] if names is None else names
+        if not isinstance(names, list) or not all(
+            isinstance(n, str) and n for n in names
+        ):
+            raise ConfigError(
+                f"modes.controllers.{mode} must be a list of controller names"
+            )
+        controllers[mode] = tuple(names)
+    return ModesConfig(
+        controllers=controllers,
+        switch_timeout_s=_positive(
+            raw, "switch_timeout_s", DEFAULT_SWITCH_TIMEOUT_S
         ),
     )
 

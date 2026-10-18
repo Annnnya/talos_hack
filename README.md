@@ -176,6 +176,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `pixi run -e ros drive` | `talos-servo drive --ros` |
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
+| `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
 | `pixi run -e ros ekf` | Pose estimate from wheels and gyro |
 | `pixi run -e ros twist-mux` | Web and keyboard share `/cmd_vel` |
 | `pixi run -e ros mux-status` | Who drives, on `/robot/active_input` |
@@ -236,6 +237,9 @@ base:
 | `/robot/<joint>/temperature` ... | `Temperature`, `Float32`, `Bool` | out |
 | `/robot/stop_all` | `std_srvs/Trigger` | stop every speed joint |
 | `/robot/<joint>/set_torque` | `std_srvs/SetBool` | torque on/off |
+| `/robot/mode`, `/robot/mode_reason` | `std_msgs/String` | out: latched |
+| `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
+| `/robot/release` | `std_srvs/Trigger` | any mode -> free |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 | `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
@@ -316,6 +320,39 @@ ros2 topic hz /odom
 
 Robot node parameters go after `--ros-args`, e.g.
 `pixi run -e ros talos-robot-ros --ros-args -p status_hz:=5.0`.
+
+### Robot modes
+
+The mode node (`pixi run -e ros mode-node`) owns the robot mode and switches
+ros2_control controllers when it changes. The state machine itself is plain
+Python in `talos_servo.modes`.
+
+| From | Event | To |
+| --- | --- | --- |
+| `free` | wall nearby (`/robot/wall_nearby`) | `aligning` |
+| `aligning` | aligned with the walls | `clamping` |
+| `clamping` | wheels press on both walls | `climbing` |
+| `climbing` | not moving up | `clamping` |
+| any | release (`/robot/release`) | `free` |
+
+- Controllers per mode come from `modes.controllers` in `config/robot.yaml`.
+  The node diffs the new mode's set against the controllers
+  controller_manager reports as active, and a switch that controller_manager
+  rejects keeps the old mode. Every second it also puts the active
+  controllers back to the current mode's set (late start, restart, a switch
+  applied after a timeout).
+- While controller_manager is not running the switch is skipped with a
+  warning, so the mode node works before the controllers exist. Set
+  `-p require_controller_manager:=true` to make the mode change fail
+  instead.
+- In `clamping` and `climbing` STOP stops the wheels but the hinge keeps
+  holding the walls.
+
+```
+ros2 topic echo /robot/mode
+ros2 service call /robot/wall_nearby std_srvs/srv/Trigger
+ros2 service call /robot/release std_srvs/srv/Trigger
+```
 
 ## Web UI
 
