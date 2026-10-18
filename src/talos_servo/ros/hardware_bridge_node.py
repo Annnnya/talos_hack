@@ -8,20 +8,23 @@ two topics; this node answers them with the `Robot` on the servo bus. See
 - `/talos/joint_commands` (sensor_msgs/JointState, in): velocity (rad/s) for
   speed joints, position (rad) for position joints. Wheels stop unless the
   command is repeated within `command_timeout_s`, so a dead controller_manager
-  never leaves them spinning. The plugin sends the URDF `initial_value` of a
-  position joint until a controller writes a goal, so each position joint
-  ignores goals equal to it until the first different one: starting the
-  stack never moves the hinge. A NaN position is no goal
+  never leaves them spinning. The plugin repeats the last goal of a position
+  joint (its URDF `initial_value` before any controller writes one, or a
+  running controller's last goal when only this node restarts). So each
+  position joint ignores the first goal it gets and every repeat of it, and
+  follows goals from the first different one: starting or restarting the
+  bridge never moves the hinge. A NaN position is no goal
 - `/talos/joint_states` (sensor_msgs/JointState, out): position (rad, wheels
   keep counting past a full turn), velocity (rad/s), effort = current (A)
-
-The hinge (`model.hinge_joint`, `bend`) is the opening angle alpha in rad, pi
-flat, converted by `talos_servo.hinge.Hinge`. Its flat servo position is
-`model.bend_flat_steps` (#84), or else where the hinge was when the bridge
-started.
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
   `moving`: readouts the plugin cannot carry, see `talos_servo.ros.readouts`
 - `/hardware_bridge/stop_all` (std_srvs/Trigger)
+
+The hinge (`model.hinge_joint`, `bend`) is the opening angle alpha in rad, pi
+flat, converted by `talos_servo.hinge.Hinge` from the fixed flat position
+`model.bend_flat_steps`. While the servo is offline, or reads outside the
+hinge range (a wrap past flat), its position and velocity are NaN: unknown,
+never a guess.
 
 Like the robot node, this is the only program on the servo port: do not run
 both. Run with `pixi run -e ros hardware-bridge`.
@@ -45,7 +48,7 @@ from std_srvs.srv import Trigger
 from talos_servo.bus import ServoBus, ServoError
 from talos_servo.config import SPEED, load_config
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, PORT_ENV_VAR, QUEUE_DEPTH
-from talos_servo.hinge import FLAT_RAD, Hinge, HingeRangeError
+from talos_servo.hinge import Hinge
 from talos_servo.robot import SOURCE_ROS, CommandError, Robot
 from talos_servo.ros.convert import (
     rad_speed_to_steps,
@@ -62,13 +65,11 @@ NODE_NAME = "hardware_bridge"
 # URDF.
 COMMANDS_TOPIC = "/talos/joint_commands"
 STATES_TOPIC = "/talos/joint_states"
-# Goals the plugin sends for a position joint before any controller writes
-# one: the URDF initial_value of its position state interface (flat for the
-# hinge, which must match description/talos.urdf.xacro), or 0.0, the plugin
-# default.
-HINGE_INITIAL_RAD = FLAT_RAD
-PLUGIN_INITIAL_RAD = 0.0
-INITIAL_TOLERANCE_RAD = 1e-9
+# Goals closer than this to a position joint's first goal count as repeats.
+GOAL_TOLERANCE_RAD = 1e-9
+# A hinge reading this far outside its step range is not a real angle (the
+# servo wrapped past flat or misread), so it is reported as unknown.
+HINGE_READ_MARGIN_STEPS = 64
 
 
 class HardwareBridgeNode(Node):
@@ -87,15 +88,13 @@ class HardwareBridgeNode(Node):
             for name, control in self._controls.items()
             if control == SPEED
         }
-        model = config.model
-        self._hinge_model = (
-            model
-            if model is not None and model.hinge_joint in robot.joints
-            else None
+        hinge = config.hinge()
+        self._hinge: Hinge | None = (
+            hinge if hinge is not None and hinge.joint in robot.joints else None
         )
-        self._hinge: Hinge | None = None
-        # Position joints that got a goal other than the plugin's initial
-        # value; only those follow goals.
+        # First goal per position joint, ignored with its repeats; joints in
+        # _armed got a different one and follow goals.
+        self._first_goals: dict[str, float] = {}
         self._armed: set[str] = set()
         # Last goal sent per position joint. The plugin repeats the same goal
         # every cycle; only a change is written to the servo.
@@ -117,7 +116,14 @@ class HardwareBridgeNode(Node):
             f"bridging joints {sorted(robot.joints)} on {COMMANDS_TOPIC} and "
             f"{STATES_TOPIC}, command timeout {config.command_timeout_s} s"
         )
-        self._ensure_hinge(self._states())
+        if self._hinge is not None:
+            low, high = self._hinge.step_range
+            self.get_logger().info(
+                f"{self._hinge.joint}: flat at step {self._hinge.flat_steps}, "
+                f"steps {low}..{high} for "
+                f"{math.degrees(self._hinge.min_rad):g}.."
+                f"{math.degrees(self._hinge.max_rad):g} deg"
+            )
 
     # --- states ----------------------------------------------------------
     def tick(self) -> None:
@@ -134,28 +140,25 @@ class HardwareBridgeNode(Node):
     def states_msg(self) -> JointState:
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        states = self._states()
-        hinge = self._ensure_hinge(states)
-        for name, j in states.items():
+        for name, j in self._states().items():
             msg.name.append(name)
-            position, velocity = self._position_velocity(name, j, hinge)
+            position, velocity = self._position_velocity(name, j)
             msg.position.append(position)
             msg.velocity.append(velocity)
             msg.effort.append(float(j["current"]))
         return msg
 
     def _position_velocity(
-        self, name: str, j: dict[str, Any], hinge: Hinge | None
+        self, name: str, j: dict[str, Any]
     ) -> tuple[float, float]:
         unwrapper = self._unwrappers.get(name)
         if unwrapper is not None:
             return unwrapper.update(j["position"]), step_speed_to_rad(
                 j["speed"]
             )
-        if self._is_hinge(name):
-            if hinge is None:  # not read yet: report the flat assumption
-                return HINGE_INITIAL_RAD, 0.0
-            return hinge.alpha(j["position"]), hinge.alpha_rate(j["speed"])
+        hinge = self._hinge
+        if hinge is not None and name == hinge.joint:
+            return self._hinge_state(hinge, j)
         return steps_to_rad(j["position"]), step_speed_to_rad(j["speed"])
 
     def publish_readouts(self) -> None:
@@ -193,30 +196,30 @@ class HardwareBridgeNode(Node):
             )
 
     def _armed_for(self, joint: str, position: float) -> bool:
-        """False while a position joint only gets the plugin's initial
-        value."""
+        """False while a position joint only gets its first goal again."""
         if joint in self._armed:
             return True
-        initial = (
-            HINGE_INITIAL_RAD if self._is_hinge(joint) else PLUGIN_INITIAL_RAD
-        )
-        if math.isclose(position, initial, abs_tol=INITIAL_TOLERANCE_RAD):
+        first = self._first_goals.get(joint)
+        if first is None:
+            self._first_goals[joint] = position
+            self.get_logger().info(
+                f"{joint}: holding, ignoring the repeated goal "
+                f"{position:.3f} rad until a new one"
+            )
+            return False
+        if math.isclose(position, first, abs_tol=GOAL_TOLERANCE_RAD):
             return False
         self._armed.add(joint)
         self.get_logger().info(
-            f"{joint}: first goal {position:.3f} rad, following goals now"
+            f"{joint}: new goal {position:.3f} rad, following goals now"
         )
         return True
 
     def _goal_steps(self, joint: str, position: float) -> int:
-        if not self._is_hinge(joint):
-            return rad_to_steps(position)
-        hinge = self._ensure_hinge(self._states())
-        if hinge is None:
-            raise CommandError(
-                "hinge angle unknown until the servo answers, goal dropped"
-            )
-        return hinge.steps(position)
+        hinge = self._hinge
+        if hinge is not None and joint == hinge.joint:
+            return hinge.steps(position)
+        return rad_to_steps(position)
 
     def _move(self, joint: str, steps: int) -> None:
         if self._goals.get(joint) == steps:
@@ -237,45 +240,27 @@ class HardwareBridgeNode(Node):
         return response
 
     # --- hinge -----------------------------------------------------------
-    def _is_hinge(self, joint: str) -> bool:
-        return (
-            self._hinge_model is not None
-            and joint == self._hinge_model.hinge_joint
+    def _hinge_state(
+        self, hinge: Hinge, j: dict[str, Any]
+    ) -> tuple[float, float]:
+        """Opening angle and rate, or NaN while they are unknown."""
+        low, high = hinge.step_range
+        steps = j["position"]
+        if not j["online"]:
+            problem = "servo offline"
+        elif not (
+            low - HINGE_READ_MARGIN_STEPS
+            <= steps
+            <= high + HINGE_READ_MARGIN_STEPS
+        ):
+            problem = f"reads step {steps}, outside its range {low}..{high}"
+        else:
+            return hinge.alpha(steps), hinge.alpha_rate(j["speed"])
+        self.get_logger().error(
+            f"{hinge.joint}: {problem}, angle unknown",
+            throttle_duration_sec=5.0,
         )
-
-    def _ensure_hinge(self, states: dict[str, dict[str, Any]]) -> Hinge | None:
-        """The hinge converter, built once its flat position is known.
-
-        Without a calibration (#84) the first reading counts as flat.
-        """
-        model = self._hinge_model
-        if self._hinge is not None or model is None:
-            return self._hinge
-        flat = model.bend_flat_steps
-        origin = "calibrated"
-        if flat is None:
-            j = states[model.hinge_joint]
-            if not j["online"]:
-                self.get_logger().error(
-                    f"{model.hinge_joint}: servo offline, its angle is "
-                    "unknown and its goals are dropped",
-                    throttle_duration_sec=5.0,
-                )
-                return None
-            flat, origin = j["position"], "not calibrated: start position"
-        try:
-            self._hinge = Hinge(model, flat)
-        except HingeRangeError as exc:
-            self.get_logger().error(str(exc), throttle_duration_sec=5.0)
-            return None
-        low, high = self._hinge.step_range
-        self.get_logger().info(
-            f"{model.hinge_joint}: flat at step {flat} ({origin}), "
-            f"steps {low}..{high} for "
-            f"{math.degrees(model.bend_min_rad):g}.."
-            f"{math.degrees(model.bend_max_rad):g} deg"
-        )
-        return self._hinge
+        return math.nan, math.nan
 
     # --- helpers ---------------------------------------------------------
     def _states(self) -> dict[str, dict[str, Any]]:

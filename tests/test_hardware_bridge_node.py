@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import copy
 import math
-import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
@@ -27,7 +25,6 @@ from talos_servo.ros.convert import (  # noqa: E402
     step_speed_to_rad,
 )
 from talos_servo.ros.hardware_bridge_node import (  # noqa: E402
-    HINGE_INITIAL_RAD,
     HardwareBridgeNode,
 )
 
@@ -73,6 +70,11 @@ def commands(names, position=(), velocity=()) -> JointState:
     )
 
 
+def hold(node, position: float = 0.0) -> None:
+    """The plugin's first goal for bend, which the bridge ignores."""
+    node.on_commands(commands(["bend"], position=[position]))
+
+
 def test_states_carry_position_velocity_and_current(node, robot):
     robot.joints["wheel"].current = 0.42
     robot.joints["wheel"].speed = 100
@@ -96,7 +98,7 @@ def test_bend_position_is_an_angle(node, robot):
     assert node.states_msg().position[0] == pytest.approx(100 * RAD_PER_STEP)
 
 
-def test_initial_value_is_ignored_until_a_different_goal(node, robot):
+def test_first_goal_is_ignored_until_a_different_goal(node, robot):
     # The plugin sends 0.0 for a position joint without an initial_value
     # until a controller writes a goal.
     for _ in range(3):
@@ -108,6 +110,7 @@ def test_initial_value_is_ignored_until_a_different_goal(node, robot):
 
 
 def test_packed_commands_spin_the_wheel_and_move_bend(node, robot):
+    hold(node)
     node.on_commands(
         commands(
             ["bend", "wheel"],
@@ -150,6 +153,7 @@ def test_inverted_wheel_turns_the_servo_the_other_way(sdk, clock):
 def test_same_bend_goal_is_written_once(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))
+    hold(node)
     for _ in range(3):
         node.on_commands(commands(["bend"], position=[0.1]))
     node.on_commands(commands(["bend"], position=[0.2]))
@@ -168,6 +172,7 @@ def test_failed_move_is_retried_with_the_same_goal(node, robot, monkeypatch):
             raise ServoError("no answer")
 
     monkeypatch.setattr(robot, "move", move)
+    hold(node)
     for _ in range(3):
         node.on_commands(commands(["bend"], position=[0.1]))
     assert len(moves) == 2
@@ -176,6 +181,7 @@ def test_failed_move_is_retried_with_the_same_goal(node, robot, monkeypatch):
 def test_stop_all_resends_the_same_goal(node, robot, monkeypatch):
     moves = []
     monkeypatch.setattr(robot, "move", lambda *a, **_k: moves.append(a))
+    hold(node)
     node.on_commands(commands(["bend"], position=[0.1]))
     node.on_stop_all(Trigger.Request(), Trigger.Response())
     node.on_commands(commands(["bend"], position=[0.1]))
@@ -210,23 +216,24 @@ def test_readout_topics_live_under_the_node(node):
 
 
 # --- hinge (#63, #85) ------------------------------------------------------
+# Flat at joint step 3000; the fake servo reads 2048, inside the hinge range.
+FLAT = 3000
+START_STEPS = 2048
+# 90 deg of fold: the opening changes 1:1 with the servo.
+QUARTER_TURN = 1024
 MODEL = {
     "hinge_joint": "bend",
     "leg_gear_ratio": 0.5,
     "bend_min_deg": 90,
     "bend_max_deg": 180,
+    "bend_flat_steps": FLAT,
 }
-# The fake servo reads 2048, so an uncalibrated hinge is flat there.
-START_STEPS = 2048
-CALIBRATED_FLAT = 3000
-# 90 deg of fold: the opening changes 1:1 with the servo.
-QUARTER_TURN = 1024
 
 
-def hinge_config(**model_changes) -> dict:
+def hinge_config() -> dict:
     data = copy.deepcopy(BASE)
     data["joints"]["bend"]["enabled"] = True
-    return {**data, "model": {**MODEL, **model_changes}}
+    return {**data, "model": MODEL}
 
 
 @pytest.fixture
@@ -250,71 +257,69 @@ def bend_state(node) -> tuple[float, float]:
     return msg.position[i], msg.velocity[i]
 
 
-def test_uncalibrated_hinge_starts_flat(hinge_node, hinge_robot):
-    assert bend_state(hinge_node)[0] == pytest.approx(math.pi)
-    hinge_robot.joints["bend"].position = START_STEPS - QUARTER_TURN
+def test_hinge_angle_comes_from_the_fixed_flat(hinge_node, hinge_robot):
+    assert bend_state(hinge_node)[0] == pytest.approx(
+        math.pi - (FLAT - START_STEPS) * RAD_PER_STEP
+    )
+    hinge_robot.joints["bend"].position = FLAT - QUARTER_TURN
     hinge_robot.joints["bend"].speed = -100
     alpha, rate = bend_state(hinge_node)
     assert alpha == pytest.approx(math.pi / 2)
     assert rate == pytest.approx(-100 * RAD_PER_STEP)
 
 
-def test_calibrated_flat_comes_from_the_config(sdk, clock):
-    data = hinge_config(bend_flat_steps=CALIBRATED_FLAT)
-    robot = Robot(sdk.bus(), config(data), clock=clock)
-    robot.open()
-    node = HardwareBridgeNode(robot)
-    try:
-        assert bend_state(node)[0] == pytest.approx(
-            math.pi - (CALIBRATED_FLAT - START_STEPS) * RAD_PER_STEP
-        )
-        node.on_commands(commands(["bend"], position=[math.pi / 2]))
-        assert robot.joints["bend"].target == CALIBRATED_FLAT - QUARTER_TURN
-    finally:
-        node.destroy_node()
-        robot.close()
-
-
-def test_hinge_ignores_flat_until_a_different_goal(hinge_node, hinge_robot):
+def test_hinge_ignores_the_initial_value_until_a_new_goal(
+    hinge_node, hinge_robot
+):
     # The URDF initial_value: what the plugin sends before any controller.
     for _ in range(3):
-        hinge_node.on_commands(commands(["bend"], position=[math.pi]))
+        hold(hinge_node, math.pi)
     assert hinge_robot.joints["bend"].target is None
     hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
-    assert hinge_robot.joints["bend"].target == START_STEPS - QUARTER_TURN
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
     hinge_node.on_commands(commands(["bend"], position=[math.pi]))
-    assert hinge_robot.joints["bend"].target == START_STEPS
+    assert hinge_robot.joints["bend"].target == FLAT
+
+
+def test_restarted_bridge_ignores_the_last_goal(hinge_node, hinge_robot):
+    # Only the bridge restarted: the plugin repeats the controller's goal.
+    for _ in range(3):
+        hold(hinge_node, 2.8)
+    assert hinge_robot.joints["bend"].target is None
+    hinge_node.on_commands(commands(["bend"], position=[math.pi / 2]))
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
+
+
+def test_plain_position_joint_ignores_a_repeated_pi(node, robot):
+    # No model: bend is a plain joint, and pi is not its initial value.
+    for _ in range(3):
+        hold(node, math.pi)
+    assert robot.joints["bend"].target is None
 
 
 def test_hinge_goals_clamp_to_the_model_limits(hinge_node, hinge_robot):
+    hold(hinge_node, math.pi)
     hinge_node.on_commands(commands(["bend"], position=[math.radians(30)]))
-    assert hinge_robot.joints["bend"].target == START_STEPS - QUARTER_TURN
+    assert hinge_robot.joints["bend"].target == FLAT - QUARTER_TURN
 
 
-def test_offline_hinge_drops_goals_and_reports_flat(sdk, clock):
+def test_offline_hinge_angle_is_unknown(sdk, clock):
     sdk.present = {1, 2, 3, 4}  # the bend servo (5) does not answer
     robot = Robot(sdk.bus(), config(hinge_config()), clock=clock)
     robot.open()
     node = HardwareBridgeNode(robot)
     try:
-        assert bend_state(node)[0] == pytest.approx(math.pi)
-        node.on_commands(commands(["bend"], position=[2.0]))
-        assert robot.joints["bend"].target is None
+        alpha, rate = bend_state(node)
+        assert math.isnan(alpha)
+        assert math.isnan(rate)
     finally:
         node.destroy_node()
         robot.close()
 
 
-def test_hinge_initial_value_matches_the_urdf():
-    xacro = pytest.importorskip("xacro")
-    root = Path(__file__).resolve().parent.parent
-    urdf = ET.fromstring(
-        xacro.process_file(
-            str(root / "description" / "talos.urdf.xacro")
-        ).toxml()
-    )
-    state = urdf.find(
-        "ros2_control/joint[@name='bend']/state_interface[@name='position']"
-        "/param[@name='initial_value']"
-    )
-    assert float(state.text) == HINGE_INITIAL_RAD
+def test_hinge_reading_far_outside_its_range_is_unknown(
+    hinge_node, hinge_robot
+):
+    # A wrap past flat reads near 0, not a real fold.
+    hinge_robot.joints["bend"].position = 3
+    assert math.isnan(bend_state(hinge_node)[0])

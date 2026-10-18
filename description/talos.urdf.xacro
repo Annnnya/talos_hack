@@ -180,11 +180,11 @@
     <xacro:wheel_interfaces name="${wheels[3]}"/>
 
     <!-- The hinge in alpha (rad, pi flat). The plugin takes the state
-         interface initial_value as the first command too, sends it until a
-         controller writes a goal, and the bridge ignores goals equal
-         to it (HINGE_INITIAL_RAD in hardware_bridge_node.py), so starting
-         never moves the hinge. No <transmission>: the plugin ignores them,
-         so the bridge converts alpha to servo steps (talos_servo.hinge). -->
+         interface initial_value as the first command too and repeats it
+         until a controller writes a goal; the bridge ignores the first
+         goal and its repeats, so starting never moves the hinge. No
+         <transmission>: the plugin ignores them, so the bridge converts
+         alpha to servo steps (talos_servo.hinge). -->
     <joint name="${hinge}">
       <command_interface name="position">
         <param name="initial_value">${pi}</param>
