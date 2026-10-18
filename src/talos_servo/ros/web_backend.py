@@ -26,7 +26,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
@@ -35,7 +35,7 @@ from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
@@ -86,6 +86,14 @@ COMMAND_SETTLE_TIME = 1.0
 EXECUTOR_JOIN_TIMEOUT = 2.0
 
 
+class RobotStatus(NamedTuple):
+    """Shared robot state from the mode node and mux_status."""
+
+    mode: str | None
+    mode_reason: str | None
+    active_input: str | None
+
+
 class RosBackend:
     """`RobotBackend` on top of the robot node's topics and services.
 
@@ -105,6 +113,9 @@ class RosBackend:
         self.config = config
         self.cmd_vel_topic = cmd_vel_topic
         self.wait_timeout = wait_timeout
+        self._mode: str | None = None
+        self._mode_reason: str | None = None
+        self._active_input: str | None = None
         self.joints = {
             c.name: Joint.from_config(c) for c in config.enabled_joints
         }
@@ -137,6 +148,9 @@ class RosBackend:
                 self._on_joint_states,
                 self._on_status,
                 on_stop_lock=self._on_stop_lock,
+                on_mode=self._on_mode,
+                on_mode_reason=self._on_mode_reason,
+                on_active_input=self._on_active_input,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -259,6 +273,30 @@ class RosBackend:
         on, heard_at = beat
         return on or now - heard_at > STOP_LOCK_TIMEOUT_S
 
+    def robot_status(self) -> RobotStatus:
+        """Mode, mode reason and active twist_mux input; None until heard."""
+        with self._lock:
+            return RobotStatus(
+                self._mode, self._mode_reason, self._active_input
+            )
+
+    def has_cmd_vel_listener(self) -> bool:
+        """True if something (twist_mux, the robot node) reads our
+        cmd_vel topic."""
+        return self._require_node().cmd_vel_pub.get_subscription_count() > 0
+
+    def _on_mode(self, msg: String) -> None:
+        with self._lock:
+            self._mode = msg.data
+
+    def _on_mode_reason(self, msg: String) -> None:
+        with self._lock:
+            self._mode_reason = msg.data
+
+    def _on_active_input(self, msg: String) -> None:
+        with self._lock:
+            self._active_input = msg.data
+
     def _apply_status(
         self, j: Joint, status: DiagnosticStatus, now: float
     ) -> None:
@@ -365,6 +403,25 @@ class RosBackend:
                 self._feeding.pop(joint, None)
             self._record(j, source, client)
         self._publish_velocity({joint: speed}, frame)
+
+    def wall_nearby(self) -> None:
+        """Ask the mode node to start aligning (free -> aligning)."""
+        self._call_mode_node(
+            self._require_node().wall_nearby_client, "wall nearby"
+        )
+
+    def release_walls(self) -> None:
+        """Ask the mode node to release the walls and go back to free."""
+        self._call_mode_node(self._require_node().release_client, "release")
+
+    def _call_mode_node(self, client: Client, what: str) -> None:
+        # The mode node is optional, so do not wait the full service timeout
+        # for one that is not there.
+        if not client.service_is_ready():
+            raise CommandError(
+                f"{what}: mode node is not running ({MODE_HINT})"
+            )
+        self._call(client, Trigger.Request(), what)
 
     def drive(
         self,
