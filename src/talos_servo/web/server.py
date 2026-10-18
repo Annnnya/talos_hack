@@ -9,10 +9,11 @@ import math
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from talos_servo.bus import (
@@ -274,6 +275,19 @@ def create_app(
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "clients": len(hub.clients)}
+
+    @app.get("/api/camera.jpg")
+    async def camera() -> Response:
+        """Latest camera frame; the page polls it at a low rate. No content
+        while the camera is off."""
+        frame = controller.camera_frame()
+        if frame is None:
+            return Response(status_code=HTTPStatus.NO_CONTENT)
+        return Response(
+            content=frame,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
