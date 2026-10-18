@@ -41,6 +41,9 @@ flowchart LR
   rest.
 - **Custom behaviour** (expansion #76, hold force #79, climb #80): Python
   nodes that send commands to those controllers, not C++ controllers.
+- **Robot model:** `description/talos.urdf.xacro` (#64) holds the joints and
+  the `<ros2_control>` block for the whole robot. `bend` is the hinge
+  opening in radians (pi flat). See "Robot model" in the README.
 
 ## Port ownership
 
@@ -95,6 +98,14 @@ Checked in the plugin source (0.3.0):
   position goals until the first one that differs from the plugin's initial
   value, or by always starting a position controller that holds the measured
   angle.
+- **Adding the hinge:** the robot model (#64) leaves `bend` out of
+  `<ros2_control>` until this issue. To add it: enable it in
+  `config/robot.yaml` (the bridge drops a whole command that names a
+  disabled joint), give its interfaces an `initial_value` (pi, flat), and
+  convert the opening angle to servo steps with
+  `talos_servo.model.alpha_per_servo_rad` plus the flat offset measured in
+  #84. Without that, alpha = pi/2 lands on step 1024 wherever the real zero
+  is.
 - **State rate:** the bridge publishes states at `telemetry_hz` (20 Hz by
   default), and `Robot.tick` reads one servo per tick round robin, so with 5
   joints each one is refreshed at about 10 Hz. controller_manager runs at

@@ -83,9 +83,22 @@ ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.
 # not run at the same time. See docs/ros2_control.md
 hardware-bridge = "talos-hardware-bridge-ros"
 ros2-control-check = "ros2 launch launch/ros2_control_check.launch.py"
+# Robot model (#64): print the URDF, or check it with check_urdf
+model-urdf = "xacro description/talos.urdf.xacro"
+check-model = "xacro description/talos.urdf.xacro -o .pixi/talos.urdf && check_urdf .pixi/talos.urdf"
 # Web UI through the running robot node, so it can share the robot
 # with other ROS nodes
 web-ros = "talos-servo web --ros"
 
+# RViz2 and joint sliders to look at the robot model. Own environment so the
+# Pi does not install them.
+[feature.viz.dependencies]
+ros-jazzy-rviz2 = "*"
+ros-jazzy-joint-state-publisher-gui = "*"
+
+[feature.viz.tasks]
+view-model = "ros2 launch launch/view_model.launch.py"
+
 [environments]
 ros = ["ros"]
+viz = ["ros", "viz"]

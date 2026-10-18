@@ -1,0 +1,189 @@
+<?xml version="1.0"?>
+<!--
+  Talos robot model (#64). An inverted V (sketch in #76): the bend hinge on
+  top with the central platform, a leg down to each wheel pair. The servo
+  pinion drives one gear per leg and the two gears turn opposite ways, so
+  each leg tilts by half the fold and the platform stays level.
+
+  Sizes, limits and joint names come from config/robot.yaml (model and base),
+  the same file the Python core reads. Servo ids and inversion stay there
+  too: the hardware bridge applies them, not this model.
+
+  Render: pixi run -e ros model-urdf
+-->
+<robot name="talos" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- A relative path is relative to this file. -->
+  <xacro:arg name="robot_config" default="../config/robot.yaml"/>
+  <xacro:property name="cfg" lazy_eval="false"
+                  value="${xacro.load_yaml('$(arg robot_config)')}"/>
+  <xacro:property name="model" value="${cfg['model']}"/>
+  <xacro:property name="base" value="${cfg['base']}"/>
+
+  <!-- Named parameters shared with #60 and the controllers. -->
+  <xacro:property name="r" value="${base['wheel_radius_m']}"/>
+  <xacro:property name="l" value="${base['wheelbase_m'] / 2}"/>
+  <xacro:property name="track" value="${base['track_width_m']}"/>
+  <!-- bend is the hinge opening angle alpha: pi flat, bend_min at max
+       fold. -->
+  <xacro:property name="hinge" value="${model['hinge_joint']}"/>
+  <xacro:property name="bend_min" value="${radians(model['bend_min_deg'])}"/>
+  <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
+  <!-- Rough STS3215 figures: 2.9 N m stall, about 4.6 rad/s. -->
+  <xacro:property name="bend_effort" value="2.9"/>
+  <xacro:property name="bend_velocity" value="4.6"/>
+
+  <!-- Visual sizes only, nothing reads them. -->
+  <xacro:property name="wheel_width" value="0.025"/>
+  <xacro:property name="leg_thickness" value="0.01"/>
+  <xacro:property name="platform_size" value="0.10 0.08 0.02"/>
+  <xacro:property name="hinge_radius" value="0.015"/>
+
+  <material name="body">
+    <color rgba="0.25 0.25 0.3 1"/>
+  </material>
+  <material name="leg">
+    <color rgba="0.8 0.5 0.1 1"/>
+  </material>
+  <material name="wheel">
+    <color rgba="0.1 0.1 0.1 1"/>
+  </material>
+
+  <!-- Central platform at the hinge axis. It stays level (#82). -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${hinge_radius + 0.01}"/>
+      <geometry>
+        <box size="${platform_size}"/>
+      </geometry>
+      <material name="body"/>
+    </visual>
+    <visual>
+      <origin rpy="${pi / 2} 0 0"/>
+      <geometry>
+        <cylinder radius="${hinge_radius}" length="${track}"/>
+      </geometry>
+      <material name="body"/>
+    </visual>
+  </link>
+
+  <!-- bend_link has no body. It only carries the hinge angle, which the legs
+       follow through their mimic joints. -->
+  <link name="bend_link"/>
+  <joint name="${hinge}" type="revolute">
+    <parent link="base_link"/>
+    <child link="bend_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="${bend_min}" upper="${bend_max}"
+           effort="${bend_effort}" velocity="${bend_velocity}"/>
+  </joint>
+
+  <!-- A leg pointing along +x (front) or -x (rear) from the hinge. -->
+  <xacro:macro name="leg" params="name sign">
+    <link name="${name}_leg">
+      <visual>
+        <origin xyz="${sign * l / 2} 0 0"/>
+        <geometry>
+          <box size="${l} ${track - wheel_width} ${leg_thickness}"/>
+        </geometry>
+        <material name="leg"/>
+      </visual>
+    </link>
+    <!-- Tilts the leg down by (pi - alpha) / 2: 0 flat. -->
+    <joint name="${name}_leg_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="${name}_leg"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="${min(sign * (pi - bend_min) / 2,
+                          sign * (pi - bend_max) / 2)}"
+             upper="${max(sign * (pi - bend_min) / 2,
+                          sign * (pi - bend_max) / 2)}"
+             effort="${bend_effort}" velocity="${bend_velocity}"/>
+      <mimic joint="${hinge}" multiplier="${-sign / 2}"
+             offset="${sign * pi / 2}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:leg name="front" sign="1"/>
+  <xacro:leg name="rear" sign="-1"/>
+
+  <!-- A mecanum wheel at the end of a leg. Positive velocity rolls the robot
+       forward on every wheel. -->
+  <xacro:macro name="wheel" params="name leg x y">
+    <link name="${name}_link">
+      <visual>
+        <origin rpy="${pi / 2} 0 0"/>
+        <geometry>
+          <cylinder radius="${r}" length="${wheel_width}"/>
+        </geometry>
+        <material name="wheel"/>
+      </visual>
+    </link>
+    <joint name="${name}" type="continuous">
+      <parent link="${leg}"/>
+      <child link="${name}_link"/>
+      <origin xyz="${x} ${y} 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- base.wheels is in FL, FR, RL, RR order. -->
+  <xacro:property name="wheels" value="${base['wheels']}"/>
+  <xacro:wheel name="${wheels[0]}" leg="front_leg" x="${l}" y="${track / 2}"/>
+  <xacro:wheel name="${wheels[1]}" leg="front_leg" x="${l}"
+               y="${-track / 2}"/>
+  <xacro:wheel name="${wheels[2]}" leg="rear_leg" x="${-l}" y="${track / 2}"/>
+  <xacro:wheel name="${wheels[3]}" leg="rear_leg" x="${-l}"
+               y="${-track / 2}"/>
+
+  <!-- Sensors on the platform. Zero offsets until measured: #91 fills the
+       IMU, #77 the camera. -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- The camera looks up at the ceiling: its x axis points along +z. -->
+  <link name="camera_link"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 0" rpy="0 ${-pi / 2} 0"/>
+  </joint>
+
+  <!-- Hardware: the topic based plugin and our bridge node, see
+       docs/ros2_control.md. The hardware interface itself is #85. -->
+  <ros2_control name="talos_servo_bus" type="system">
+    <hardware>
+      <plugin>topic_based_ros2_control/TopicBasedSystem</plugin>
+      <!-- Must match COMMANDS_TOPIC and STATES_TOPIC in
+           hardware_bridge_node.py. -->
+      <param name="joint_commands_topic">/talos/joint_commands</param>
+      <param name="joint_states_topic">/talos/joint_states</param>
+      <!-- Always send: see docs/ros2_control.md. -->
+      <param name="trigger_joint_command_threshold">-1</param>
+    </hardware>
+
+    <xacro:macro name="wheel_interfaces" params="name">
+      <joint name="${name}">
+        <command_interface name="velocity"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </xacro:macro>
+    <xacro:wheel_interfaces name="${wheels[0]}"/>
+    <xacro:wheel_interfaces name="${wheels[1]}"/>
+    <xacro:wheel_interfaces name="${wheels[2]}"/>
+    <xacro:wheel_interfaces name="${wheels[3]}"/>
+
+    <!-- The hinge is left out on purpose until #85. The bridge only knows
+         enabled joints and would drop every command naming it, and nothing
+         maps alpha to the servo yet. #85 adds it back with an initial_value,
+         the alpha to servo conversion (talos_servo.model) and the flat
+         offset calibrated in #84. See docs/ros2_control.md. -->
+  </ros2_control>
+
+</robot>
