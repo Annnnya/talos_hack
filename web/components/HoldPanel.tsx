@@ -7,6 +7,9 @@ import { useThrottle } from "@/lib/useBridge";
 /** Seconds of history in the trace. */
 const TRACE_S = 10;
 const HOT_C = 60;
+/** The servo cuts to 20 % drive after 2 s above 50 % load (EEPROM 34-36). */
+const OVERLOAD_PCT = 50;
+const LOAD_WARN_PCT = 40;
 const W = 300;
 const H = 70;
 
@@ -38,13 +41,17 @@ export default function HoldPanel({
   send,
   enabled,
   temp,
+  load,
 }: {
   hold: HoldState;
   send: (msg: ClientMessage) => void;
   enabled: boolean;
   /** Hinge servo temperature, °C. */
   temp: number | null;
+  /** Hinge servo load, raw 0..1000 (0.1 % each). */
+  load: number | null;
 }) {
+  const loadPct = load === null ? null : Math.abs(load) / 10;
   const [setpoint, setSetpoint] = useState(Math.min(0.3, hold.max_current_a));
   const [samples, setSamples] = useState<Sample[]>([]);
   const activeRef = useRef(hold.active);
@@ -89,6 +96,10 @@ export default function HoldPanel({
           <dd className="text-xl font-bold tabular-nums">{setpoint.toFixed(2)} A</dd>
         </div>
         <div>
+          <dt className="text-xs text-black/60 dark:text-white/60">
+            Load {loadPct === null ? "?" : `${loadPct.toFixed(0)}%`}
+          </dt>
+          <dd className="sr-only">servo load</dd>
           <dt className="text-xs text-black/60 dark:text-white/60">Goal lead</dt>
           <dd className="text-xl font-bold tabular-nums">{((hold.offset_rad * 180) / Math.PI).toFixed(1)}°</dd>
         </div>
@@ -120,6 +131,11 @@ export default function HoldPanel({
       </button>
       {hold.note && !hold.active && (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Stopped: {hold.note}</p>
+      )}
+      {loadPct !== null && loadPct >= LOAD_WARN_PCT && (
+        <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">
+          Load {loadPct.toFixed(0)}%: above {OVERLOAD_PCT}% for 2 s the servo cuts to 20% drive. Lower the setpoint.
+        </p>
       )}
       {temp !== null && temp >= HOT_C && (
         <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">

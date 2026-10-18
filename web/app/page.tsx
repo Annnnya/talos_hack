@@ -75,7 +75,9 @@ export default function Home() {
   const nearWall = mode === "aligning" || mode === "clamping" || mode === "climbing";
   // HOLD_MODES in modes.py; holding keeps going through STOP.
   const canHold = connected && ros && nearWall;
-  const hingeTemp = servos.find((s) => s.name === hinge?.joint)?.temp ?? null;
+  const hingeServo = servos.find((s) => s.name === hinge?.joint);
+  const hingeTemp = hingeServo?.temp ?? null;
+  const hingeLoad = hingeServo?.load ?? null;
   const canClimb = connected && ros && !stopped && nearWall;
   const [speedPercent, setSpeedPercent] = useSpeedPercent();
   const scale = speedPercent / 100;
@@ -184,7 +186,7 @@ export default function Home() {
       )}
 
       {ros && hold && (nearWall || hold.active) && (
-        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} />
+        <HoldPanel hold={hold} send={send} enabled={canHold} temp={hingeTemp} load={hingeLoad} />
       )}
 
       {ros && nearWall && (
