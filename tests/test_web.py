@@ -205,6 +205,26 @@ def test_ui_serves_home_and_debug_pages(robot, tmp_path):
     assert debug.status_code == 200 and debug.text == "debug page"
 
 
+def test_debug_redirects_to_its_folder(robot, tmp_path):
+    # Why the export needs trailingSlash: StaticFiles(html=True) only finds
+    # `debug/index.html`, reached through a redirect to `/debug/`.
+    (tmp_path / "index.html").write_text("home page")
+    (tmp_path / "debug").mkdir()
+    (tmp_path / "debug" / "index.html").write_text("debug page")
+    with TestClient(create_app(robot, ui_dir=tmp_path)) as c:
+        response = c.get("/debug", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/debug/")
+
+
+def test_debug_html_without_trailing_slash_is_not_found(robot, tmp_path):
+    # The default Next export (`debug.html`) would 404 at `/debug`.
+    (tmp_path / "index.html").write_text("home page")
+    (tmp_path / "debug.html").write_text("debug page")
+    with TestClient(create_app(robot, ui_dir=tmp_path)) as c:
+        assert c.get("/debug").status_code == 404
+
+
 # --- cli
 # -------------------------------------------------------------------------
 
