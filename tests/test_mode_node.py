@@ -485,12 +485,13 @@ def test_hinge_motion_in_clamping_keeps_the_controllers(node, cm):
     assert len(cm.requests) == requests
 
 
-def test_hinge_motion_is_refused_while_aligning(node, cm):
-    node.request(Event.WALL_NEARBY)
+def test_hinge_motion_is_refused_while_climbing(node, cm):
+    for event in (Event.WALL_NEARBY, Event.ALIGNED, Event.WALL_CONTACT):
+        node.request(event)
     set_stop(node, False)
     response = hinge_motion(node, True)
     assert not response.success
-    assert "aligning" in response.message
+    assert "climbing" in response.message
     assert not node.hinge_motion
 
 
