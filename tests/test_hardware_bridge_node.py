@@ -257,6 +257,17 @@ def test_status_as_robot_is_read_by_the_web_backend(robot, monkeypatch):
         node.destroy_node()
 
 
+def test_every_tick_sends_fresh_states(node, sdk, monkeypatch):
+    sent = []
+    monkeypatch.setattr(node.states_pub, "publish", sent.append)
+    sdk.handler.speed = 300
+    node.tick()
+    node.tick()
+    assert len(sent) == 2
+    i = sent[-1].name.index("wheel")
+    assert sent[-1].velocity[i] == pytest.approx(step_speed_to_rad(300))
+
+
 def test_readout_topics_live_under_the_node(node):
     assert "/hardware_bridge/wheel/current" in node.readouts.topic_names
 

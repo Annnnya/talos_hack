@@ -8,7 +8,8 @@
 max_speed: 1000
 # How often joint state goes to the web UI and ROS.
 telemetry_hz: 20
-# How often the robot sends wheel speeds and reads one servo.
+# How often the robot sends wheel speeds, reads every wheel's position and speed
+# (one sync read) and reads one servo in full.
 control_hz: 50
 # Speed commands from ROS (/cmd_vel, velocity_cmd) stop the wheel if not repeated this often.
 command_timeout_s: 0.5

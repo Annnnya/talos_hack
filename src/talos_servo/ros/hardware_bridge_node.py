@@ -17,7 +17,9 @@ two topics; this node answers them with the `Robot` on the servo bus. See
   restarted). So starting or restarting either side never moves the hinge.
   A NaN position is no goal
 - `/talos/joint_states` (sensor_msgs/JointState, out): position (rad, wheels
-  keep counting past a full turn), velocity (rad/s), effort = current (A)
+  keep counting past a full turn), velocity (rad/s), effort = current (A).
+  Sent after every `Robot.tick` (`control_hz`), which reads every wheel's
+  position and speed, so the mecanum odometry gets fresh wheel states
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
   `moving`: readouts the plugin cannot carry, see `talos_servo.ros.readouts`
 - `/hardware_bridge/stop_all` (std_srvs/Trigger)
@@ -133,7 +135,6 @@ class HardwareBridgeNode(Node):
         )
         self.create_service(Trigger, "~/stop_all", self.on_stop_all)
         self.create_timer(1.0 / config.control_hz, self.tick)
-        self.create_timer(1.0 / config.telemetry_hz, self.publish_states)
         self.create_timer(1.0 / status_hz, self.publish_readouts)
         self.get_logger().info(
             f"bridging joints {sorted(robot.joints)} on {COMMANDS_TOPIC} and "
@@ -156,6 +157,7 @@ class HardwareBridgeNode(Node):
             self.get_logger().error(
                 f"tick failed: {exc}", throttle_duration_sec=1.0
             )
+        self.publish_states()
 
     def publish_states(self) -> None:
         self.states_pub.publish(self.states_msg())

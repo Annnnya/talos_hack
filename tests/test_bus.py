@@ -448,3 +448,36 @@ def test_serial_exception_in_sync_write_becomes_servo_error(sdk, monkeypatch):
         with pytest.raises(ServoError, match="serial port error"):
             bus.set_speeds({1: 0})
         assert sdk.port.is_using is False
+
+
+def test_read_positions_speeds_in_one_sync_read(sdk):
+    with sdk.bus() as bus:
+        sdk.handler.position = 3000
+        sdk.handler.speed = -250
+        assert bus.read_positions_speeds([3, 4]) == {
+            3: (3000, -250),
+            4: (3000, -250),
+        }
+        assert sdk.handler.sync_reads() == [[3, 4]]
+
+
+def test_read_positions_speeds_skips_silent_and_faulty_servos(sdk):
+    sdk.fail[("sync_read", 4)] = (COMM_RX_TIMEOUT, 0)
+    sdk.fail[("sync_read", 5)] = (COMM_SUCCESS, 32)
+    with sdk.bus() as bus:
+        assert list(bus.read_positions_speeds([3, 4, 5])) == [3]
+
+
+def test_read_positions_speeds_without_any_answer_raises(sdk):
+    sdk.fail[("sync_read", 3)] = (COMM_RX_TIMEOUT, 0)
+    with (
+        sdk.bus() as bus,
+        pytest.raises(ServoError, match=r"sync read of servos \[3\]"),
+    ):
+        bus.read_positions_speeds([3])
+
+
+def test_read_positions_speeds_of_nothing_sends_nothing(sdk):
+    with sdk.bus() as bus:
+        assert bus.read_positions_speeds([]) == {}
+        assert sdk.handler.sync_reads() == []

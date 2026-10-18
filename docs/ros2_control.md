@@ -193,12 +193,12 @@ publish zeros to stop.
 
 ## Open points
 
-- **State rate:** the bridge publishes states at `telemetry_hz` (20 Hz by
-  default), and `Robot.tick` reads one servo per tick round robin, so with 5
-  joints each one is refreshed at about 10 Hz. controller_manager runs at
-  50 Hz, so controllers see repeated samples. The mecanum odometry (#65)
-  therefore lags and steps; fresher wheel states (for example a sync read of
-  the wheels every tick) are a follow-up.
+- **State rate:** every `Robot.tick` (`control_hz`, 50 Hz, the same as
+  controller_manager) reads all wheel positions and speeds in one sync-read
+  packet, and the bridge publishes states right after it, so the mecanum
+  odometry sees fresh wheel states each cycle. Load, voltage, temperature,
+  current and the hinge still come from the one-servo-per-tick round robin
+  read, about 10 Hz per joint with 5 joints.
 
 ## Fallback
 
