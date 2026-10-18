@@ -88,6 +88,9 @@ ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.
 # not run at the same time. See docs/ros2_control.md
 hardware-bridge = "talos-hardware-bridge-ros"
 ros2-control-check = "ros2 launch launch/ros2_control_check.launch.py"
+# The whole robot through ros2_control (#85): every wheel and the hinge with
+# forward command controllers. Also replaces robot-node
+ros2-control = "ros2 launch launch/ros2_control.launch.py"
 # Robot model (#64): print the URDF, or check it with check_urdf
 model-urdf = "xacro description/talos.urdf.xacro"
 check-model = "xacro description/talos.urdf.xacro -o .pixi/talos.urdf && check_urdf .pixi/talos.urdf"

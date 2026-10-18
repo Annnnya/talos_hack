@@ -153,8 +153,8 @@
     <origin xyz="0 0 0" rpy="0 ${-pi / 2} 0"/>
   </joint>
 
-  <!-- Hardware: the topic based plugin and our bridge node, see
-       docs/ros2_control.md. The hardware interface itself is #85. -->
+  <!-- Hardware: the topic based plugin and our bridge node (#85), see
+       docs/ros2_control.md. -->
   <ros2_control name="talos_servo_bus" type="system">
     <hardware>
       <plugin>topic_based_ros2_control/TopicBasedSystem</plugin>
@@ -179,11 +179,22 @@
     <xacro:wheel_interfaces name="${wheels[2]}"/>
     <xacro:wheel_interfaces name="${wheels[3]}"/>
 
-    <!-- The hinge is left out on purpose until #85. The bridge only knows
-         enabled joints and would drop every command naming it, and nothing
-         maps alpha to the servo yet. #85 adds it back with an initial_value,
-         the alpha to servo conversion (talos_servo.model) and the flat
-         offset calibrated in #84. See docs/ros2_control.md. -->
+    <!-- The hinge in alpha (rad, pi flat). The plugin takes the state
+         interface initial_value as the first command too, sends it until a
+         controller writes a goal, and the bridge ignores goals equal
+         to it (HINGE_INITIAL_RAD in hardware_bridge_node.py), so starting
+         never moves the hinge. No <transmission>: the plugin ignores them,
+         so the bridge converts alpha to servo steps (talos_servo.hinge). -->
+    <joint name="${hinge}">
+      <command_interface name="position">
+        <param name="initial_value">${pi}</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">${pi}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
   </ros2_control>
 
 </robot>

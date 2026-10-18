@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+import yaml
 
 from talos_servo.config import POSITION, SPEED, load_config
 from talos_servo.model import wheelbase_m
@@ -16,6 +17,7 @@ xacro = pytest.importorskip("xacro")
 ROOT = Path(__file__).resolve().parent.parent
 XACRO = ROOT / "description" / "talos.urdf.xacro"
 CONFIG = load_config(ROOT / "config" / "robot.yaml")
+CONTROLLERS = ROOT / "config" / "ros2_control.yaml"
 COMMAND_INTERFACE = {SPEED: "velocity", POSITION: "position"}
 HINGE = CONFIG.model.hinge_joint
 LEGS = ("front_leg_joint", "rear_leg_joint")
@@ -56,12 +58,20 @@ def hardware_joints(robot: ET.Element) -> dict[str, ET.Element]:
     return {j.get("name"): j for j in robot.findall("ros2_control/joint")}
 
 
-def test_ros2_control_has_only_enabled_joints_but_the_hinge(robot):
-    """The bridge drops a whole command naming a joint it does not drive,
-    and the hinge waits for the alpha to servo conversion (#85)."""
-    expected = {j.name for j in CONFIG.enabled_joints} - {HINGE}
+def test_ros2_control_has_every_enabled_joint(robot):
+    """The bridge drops a whole command naming a joint it does not drive."""
+    expected = {j.name for j in CONFIG.enabled_joints}
     assert set(hardware_joints(robot)) == expected
-    assert HINGE not in hardware_joints(robot)
+    assert HINGE in expected
+
+
+def test_hinge_starts_flat(robot):
+    """The plugin sends this until a controller writes a goal; the bridge
+    ignores it, so starting never moves the hinge."""
+    state = hardware_joints(robot)[HINGE].find(
+        "state_interface[@name='position']/param[@name='initial_value']"
+    )
+    assert float(state.text) == pytest.approx(math.pi)
 
 
 def test_command_interfaces_match_the_joint_control(robot):
@@ -71,8 +81,20 @@ def test_command_interfaces_match_the_joint_control(robot):
         assert commands == [COMMAND_INTERFACE[controls[name]]]
 
 
-def test_no_transmission_until_the_hinge_is_driven(robot):
+def test_no_transmission(robot):
+    """The plugin ignores transmissions; the bridge converts the hinge."""
     assert robot.find("ros2_control/transmission") is None
+
+
+def test_controllers_cover_every_hardware_joint(robot):
+    params = yaml.safe_load(CONTROLLERS.read_text(encoding="utf-8"))
+    claimed = [
+        joint
+        for name, section in params.items()
+        if name != "controller_manager"
+        for joint in section["ros__parameters"]["joints"]
+    ]
+    assert sorted(claimed) == sorted(hardware_joints(robot))
 
 
 def _leg_angle(joint: ET.Element, alpha: float) -> float:
