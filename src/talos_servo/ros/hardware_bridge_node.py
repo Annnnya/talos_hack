@@ -8,7 +8,10 @@ two topics; this node answers them with the `Robot` on the servo bus. See
 - `/talos/joint_commands` (sensor_msgs/JointState, in): velocity (rad/s) for
   speed joints, position (rad) for position joints. Wheels stop unless the
   command is repeated within `command_timeout_s`, so a dead controller_manager
-  never leaves them spinning
+  never leaves them spinning. Position goals are dropped unless the
+  `accept_position_goals` parameter is true: the plugin sends its initial
+  value (0.0) for a position joint no controller claims, which would move the
+  hinge to center at startup. #85 replaces this guard
 - `/talos/joint_states` (sensor_msgs/JointState, out): position (rad, wheels
   keep counting past a full turn), velocity (rad/s), effort = current (A)
 - `/hardware_bridge/<joint>/temperature`, `voltage`, `current`, `load`,
@@ -42,8 +45,8 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
-from talos_servo.ros.robot_node import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.topic_bridge import Unwrapper, unpack_commands
 
 NODE_NAME = "hardware_bridge"
@@ -54,8 +57,10 @@ STATES_TOPIC = "/talos/joint_states"
 
 
 class HardwareBridgeNode(Node):
-    def __init__(self, robot: Robot, *, node_name: str = NODE_NAME) -> None:
-        super().__init__(node_name)
+    def __init__(
+        self, robot: Robot, *, node_name: str = NODE_NAME, **node_kwargs
+    ) -> None:
+        super().__init__(node_name, **node_kwargs)
         self.robot = robot
         config = robot.config
         status_hz = float(
@@ -67,6 +72,9 @@ class HardwareBridgeNode(Node):
             for name, control in self._controls.items()
             if control == SPEED
         }
+        self._accept_position_goals = bool(
+            self.declare_parameter("accept_position_goals", False).value
+        )
         # Last goal sent per position joint. The plugin repeats the same goal
         # every cycle; only a change is written to the servo.
         self._goals: dict[str, int] = {}
@@ -140,6 +148,12 @@ class HardwareBridgeNode(Node):
                     expires=True,
                 ),
             )
+        if positions and not self._accept_position_goals:
+            self._reject(
+                f"ignoring position goals for {sorted(positions)}: set "
+                "accept_position_goals to true to allow them"
+            )
+            positions = {}
         for joint, position in positions.items():
             self._safely(
                 joint,
@@ -151,6 +165,9 @@ class HardwareBridgeNode(Node):
     def _move(self, joint: str, steps: int) -> None:
         if self._goals.get(joint) == steps:
             return
+        # Forget the goal first: if the move fails, the next identical goal
+        # is tried again instead of being skipped.
+        self._goals.pop(joint, None)
         self.robot.move(joint, steps, DEFAULT_MOVE_SPEED, source=SOURCE_ROS)
         self._goals[joint] = steps
 
@@ -158,6 +175,8 @@ class HardwareBridgeNode(Node):
         self, _request: Trigger.Request, response: Trigger.Response
     ) -> Trigger.Response:
         self.robot.stop_all(source=SOURCE_ROS)
+        # After a stop the controller may repeat its last goal; write it again.
+        self._goals.clear()
         response.success, response.message = True, "stopped every speed joint"
         return response
 
