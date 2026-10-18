@@ -58,6 +58,7 @@ serial port. Then nothing else can use the servos.
 | `src/talos_servo/cli.py` | The `talos-servo` command |
 | `src/talos_servo/teleop.py` | Keyboard driving for `talos-servo drive` |
 | `src/talos_servo/ros/` | `robot_node`, `imu_node`, the ROS client |
+| `src/talos_servo/ros/camera_node.py` | Raspberry Pi CSI camera node |
 | `src/talos_servo/web/` | FastAPI server for the web UI |
 | `web/` | Next.js UI, built into `web/out` |
 | `deploy/` | systemd units for the Pi |
@@ -71,6 +72,7 @@ flowchart LR
     subgraph pi["Raspberry Pi (ROS 2 Jazzy)"]
         NODE["robot_node<br/>owns the servo port"]
         IMUN["imu_node"]
+      CAM["camera_node<br/>Camera Module 3"]
         FILT["imu_filter_madgwick"]
         EKF["robot_localization<br/>ekf_node"]
         MUX["twist_mux<br/>+ mux_status"]
@@ -83,6 +85,7 @@ flowchart LR
     NODE -- "/joint_states · /diagnostics" --> WEB
     MUX -- "/cmd_vel" --> NODE
     NODE <--> SERVOS
+    CAM --> CAMERA["/camera/image/compressed"]
     NODE -- "/odom" --> EKF
     IMUN <--> MPU
     IMUN -- "/imu/data_raw" --> FILT
@@ -241,6 +244,10 @@ base:
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
+| `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
+| `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
+| `/camera/take_snapshot` | `std_srvs/Trigger` | capture and publish one snapshot |
+| `/camera/stream` | `std_srvs/SetBool` | enable/disable camera stream |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 | `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
 | `/keyboard/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, keyboard |
@@ -388,6 +395,37 @@ pixi run -e ros ekf          # fuses /odom and gyro, config/ekf.yaml
 
 The EKF uses wheel velocities and the gyro yaw rate only: mecanum wheels slip,
 and the IMU has no magnetometer.
+
+## Camera
+
+The camera node uses Raspberry Pi OS's `rpicam-still` and `rpicam-vid` tools,
+so it does not add Python camera libraries or a custom service package. Install
+`rpicam-apps` on the Pi, then run the node:
+
+```
+pixi run -e ros camera-node
+```
+
+Camera index 0 is the default for the Camera Module 3 connected to CSI 0.
+`/camera/take_snapshot` (`std_srvs/Trigger`) captures a full-resolution JPEG
+and publishes it once on `/camera/snapshot/compressed`. `/camera/stream`
+(`std_srvs/SetBool`) toggles 15 FPS 640x360 JPEG frames on
+`/camera/image/compressed`. Taking a snapshot temporarily pauses an active
+stream and resumes it after capture. Resolution, frame rate, and camera index
+are in `config/camera.yaml`.
+
+Run `pixi run -e viz view-model` on a computer with a graphical display to see
+the robot model plus live and snapshot image displays. Call these services to
+control the camera from a second terminal after `pixi shell -e viz`:
+
+```
+ros2 service call /camera/take_snapshot std_srvs/srv/Trigger "{}"
+ros2 service call /camera/stream std_srvs/srv/SetBool "{data: true}"
+ros2 service call /camera/stream std_srvs/srv/SetBool "{data: false}"
+```
+
+Do not launch RViz from a headless SSH session on the Pi. The camera node must
+be running, and the Pi and viewer must use the same ROS domain.
 
 ## Deploy on the Pi
 

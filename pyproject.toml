@@ -17,6 +17,7 @@ talos-imu-ros = "talos_servo.ros.imu_node:main"
 talos-mode-ros = "talos_servo.ros.mode_node:main"
 talos-mux-status-ros = "talos_servo.ros.mux_status_node:main"
 talos-hardware-bridge-ros = "talos_servo.ros.hardware_bridge_node:main"
+talos-camera-ros = "talos_servo.ros.camera_node:main"
 
 [project.optional-dependencies]
 imu = [
