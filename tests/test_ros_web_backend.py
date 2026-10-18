@@ -34,6 +34,7 @@ from talos_servo.bus import ServoError  # noqa: E402
 from talos_servo.defaults import WEB_CMD_VEL_TOPIC  # noqa: E402
 from talos_servo.robot import SOURCE_CLI, CommandError, Robot  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
+from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.robot_node import RobotNode  # noqa: E402
 from talos_servo.ros.web_backend import (  # noqa: E402
     STATUS_STALE_AFTER,
@@ -103,6 +104,66 @@ def feed_watchdog(backend: RosBackend, seconds: float) -> None:
     while time.monotonic() < deadline:
         backend.tick()
         time.sleep(0.05)
+
+
+@pytest.fixture
+def mode_node():
+    # Real mode node, no controller_manager: only STOP matters here.
+    node = ModeNode(node_name="mode_for_web_backend")
+    with spinning(node):
+        yield node
+
+
+def wait_for_mode_node(backend: RosBackend) -> None:
+    client = backend._require_node().set_stop_client
+    wait_for(client.service_is_ready, WAIT)
+
+
+def test_release_stop_and_stop_all_go_through_the_mode_node(backend, mode_node):
+    wait_for_mode_node(backend)
+    assert backend.stopped()  # the mode node starts with STOP on
+    backend.release_stop()
+    assert not mode_node.stopped
+    wait_for(lambda: not backend.stopped(), WAIT)
+    backend.stop_all()
+    assert mode_node.stopped
+    wait_for(backend.stopped, WAIT)
+
+
+def test_stopped_once_the_mode_node_goes_quiet(backend):
+    node = ModeNode(node_name="mode_that_dies")
+    with spinning(node):
+        wait_for_mode_node(backend)
+        backend.release_stop()
+        wait_for(lambda: not backend.stopped(), WAIT)
+    # Like twist_mux: no beats within the lock timeout means STOP on.
+    wait_for(backend.stopped, WAIT)
+
+
+def test_release_stop_without_a_mode_node_fails_loudly(backend):
+    with pytest.raises(CommandError, match="mode node is not running"):
+        backend.release_stop()
+
+
+def test_stop_all_without_a_mode_node_still_stops_the_wheels(backend, robot):
+    backend.spin("wheel", 300)
+    wait_for(lambda: robot.joints["wheel"].target_speed == 300, WAIT)
+    backend.stop_all()
+    wait_for(lambda: robot.joints["wheel"].target_speed == 0, WAIT)
+
+
+def test_browser_sees_stop_and_can_release_it(robot_node, mode_node):
+    backend = make_backend()
+    with TestClient(create_app(backend, ros=True)) as client:
+        wait_for_mode_node(backend)
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            assert ws.receive_json()["stopped"] is True
+            ws.send_json({"type": "release_stop"})
+            wait_for(lambda: not mode_node.stopped, WAIT)
+            wait_for(lambda: ws.receive_json()["stopped"] is False, WAIT)
+            ws.send_json({"type": "stop_all"})
+            wait_for(lambda: mode_node.stopped, WAIT)
 
 
 def test_open_mirrors_robot_state(backend, robot):

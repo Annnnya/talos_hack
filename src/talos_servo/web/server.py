@@ -121,6 +121,10 @@ def _dispatch(
     who = {"source": SOURCE_WEB, "client": client}
     if kind == "stop_all":
         return lambda: controller.stop_all(**who)
+    if kind == "release_stop":
+        if not ros:
+            raise CommandError("releasing STOP needs `talos-servo web --ros`")
+        return lambda: controller.release_stop(**who)
     if kind == "drive":
         # The base is shared through twist_mux, so there is no direct path.
         if not ros:
@@ -177,6 +181,8 @@ def create_app(
             "limits": limits,
             "settings": settings.as_message(),
             "servos": controller.snapshot(),
+            # True while STOP locks twist_mux; None without ROS.
+            "stopped": controller.stopped(),
         }
 
     async def control_loop() -> None:

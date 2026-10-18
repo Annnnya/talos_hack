@@ -16,6 +16,8 @@ Differences from driving the bus directly:
   robot's diagnostics report who sent it, and the UI shows it.
 - `drive` publishes on `cmd_vel_topic`. The web server passes its twist_mux
   input, so it shares the base with the keyboard instead of fighting it.
+- `stop_all` also turns STOP on in the mode node (`/robot/set_stop`), which
+  locks twist_mux against every input until `release_stop`.
 """
 
 from __future__ import annotations
@@ -33,11 +35,16 @@ from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
 from talos_servo.config import SPEED, RobotConfig
-from talos_servo.defaults import ROBOT_NODE_NAME, ROBOT_NS
+from talos_servo.defaults import (
+    ROBOT_NODE_NAME,
+    ROBOT_NS,
+    STOP_LOCK_TIMEOUT_S,
+)
 from talos_servo.robot import (
     SOURCE_WEB,
     CommandError,
@@ -70,6 +77,7 @@ STATUS_STALE_AFTER = 2.0
 # Diagnostics entries from the robot node are named "<node name>: <joint>".
 STATUS_PREFIX = f"{ROBOT_NODE_NAME}: "
 HINT = "start it with `pixi run -e ros robot-node`"
+MODE_HINT = "start it with `pixi run -e ros mode-node`"
 # Status lags our own commands. A command the robot reports with a frame this
 # backend sends, and no newer than this after our last send, is our own echo
 # (maybe of an older command), so it must not move a slider back. Commands from
@@ -115,6 +123,8 @@ class RosBackend:
         self._feeding: dict[str, tuple[int, str]] = {}
         self._sent_at: dict[str, float] = {}
         self._own_frames: set[str] = set()
+        # Last STOP state from the mode node and when it came.
+        self._stop_beat: tuple[bool, float] | None = None
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -126,6 +136,7 @@ class RosBackend:
                 self.joints,
                 self._on_joint_states,
                 self._on_status,
+                on_stop_lock=self._on_stop_lock,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -230,6 +241,23 @@ class RosBackend:
                     log.warning("bad status for %s: %s", status.name, exc)
             self._last_status = now
         self._first_status.set()
+
+    def _on_stop_lock(self, msg: Bool) -> None:
+        with self._lock:
+            self._stop_beat = (bool(msg.data), self._clock())
+
+    def stopped(self) -> bool:
+        """True while twist_mux's STOP lock is on.
+
+        That is the mode node saying so, or no word from it within the lock
+        timeout (no mode node), which twist_mux also treats as STOP on.
+        """
+        with self._lock:
+            beat, now = self._stop_beat, self._clock()
+        if beat is None:
+            return True
+        on, heard_at = beat
+        return on or now - heard_at > STOP_LOCK_TIMEOUT_S
 
     def _apply_status(
         self, j: Joint, status: DiagnosticStatus, now: float
@@ -379,6 +407,17 @@ class RosBackend:
     def stop_all(
         self, *, source: str = SOURCE_WEB, client: str | None = None
     ) -> None:
+        """Turn STOP on in the mode node, then stop every speed joint.
+
+        STOP locks twist_mux, so a browser or keyboard still sending cannot
+        drive the base again. Best effort, never raises.
+        """
+        try:
+            self.set_stop(True)
+        except (CommandError, ServoError) as exc:
+            # Without the mode node twist_mux is locked anyway: its stop
+            # lock went quiet.
+            log.warning("STOP through the mode node failed: %s", exc)
         with self._lock:
             self._feeding.clear()
             wheels = [j for j in self.joints.values() if j.control == SPEED]
@@ -398,6 +437,22 @@ class RosBackend:
             # No more velocity commands go out, so the robot's watchdog still
             # stops the wheels.
             log.warning("stop all through the robot node failed: %s", exc)
+
+    def set_stop(self, stopped: bool) -> None:
+        """Turn STOP on (True) or release it (False) in the mode node."""
+        client = self._require_node().set_stop_client
+        # The mode node is optional, so do not wait the full service
+        # timeout for one that is not there.
+        if not client.service_is_ready():
+            raise CommandError(f"STOP: mode node is not running ({MODE_HINT})")
+        what = "STOP" if stopped else "release STOP"
+        self._call(client, SetBool.Request(data=stopped), what)
+
+    def release_stop(
+        self, *, source: str = SOURCE_WEB, client: str | None = None
+    ) -> None:
+        """Release STOP, so twist_mux passes the inputs on again."""
+        self.set_stop(False)
 
     def stop_own(
         self, *, source: str = SOURCE_WEB, client: str | None = None
