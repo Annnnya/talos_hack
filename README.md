@@ -177,7 +177,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `talos-servo web` | Browser UI on port 8000 |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
-| `pixi run -e ros drive` | `talos-servo drive --ros` |
+| `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP |
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
@@ -189,6 +189,13 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
   node instead of the port, so these can run next to each other.
 - `ping`, `spin`, `monitor` and `set-id` without `--ros` are bench tools: they
   take servo ids and work without a config.
+- `drive --ros` publishes on `/keyboard/cmd_vel`, so it needs `twist-mux`.
+  Space also turns STOP on for every input (`/robot/set_stop`) and Enter
+  releases it. N calls `/robot/wall_nearby` and L `/robot/release` on the
+  mode node, without freezing the keys during a slow switch. It
+  prints the mode, why it changed and which input drives, also when the web
+  changes them. Q/E do nothing while climbing, and the drive keys do nothing
+  while aligning or clamping. Quitting stops only the keyboard input.
 - Every command stops what it started on exit, including Ctrl+C.
 - New servos ship with id 1. Connect them one at a time and give each its own
   id with `set-id` before chaining them.
@@ -273,12 +280,12 @@ The web server (`web-ros`) sends the browser's `drive` messages on
 and sends one stop on release, so a closed tab drops out of the mux within
 0.5 s.
 
-Over ROS the web **STOP ALL** button (or Space) also turns STOP on through
-`/robot/set_stop`, so a browser still holding a drive button cannot drive
-again. While STOP is on, the web pages show **Release STOP** (or Enter). The
-keyboard, `drive --ros`, still publishes straight to `/cmd_vel` until #73
-moves it onto its mux input, so the lock does not stop it yet, and running
-`twist-mux` next to it adds a second publisher on `/cmd_vel`.
+`drive --ros` sends the keys on `/keyboard/cmd_vel`. STOP from anywhere wins
+over every input: the web **STOP ALL** button (or Space on the page) and
+Space in `drive --ros` turn it on through `/robot/set_stop`, so an input
+that is still sending cannot drive again. Release it with **Release STOP**
+on the web pages (shown while STOP is on), Enter on either, or
+`/robot/set_stop` `false`.
 
 ```
 pixi run -e ros mode-node

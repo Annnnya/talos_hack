@@ -12,6 +12,9 @@ DEFAULT_CONFIG = "config/robot.yaml"
 ROBOT_NODE_NAME = "robot"
 ROBOT_NS = f"/{ROBOT_NODE_NAME}"
 QUEUE_DEPTH = 10
+# twist_mux inputs (config/twist_mux.yaml); the mux merges them into /cmd_vel.
+KEYBOARD_CMD_VEL_TOPIC = "/keyboard/cmd_vel"
+WEB_CMD_VEL_TOPIC = "/web/cmd_vel"
 # Move speed (steps/s) when a position command does not say. Low, like every
 # default here.
 DEFAULT_MOVE_SPEED = 200

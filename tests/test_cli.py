@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from scservo_sdk import COMM_RX_TIMEOUT
 
 from talos_servo import cli, parsing
+from talos_servo.defaults import KEYBOARD_CMD_VEL_TOPIC
+
+ROBOT_CONFIG = Path(__file__).resolve().parents[1] / "config" / "robot.yaml"
 
 
 @pytest.fixture
@@ -149,12 +154,16 @@ def over_ros(monkeypatch, tmp_path):
 
     calls = {}
     stub = types.ModuleType("talos_servo.ros.cli_commands")
-    stub.RosBackend = lambda config: {
-        "joints": [j.name for j in config.enabled_joints]
+    stub.RosBackend = lambda config, **options: {
+        "joints": [j.name for j in config.enabled_joints],
+        **options,
     }
     stub.spin_over_ros = lambda backend, *a: calls.update(spin=(backend, a))
     stub.monitor_over_ros = lambda backend, *a: calls.update(
         monitor=(backend, a)
+    )
+    stub.drive_over_ros = lambda backend, read_key, **kw: calls.update(
+        drive=(backend, read_key, kw)
     )
     monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", stub)
     monkeypatch.setattr(talos_servo.ros, "cli_commands", stub, raising=False)
@@ -196,6 +205,43 @@ def test_over_ros_says_acceleration_is_ignored(over_ros, capsys):
     args = ["spin", "--ros", "--config", config, "--ids", "2", "--acc", "50"]
     assert cli.main(args) == 0
     assert "--acc is ignored" in capsys.readouterr().out
+
+
+@pytest.fixture
+def fake_terminal(monkeypatch):
+    """`terminal_keys` without a real terminal; hands out the key reader."""
+    from talos_servo import teleop
+
+    def read_key(_timeout: float) -> str | None:
+        return None
+
+    @contextlib.contextmanager
+    def terminal_keys():
+        yield read_key
+
+    monkeypatch.setattr(teleop, "terminal_keys", terminal_keys)
+    return read_key
+
+
+def test_drive_over_ros_uses_the_keyboard_mux_input(
+    over_ros, fake_terminal, capsys
+):
+    calls, _config = over_ros
+    assert cli.main(["drive", "--ros", "--config", str(ROBOT_CONFIG)]) == 0
+    backend, read_key, kw = calls["drive"]
+    assert backend["cmd_vel_topic"] == KEYBOARD_CMD_VEL_TOPIC
+    assert read_key is fake_terminal
+    assert kw == {"linear": 0.1, "angular": 0.5}
+    out = capsys.readouterr().out
+    assert "N wall nearby" in out
+    assert "L release" in out
+
+
+def test_drive_over_ros_takes_speeds_from_options(over_ros, fake_terminal):
+    calls, _config = over_ros
+    args = ["drive", "--ros", "--config", str(ROBOT_CONFIG)]
+    assert cli.main([*args, "--linear", "0.05", "--angular", "0.2"]) == 0
+    assert calls["drive"][2] == {"linear": 0.05, "angular": 0.2}
 
 
 def test_over_ros_without_ros_installed_explains(monkeypatch, capsys):

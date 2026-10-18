@@ -12,6 +12,7 @@ from conftest import MUX_CONFIG, flatten
 yaml = pytest.importorskip("yaml")
 
 from talos_servo.defaults import (  # noqa: E402
+    KEYBOARD_CMD_VEL_TOPIC,
     STOP_LOCK_PERIOD_S,
     STOP_LOCK_TIMEOUT_S,
     WEB_CMD_VEL_TOPIC,
@@ -55,8 +56,8 @@ def test_plain_twist_like_the_robot_node(params):
 
 def test_web_and_keyboard_inputs(inputs):
     assert {name: e.topic for name, e in inputs.items()} == {
-        "keyboard": "/keyboard/cmd_vel",
-        "web": "/web/cmd_vel",
+        "keyboard": KEYBOARD_CMD_VEL_TOPIC,
+        "web": WEB_CMD_VEL_TOPIC,
     }
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any
 
 import pytest
 from conftest import FakeClock
@@ -24,7 +25,9 @@ class Keys:
         return self.keys.pop(0)
 
 
-def drive_with(keys: list[str | None]) -> list[tuple[float, float, float]]:
+def drive_with(
+    keys: list[str | None], **kwargs: Any
+) -> list[tuple[float, float, float]]:
     clock = FakeClock()
     sent: list[tuple[float, float, float]] = []
     with contextlib.suppress(KeyboardInterrupt):
@@ -34,8 +37,13 @@ def drive_with(keys: list[str | None]) -> list[tuple[float, float, float]]:
             linear=0.1,
             angular=0.5,
             clock=clock,
+            **kwargs,
         )
     return sent
+
+
+FORWARD = (0.1, 0.0, 0.0)
+TURN_LEFT = (0.0, 0.0, 0.5)
 
 
 def test_keys_map_to_body_velocity():
@@ -105,6 +113,134 @@ def test_drive_that_fails_partway_still_gets_a_stop():
             drive, Keys(["w"], clock), linear=0.1, angular=0.5, clock=clock
         )
     assert sent == [(0.1, 0.0, 0.0), teleop.STOPPED]
+
+
+def test_action_keys_run_once_and_do_not_drive():
+    pressed: list[str] = []
+    actions = {
+        teleop.WALL_NEARBY_KEY: lambda: pressed.append("wall"),
+        teleop.RELEASE_KEY: lambda: pressed.append("release"),
+    }
+    sent = drive_with(["n", None, "L", "x"], actions=actions)
+    assert pressed == ["wall", "release"]
+    assert sent == []
+
+
+def test_space_runs_on_stop_after_its_stop():
+    events: list = []
+    sent: list = []
+    clock = FakeClock()
+
+    def drive(*v):
+        sent.append(v)
+        events.append("drive")
+
+    with contextlib.suppress(KeyboardInterrupt):
+        teleop.run(
+            drive,
+            Keys(["w", " ", None, "w", "x"], clock),
+            linear=0.1,
+            angular=0.5,
+            clock=clock,
+            on_stop=lambda: events.append("stop"),
+        )
+    # The local zero goes out first, then STOP for every input; other keys
+    # do not call it.
+    assert events == ["drive", "drive", "stop", "drive", "drive"]
+    assert sent[1] == teleop.STOPPED
+
+
+@pytest.mark.parametrize("enter", sorted(teleop.RELEASE_STOP_KEYS))
+def test_enter_is_an_action_key(enter):
+    pressed: list[str] = []
+    actions = dict.fromkeys(
+        teleop.RELEASE_STOP_KEYS, lambda: pressed.append("release stop")
+    )
+    assert drive_with([enter, "x"], actions=actions) == []
+    assert pressed == ["release stop"]
+
+
+def test_action_key_does_not_keep_a_held_key_going():
+    # The held key times out as if the action key were no key at all.
+    quiet = [None] * (round(teleop.KEY_TIMEOUT_S / teleop.LOOP_PERIOD_S) + 1)
+    with_action = drive_with(["w", "n", *quiet], actions={"n": lambda: None})
+    without = drive_with(["w", None, *quiet])
+    assert with_action == without
+    assert with_action[-1] == teleop.STOPPED
+
+
+@pytest.mark.parametrize(
+    ("mode", "keys"),
+    [
+        ("free", set("wsadqe")),
+        ("climbing", set("wsad")),
+        ("aligning", set()),
+        ("clamping", set()),
+        (None, set("wsadqe")),
+        ("unheard of", set("wsadqe")),
+    ],
+)
+def test_allowed_keys_per_mode(mode, keys):
+    assert teleop.allowed_keys(mode) == keys
+
+
+def test_turn_keys_stop_while_climbing():
+    allowed = lambda: teleop.allowed_keys("climbing")  # noqa: E731
+    assert drive_with(["w", "q", "x"], allowed=allowed) == [
+        FORWARD,
+        teleop.STOPPED,
+    ]
+
+
+@pytest.mark.parametrize("mode", ["aligning", "clamping"])
+def test_drive_keys_do_nothing_while_aligning_or_clamping(mode):
+    allowed = lambda: teleop.allowed_keys(mode)  # noqa: E731
+    assert drive_with(["w", "a", "x"], allowed=allowed) == []
+
+
+def test_keys_follow_a_mode_change_mid_run():
+    mode = ["free"]
+
+    def climb() -> None:
+        mode[0] = "climbing"
+
+    sent = drive_with(
+        ["q", "n", "q", "x"],
+        actions={"n": climb},
+        allowed=lambda: teleop.allowed_keys(mode[0]),
+    )
+    assert sent == [TURN_LEFT, TURN_LEFT, teleop.STOPPED]
+
+
+def test_space_stops_in_every_mode():
+    allowed = lambda: teleop.allowed_keys("aligning")  # noqa: E731
+    assert drive_with([" ", "x"], allowed=allowed) == [teleop.STOPPED]
+
+
+def test_status_line():
+    assert (
+        teleop.status_line("climbing", "wall contact", "web")
+        == "mode: climbing (wall contact) | driving: web"
+    )
+    assert teleop.status_line(None, None, None) == "mode: ? | driving: ?"
+
+
+def test_status_printer_prints_at_start_and_on_change():
+    status = [("free", None, "none")]
+    lines: list[str] = []
+    printer = teleop.StatusPrinter(lambda: status[0], lines.append)
+    printer()
+    printer()
+    status[0] = ("aligning", "wall nearby", "none")
+    printer()
+    status[0] = ("aligning", "wall nearby", "keyboard")
+    printer()
+    printer()
+    assert lines == [
+        "mode: free | driving: none",
+        "mode: aligning (wall nearby) | driving: none",
+        "mode: aligning (wall nearby) | driving: keyboard",
+    ]
 
 
 def test_terminal_keys_need_a_terminal(monkeypatch):
