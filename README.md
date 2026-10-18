@@ -130,6 +130,10 @@ joins it in #85, together with the conversion from opening angle to servo
 angle (`talos_servo.model.alpha_per_servo_rad`) and the flat offset from the
 calibration in #84.
 
+How fast the wheels must turn while the hinge opens or closes, with test
+vectors for the expansion controller (#76), is in
+[docs/hinge_kinematics.md](docs/hinge_kinematics.md).
+
 View it in RViz2 (needs a display; installs RViz only in the `viz`
 environment, not on the Pi; works on Linux and Windows):
 
