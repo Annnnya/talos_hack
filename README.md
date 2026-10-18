@@ -269,13 +269,12 @@ The web server (`web-ros`) sends the browser's `drive` messages on
 and sends one stop on release, so a closed tab drops out of the mux within
 0.5 s.
 
-**`/robot/stop_lock` is not a working STOP yet.** The web UI is on its mux
-input, but `drive --ros` still publishes straight to `/cmd_vel` until #73
-moves it, so the lock does not stop the keyboard. Running `twist-mux` next
-to it also adds a second publisher on `/cmd_vel`. The web STOP button calls
-the robot node's `stop_all`, which a browser still holding a drive button
-overrides on its next message; STOP from the UIs through the lock is #108.
-Use `/robot/stop_all` and let go of every button to stop the robot.
+Over ROS the web **STOP ALL** button (or Space) also turns STOP on through
+`/robot/set_stop`, so a browser still holding a drive button cannot drive
+again. While STOP is on, the web pages show **Release STOP** (or Enter). The
+keyboard, `drive --ros`, still publishes straight to `/cmd_vel` until #73
+moves it onto its mux input, so the lock does not stop it yet, and running
+`twist-mux` next to it adds a second publisher on `/cmd_vel`.
 
 ```
 pixi run -e ros mode-node
@@ -376,12 +375,12 @@ uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
 Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
-joint, including wheels the CLI or a ROS node is driving. `/` has a STOP ALL
-button too and keeps its own connection. When the last browser disconnects,
+joint, including wheels the CLI or a ROS node is driving, and over ROS turns
+STOP on (see twist_mux above); **Release STOP** (or Enter) lets the base
+drive again. `/` has both buttons too and keeps its own connection. When the last browser disconnects,
 the server stops only what the web commanded: the joints it spins and its
 twist_mux input. Over ROS, keyboard driving carries on. For UI work with hot
-reload,
-run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
+reload, run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
