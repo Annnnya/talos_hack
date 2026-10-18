@@ -23,10 +23,8 @@ Run with `pixi run -e ros robot-node`.
 
 from __future__ import annotations
 
-import argparse
 import logging
 import math
-import os
 import sys
 from collections.abc import Callable, Sequence
 
@@ -39,10 +37,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool, Trigger
 
-from talos_servo.bus import DEFAULT_BAUDRATE, ServoBus, ServoError
+from talos_servo.bus import ServoBus, ServoError
 from talos_servo.config import load_config
 from talos_servo.defaults import (
-    DEFAULT_CONFIG,
     DEFAULT_MOVE_SPEED,
     PORT_ENV_VAR,
     QUEUE_DEPTH,
@@ -57,9 +54,9 @@ from talos_servo.ros.convert import (
     step_speed_to_rad,
     steps_to_rad,
 )
+from talos_servo.ros.port_args import DEFAULT_STATUS_HZ, parse_args
 from talos_servo.ros.readouts import JointReadoutPublishers
 
-DEFAULT_STATUS_HZ = 2.0
 JOINT_STATES_TOPIC = "/joint_states"
 DIAGNOSTICS_TOPIC = "/diagnostics"
 CMD_VEL_TOPIC = "/cmd_vel"
@@ -194,19 +191,9 @@ class RobotNode(Node):
     def publish_readouts(self) -> None:
         """Numeric readouts for every online joint; offline ones show up in
         /diagnostics."""
-        stamp = self.get_clock().now().to_msg()
-        for j in self.robot.snapshot():
-            if not j["online"]:
-                continue
-            self.readouts.publish(
-                j["name"],
-                stamp,
-                temperature=j["temp"],
-                voltage=j["voltage"],
-                current=j["current"],
-                load=j["load"],
-                moving=j["moving"],
-            )
+        self.readouts.publish_snapshot(
+            self.robot.snapshot(), self.get_clock().now().to_msg()
+        )
 
     def status_msg(self) -> DiagnosticArray:
         msg = DiagnosticArray()
@@ -317,27 +304,10 @@ def _yaw_quaternion(yaw: float) -> Quaternion:
     return Quaternion(z=math.sin(yaw / 2), w=math.cos(yaw / 2))
 
 
-def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
-    parser = argparse.ArgumentParser(
-        prog="talos-robot-ros", description=__doc__.splitlines()[0]
-    )
-    parser.add_argument(
-        "--config", default=DEFAULT_CONFIG, help="robot config (%(default)s)"
-    )
-    parser.add_argument(
-        "--port",
-        default=os.environ.get(PORT_ENV_VAR),
-        help=f"serial port, e.g. /dev/ttyACM0 (default: ${PORT_ENV_VAR})",
-    )
-    parser.add_argument(
-        "--baud", type=int, default=DEFAULT_BAUDRATE, help="(%(default)s)"
-    )
-    # Everything else (e.g. --ros-args -p status_hz:=5.0) goes to rclpy.
-    return parser.parse_known_args(argv)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    args, ros_args = parse_args(sys.argv[1:] if argv is None else argv)
+    args, ros_args = parse_args(
+        sys.argv[1:] if argv is None else argv, prog="talos-robot-ros"
+    )
     logging.basicConfig(level=logging.INFO)
     if not args.port:
         print(

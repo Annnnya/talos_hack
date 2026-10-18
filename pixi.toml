@@ -55,6 +55,15 @@ ros-jazzy-ros-base = "*"
 ros-jazzy-diagnostic-msgs = "*"
 ros-jazzy-imu-filter-madgwick = "*"
 ros-jazzy-robot-localization = "*"
+# ros2_control (see docs/ros2_control.md). topic_based_ros2_control is the
+# ready-made C++ hardware plugin that hands joint commands and states to our
+# Python hardware bridge node over topics.
+ros-jazzy-controller-manager = "*"
+ros-jazzy-ros2-controllers = "*"
+ros-jazzy-ros2controlcli = "*"
+ros-jazzy-topic-based-ros2-control = "*"
+ros-jazzy-robot-state-publisher = "*"
+ros-jazzy-xacro = "*"
 
 [feature.ros.tasks]
 # The only program on the servo port; everything else goes through it
@@ -69,6 +78,11 @@ imu-filter = "ros2 run imu_filter_madgwick imu_filter_madgwick_node --ros-args -
 imu-tf = "ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id imu_link"
 # Fuses /odom and /imu/data_raw into /odometry/filtered and the odom -> base_link transform
 ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.yaml"
+# ros2_control bench check (#88): controller_manager with the topic based
+# plugin plus our hardware bridge on one wheel. Replaces robot-node, which must
+# not run at the same time. See docs/ros2_control.md
+hardware-bridge = "talos-hardware-bridge-ros"
+ros2-control-check = "ros2 launch launch/ros2_control_check.launch.py"
 # Web UI through the running robot node, so it can share the robot
 # with other ROS nodes
 web-ros = "talos-servo web --ros"

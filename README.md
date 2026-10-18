@@ -100,6 +100,13 @@ flowchart TB
     S2 -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
+### ros2_control (in progress, #62)
+
+Control is moving to ros2_control. How it works with our Python code (the
+topic based hardware plugin plus `hardware_bridge_node`) and the bench check
+`pixi run -e ros ros2-control-check` are in
+[docs/ros2_control.md](docs/ros2_control.md).
+
 ## Quick start
 
 Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
