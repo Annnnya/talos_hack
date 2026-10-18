@@ -89,10 +89,18 @@ Checked in the plugin source (0.3.0):
 
 - **Unclaimed position joints:** when no controller claims a position
   interface, the plugin still sends its initial command (`initial_value`, or
-  0.0). For `bend` that would be a move to 0 rad at startup. #85 must stop
-  that, for example by having the bridge ignore position goals until the
-  first one that differs from the plugin's initial value, or by always
-  starting a position controller that holds the measured angle.
+  0.0). For `bend` that would be a move to 0 rad at startup. Until #85 the
+  bridge drops every position goal unless its `accept_position_goals`
+  parameter is true. #85 must replace that guard, for example by ignoring
+  position goals until the first one that differs from the plugin's initial
+  value, or by always starting a position controller that holds the measured
+  angle.
+- **State rate:** the bridge publishes states at `telemetry_hz` (20 Hz by
+  default), and `Robot.tick` reads one servo per tick round robin, so with 5
+  joints each one is refreshed at about 10 Hz. controller_manager runs at
+  50 Hz, so controllers see repeated samples. Fine for the bench check; the
+  odometry in #65 needs fresher wheel states (for example a sync read of the
+  wheels every tick).
 - `/dynamic_joint_states` will only show position, velocity and effort.
   #85 should say current is in `effort` and load is on the readout topic.
 
