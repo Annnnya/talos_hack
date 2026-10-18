@@ -435,7 +435,8 @@ def test_invalid_imu_mount_is_rejected(imu, message):
         parse_config({**SMALL, "imu": imu})
 
 
-def test_repo_config_mounts_the_imu_flat():
-    # The board lies flat on the platform (#91); the URDF reads the same.
+def test_repo_config_mounts_the_imu_chip_down():
+    # The board is screwed on upside down (#91); the URDF reads the same.
     imu = load_config(ROBOT_CONFIG).imu
-    assert (imu.xyz, imu.rpy) == ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+    assert imu.xyz == (0.0, 0.0, 0.0)
+    assert imu.rpy == pytest.approx((math.pi, 0.0, 0.0))

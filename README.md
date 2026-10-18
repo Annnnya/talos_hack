@@ -612,8 +612,9 @@ and the IMU has no magnetometer.
 
 ### Where the IMU sits (#91)
 
-The board lies flat on the central platform, x axis forward, so `imu` in
-`config/robot.yaml` is all zeros. The URDF `imu_joint` reads it, so under
+The board is screwed chip-down on the central platform, x axis forward, so
+`imu` in `config/robot.yaml` has a roll of pi (its raw z acceleration reads
+-g on a level floor). The URDF `imu_joint` reads it, so under
 ros2_control robot_state_publisher publishes `base_link -> imu_link`; the
 old robot node path runs `static_transform_publisher` with the same values.
 If the board is ever moved, measure `xyz` (m, from the hinge axis centre)
