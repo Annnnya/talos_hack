@@ -19,10 +19,12 @@ Wants=network-online.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/talos_hack
+# Optional: without it the launch takes the one adapter under
+# /dev/serial/by-id, else /dev/ttyACM0.
 Environment=TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00
 # Every shell running --ros commands must use the same domain.
 # Environment=ROS_DOMAIN_ID=0
-# Add camera:=true imu:=true to start the camera and the IMU chain too.
+# The IMU chain starts by default; add camera:=true for the camera.
 ExecStart=/home/pi/.pixi/bin/pixi run -e ros robot
 # SIGINT runs every node's Ctrl+C path: stop the wheels, close the port.
 KillSignal=SIGINT
