@@ -32,6 +32,7 @@ from talos_servo.ros.names import (
     SET_STOP_SERVICE,
     STOP_LOCK_TOPIC,
     WALL_NEARBY_SERVICE,
+    WALL_SIDE_TOPIC,
 )
 from talos_servo.ros.robot_node import (
     CMD_VEL_TOPIC,
@@ -78,6 +79,9 @@ class WebClientNode(Node):
         )
         self.climb_pub = self.create_publisher(
             Float64, CLIMB_TOPIC, QUEUE_DEPTH
+        )
+        self.side_pub = self.create_publisher(
+            Float64, WALL_SIDE_TOPIC, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH

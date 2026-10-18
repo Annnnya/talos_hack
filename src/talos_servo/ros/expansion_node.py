@@ -69,6 +69,7 @@ from talos_servo.ros.names import (
     LATCHED,
     MODE_TOPIC,
     STOP_LOCK_TOPIC,
+    WALL_SIDE_TOPIC,
     WHEEL_COMMANDS_TOPIC,
 )
 
@@ -108,6 +109,8 @@ class ExpansionNode(Node):
         self._rate_stamp: float | None = None
         self._climb = 0.0
         self._climb_stamp: float | None = None
+        self._side = 0.0
+        self._side_stamp: float | None = None
         self.max_climb = self.settings.max_climb_speed_m_s
         self.wheel_radius_m = config.base.wheel_radius_m
         self._alpha = math.nan
@@ -143,6 +146,9 @@ class ExpansionNode(Node):
         )
         self.create_subscription(
             Float64, CLIMB_TOPIC, self.on_climb, QUEUE_DEPTH
+        )
+        self.create_subscription(
+            Float64, WALL_SIDE_TOPIC, self.on_side, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, self.on_joint_state, QUEUE_DEPTH
@@ -289,10 +295,36 @@ class ExpansionNode(Node):
             return 0.0
         return self._climb
 
-    def climb_wheels(self, speed: float) -> Wheels:
-        """Front pair one way, rear pair the other, in rad/s."""
-        w = speed / self.wheel_radius_m
-        return (w, w, -w, -w)
+    def on_side(self, msg: Float64) -> None:
+        speed = float(msg.data)
+        if not math.isfinite(speed):
+            speed = 0.0
+        self._side = max(-self.max_climb, min(self.max_climb, speed))
+        self._side_stamp = self._now()
+
+    def requested_side(self) -> float:
+        """The last sideways speed, or 0 once it is older than the timeout."""
+        if self._side_stamp is None:
+            return 0.0
+        if self._now() - self._side_stamp > self.settings.command_timeout_s:
+            return 0.0
+        return self._side
+
+    def climb_wheels(self, speed: float, side: float = 0.0) -> Wheels:
+        """Wheel speeds in rad/s on the wall: up is the front pair one way
+        and the rear pair the other; sideways (+ left) is the same wheel
+        pattern as a sideways move on the ground (`mecanum.wheel_speeds`).
+        Scaled down together so no wheel passes the climb speed cap."""
+        surface = (
+            speed - side,
+            speed + side,
+            -speed + side,
+            -speed - side,
+        )
+        largest = max(abs(v) for v in surface)
+        scale = min(1.0, self.max_climb / largest) if largest else 1.0
+        fl, fr, rl, rr = (v * scale / self.wheel_radius_m for v in surface)
+        return (fl, fr, rl, rr)
 
     def on_joint_state(self, msg: JointState) -> None:
         try:
@@ -346,8 +378,9 @@ class ExpansionNode(Node):
         self.hold_tick()
         rate = self.requested_rate()
         climb = self.requested_climb()
-        if climb and not rate:
-            self.climb_tick(climb)
+        side = self.requested_side()
+        if (climb or side) and not rate:
+            self.climb_tick(climb, side)
             return
         why = self.blocked() if rate else None
         if rate == 0.0 or why is not None:
@@ -364,7 +397,7 @@ class ExpansionNode(Node):
         self._moving = step.wheels != STILL
         self._note(step.held)
 
-    def climb_tick(self, speed: float) -> None:
+    def climb_tick(self, speed: float, side: float = 0.0) -> None:
         """Turn the front and rear pairs opposite ways; the hinge keeps its
         goal so a clamped robot keeps pressing on the walls."""
         why = self.blocked(CLIMB_MODES)
@@ -375,7 +408,7 @@ class ExpansionNode(Node):
             self._ask(True)
             self._still("waiting for the wheel controller")
             return
-        self._send_wheels(self.climb_wheels(speed))
+        self._send_wheels(self.climb_wheels(speed, side))
         self._moving = True
         self._note(None)
 

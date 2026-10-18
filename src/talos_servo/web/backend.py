@@ -69,6 +69,10 @@ class RobotBackend(Protocol):
         """Hinge current hold state, None without ROS or the expansion
         node."""
 
+    def wall_side(self, speed: float) -> None:
+        """Sideways speed on the wall (m/s, + left). Stops unless repeated.
+        Over ROS only."""
+
     def climb(self, speed: float) -> None:
         """Climb speed (m/s, + up): front wheels one way, rear the other.
         Stops unless repeated. Over ROS only."""

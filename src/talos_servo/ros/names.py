@@ -25,6 +25,9 @@ EXPANSION_RATE_TOPIC = "/expansion/rate"
 # Climb speed in m/s (std_msgs/Float64, + up): front wheels one way, rear
 # wheels the other. Repeat it like the rate.
 CLIMB_TOPIC = "/expansion/climb"
+# Sideways speed on the wall in m/s (std_msgs/Float64, + left), mixed with the
+# climb speed. Repeat it like the climb speed.
+WALL_SIDE_TOPIC = "/expansion/side"
 # Hinge current hold (#142): setpoint in A (std_msgs/Float64, latched), on
 # and off (std_srvs/SetBool), and its state as JSON (std_msgs/String).
 HOLD_SETPOINT_TOPIC = "/hinge_hold/setpoint"

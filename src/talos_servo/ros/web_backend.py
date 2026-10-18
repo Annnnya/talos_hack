@@ -485,6 +485,14 @@ class RosBackend:
             Float64(data=finite_clamp(speed, limit))
         )
 
+    def wall_side(self, speed: float) -> None:
+        """Publish one sideways speed on the wall (m/s, + left, 0 stops),
+        clamped to the climb cap. Stops unless repeated."""
+        limit = self.config.expansion.max_climb_speed_m_s
+        self._require_node().side_pub.publish(
+            Float64(data=finite_clamp(speed, limit))
+        )
+
     def hinge_state(self) -> dict[str, Any] | None:
         """Hinge readout for calibrating `model.bend_flat_steps`, or None
         without a hinge. `angle_deg` and `raw_steps` are None while the

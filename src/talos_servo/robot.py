@@ -429,6 +429,9 @@ class Robot:
     def hold_state(self) -> dict[str, Any] | None:
         return None
 
+    def wall_side(self, speed: float) -> None:
+        raise CommandError("moving on the wall needs `talos-servo web --ros`")
+
     def climb(self, speed: float) -> None:
         raise CommandError("climbing needs `talos-servo web --ros`")
 

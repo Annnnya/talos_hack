@@ -133,6 +133,8 @@ export type ClientMessage =
   | { type: "hinge"; rate: number }
   /** Climb speed (m/s, + up, 0 stops), ROS only. Re-send while held. */
   | { type: "climb"; speed: number }
+  /** Sideways speed on the wall (m/s, + left, 0 stops), ROS only. Re-send while held. */
+  | { type: "wall_side"; speed: number }
   /** Hinge current hold on/off with its setpoint (A), ROS only. */
   | { type: "hinge_hold"; enabled: boolean; setpoint: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };

@@ -96,7 +96,7 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
 
 # Client messages that change nothing the UI shows. The browser re-sends drive
 # while a button is held, so a state broadcast per message would flood it.
-QUIET_COMMANDS = frozenset({"drive", "hinge", "climb"})
+QUIET_COMMANDS = frozenset({"drive", "hinge", "climb", "wall_side"})
 # Client messages that ask the mode node for a mode change -> backend method.
 MODE_COMMANDS = {"wall_nearby": "wall_nearby", "release": "release_walls"}
 
@@ -156,6 +156,16 @@ def _dispatch(
             raise CommandError(f"setpoint must be 0 or more, got {setpoint}")
         setpoint = min(setpoint, controller.config.hinge_hold.max_current_a)
         return lambda: controller.hinge_hold(enabled, setpoint)
+    if kind == "wall_side":
+        if not ros:
+            raise CommandError(
+                "moving on the wall needs `talos-servo web --ros`"
+            )
+        speed = _finite(msg, "speed")
+        error = climb_error(controller.robot_status().mode, speed)
+        if error:
+            raise CommandError(error)
+        return lambda: controller.wall_side(speed)
     if kind == "climb":
         if not ros:
             raise CommandError("climbing needs `talos-servo web --ros`")
