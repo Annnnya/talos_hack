@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CameraView from "@/components/CameraView";
 import ClimbPanel from "@/components/ClimbPanel";
 import HingePanel from "@/components/HingePanel";
 import HoldPanel from "@/components/HoldPanel";
@@ -184,6 +185,8 @@ export default function Home() {
           STOP is on: the robot ignores every input until you release it.
         </p>
       )}
+
+      {ros && connected && <CameraView />}
 
       <div className="flex flex-1 items-center justify-center">
         <Joystick

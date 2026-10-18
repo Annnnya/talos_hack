@@ -515,3 +515,24 @@ def test_state_reports_the_platform_tilt(robot, monkeypatch):
     ):
         ws.receive_json()
         assert ws.receive_json()["tilt"] == {"roll_deg": -1.5, "pitch_deg": 2.0}
+
+
+# --- camera frame (#147) ---------------------------------------------------
+
+JPEG = b"\xff\xd8 fake jpeg \xff\xd9"
+
+
+def test_camera_without_a_frame_is_no_content(client):
+    response = client.get("/api/camera.jpg")
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_camera_serves_the_latest_frame_uncached(robot, monkeypatch):
+    monkeypatch.setattr(robot, "camera_frame", lambda: JPEG)
+    with TestClient(create_app(robot)) as client:
+        response = client.get("/api/camera.jpg")
+    assert response.status_code == 200
+    assert response.content == JPEG
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["cache-control"] == "no-store"

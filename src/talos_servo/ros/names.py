@@ -62,6 +62,9 @@ ACTIVE_INPUT_TOPIC = f"{ROBOT_NS}/active_input"
 # this, with an orientation quaternion (#91).
 IMU_DATA_TOPIC = "/imu/data"
 
+# JPEG frames from the camera node.
+CAMERA_IMAGE_TOPIC = "/camera/image/compressed"
+
 # Late subscribers (a UI that starts after the node) still get the last value.
 LATCHED = QoSProfile(
     depth=1,
