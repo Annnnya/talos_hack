@@ -149,6 +149,15 @@ ros2 topic echo /dynamic_joint_states                 # effort = current
 
 The hinge does not move at startup: send a new goal to move it.
 
+To open or close the hinge with the wheels rolling along, publish a rate in
+rad/s (positive opens) to the expansion node (#76), started by
+`pixi run -e ros robot`. Release STOP first. Details are in
+[docs/ros2_control.md](docs/ros2_control.md#opening-and-closing-the-hinge-76).
+
+```
+ros2 topic pub -r 10 /expansion/rate std_msgs/msg/Float64 "{data: 0.1}"
+```
+
 ### Robot model (#64)
 
 `description/talos.urdf.xacro` is the robot for ROS: the `bend` hinge, the
@@ -329,6 +338,8 @@ base:
 | `/robot/mode`, `/robot/mode_reason` | `std_msgs/String` | out: latched |
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
+| `/robot/hinge_motion` | `std_srvs/SetBool` | free: wheels to the expansion node |
+| `/expansion/rate` | `std_msgs/Float64` | in: open (+) or close (-) the hinge, rad/s |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
 | `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
@@ -439,8 +450,9 @@ Python in `talos_servo.modes`.
 | any | release (`/robot/release`) | `free` |
 
 - Controllers per mode come from `modes.controllers` in `config/robot.yaml`:
-  `mecanum_drive_controller` in `free` and `aligning`, none yet in
-  `clamping` and `climbing` (#76, #92), so the base stops there.
+  `mecanum_drive_controller` in `free` and `aligning`,
+  `wheel_velocity_controller` for the expansion node in `clamping` and none
+  yet in `climbing` (#92), so the base stops there.
   The node diffs the new mode's set against the controllers
   controller_manager reports as active, and a switch that controller_manager
   rejects keeps the old mode. Every second it also puts the active
@@ -452,6 +464,10 @@ Python in `talos_servo.modes`.
   instead.
 - In `clamping` and `climbing` STOP stops the wheels but the hinge keeps
   holding the walls.
+- `/robot/hinge_motion` (`std_srvs/SetBool`) is for the expansion node: in
+  `free` it swaps `mecanum_drive_controller` for `wheel_velocity_controller`
+  while the hinge moves. Refused outside `free` and `clamping` and while
+  STOP is on.
 
 ```
 ros2 topic echo /robot/mode
