@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 import types
 
 import pytest
-from conftest import SMALL, config, wait_for
+from conftest import BASE, SMALL, config, wait_for
 from fastapi.testclient import TestClient
 
 from talos_servo import cli
-from talos_servo.robot import Robot
+from talos_servo.robot import CommandError, Robot
 from talos_servo.web import server
 from talos_servo.web.server import create_app
 
@@ -52,6 +53,9 @@ def test_initial_state_lists_enabled_joints(client):
     assert [s["name"] for s in msg["servos"]] == ["bend", "wheel"]
     assert [s["control"] for s in msg["servos"]] == ["position", "speed"]
     assert msg["limits"]["speed_max"] == 500
+    # SMALL has no base, so there is nothing to drive.
+    assert msg["limits"]["linear_max"] is None
+    assert msg["limits"]["angular_max"] is None
     assert msg["ros"] is False
     assert all(s["last_command"] is None for s in msg["servos"])
 
@@ -181,6 +185,84 @@ def test_last_client_stop_survives_connection_task_cancel(
             ),
         )
     wait_for(lambda: robot.joints["wheel"].target_speed == 0)
+
+
+def test_last_client_leaving_stops_only_what_the_web_commanded(
+    client, robot, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(robot, "stop_own", lambda **who: calls.append(who))
+    monkeypatch.setattr(
+        robot, "stop_all", lambda **who: pytest.fail("stop_all called")
+    )
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+    wait_for(lambda: calls)
+    assert calls == [{"source": "web"}]
+
+
+# --- drive
+# ------------------------------------------------------------------------
+
+
+class DriveRecorder:
+    """Just enough backend for `_dispatch` to call `drive` on."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[float, ...], dict]] = []
+
+    def drive(self, *velocity: float, **who: object) -> None:
+        self.calls.append((velocity, who))
+
+
+def drive(**velocity: object) -> dict:
+    return {"type": "drive", "vx": 0.0, "vy": 0.0, "wz": 0.0} | velocity
+
+
+def test_drive_passes_velocity_and_sender():
+    backend = DriveRecorder()
+    msg = drive(vx=0.1, vy=-0.2, wz=0.3)
+    server._dispatch(backend, msg, "abc", ros=True)()
+    assert backend.calls == [
+        ((0.1, -0.2, 0.3), {"source": "web", "client": "abc"})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("msg", "error"),
+    [
+        ({"type": "drive", "vy": 0.0, "wz": 0.0}, KeyError),
+        (drive(vx="fast"), ValueError),
+        (drive(vy=None), TypeError),
+        (drive(wz=math.nan), CommandError),
+        (drive(vx=math.inf), CommandError),
+    ],
+)
+def test_bad_drive_is_rejected(msg, error):
+    backend = DriveRecorder()
+    with pytest.raises(error):
+        server._dispatch(backend, msg, ros=True)
+    assert backend.calls == []
+
+
+def test_drive_without_ros_is_an_error(client, robot):
+    # The base is shared through twist_mux, so there is no direct drive path.
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json(drive(vx=0.1))
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+    assert robot.joints["wheel"].target_speed == 0
+
+
+def test_state_reports_the_base_speed_limits(sdk):
+    robot = Robot(sdk.bus(), config(BASE))
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        limits = ws.receive_json()["limits"]
+    assert (limits["linear_max"], limits["angular_max"]) == (0.2, 1.0)
 
 
 def test_server_shutdown_closes_the_port(sdk, robot):
