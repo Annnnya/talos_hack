@@ -35,6 +35,10 @@ WALL_SIDE_TOPIC = "/expansion/side"
 HOLD_SETPOINT_TOPIC = "/hinge_hold/setpoint"
 HOLD_ENABLE_SERVICE = "/hinge_hold/enable"
 HOLD_STATE_TOPIC = "/hinge_hold/state"
+# Level loop (#82) in the expansion node: on and off (std_srvs/SetBool) and
+# its state as JSON (std_msgs/String).
+LEVEL_ENABLE_SERVICE = "/level/enable"
+LEVEL_STATE_TOPIC = "/level/state"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
 

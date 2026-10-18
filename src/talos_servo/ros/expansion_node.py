@@ -28,6 +28,11 @@ holds. STOP pauses the clamp and releasing STOP goes on. A rate on
 `/expansion/rate` while clamping cancels the clamp: the operator takes over
 until clamping is entered again.
 
+Level (#82, `talos_servo.level`): with `/level/enable` on, the platform roll
+and pitch from `/imu/data` trim the wheel pairs while on the wall, also at
+rest, so a clamped robot levels itself. It stops with STOP, outside the wall
+modes and on a tilt fault. `/level/state` reports it as JSON.
+
 Run with `pixi run -e ros expansion-node`.
 """
 
@@ -44,13 +49,15 @@ from collections.abc import Callable, Sequence
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from rclpy.task import Future
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Bool, Float32, Float64, Float64MultiArray, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.clamp import Clamp, Outcome
+from talos_servo.climb import wheel_speeds as climb_wheel_speeds
 from talos_servo.config import ConfigError, RobotConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
@@ -60,6 +67,7 @@ from talos_servo.defaults import (
 )
 from talos_servo.expansion import STILL, Expansion, Wheels
 from talos_servo.hinge_hold import HingeHold
+from talos_servo.level import NO_TRIM, Leveler, Trim
 from talos_servo.modes import (
     CLIMB_MODES,
     HINGE_MODES,
@@ -67,6 +75,8 @@ from talos_servo.modes import (
     SWAP_MODES,
     Mode,
 )
+from talos_servo.orientation import platform_tilt
+from talos_servo.ros.imu_convert import COVARIANCE_NOT_PROVIDED
 from talos_servo.ros.names import (
     CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
@@ -75,7 +85,10 @@ from talos_servo.ros.names import (
     HOLD_ENABLE_SERVICE,
     HOLD_SETPOINT_TOPIC,
     HOLD_STATE_TOPIC,
+    IMU_DATA_TOPIC,
     LATCHED,
+    LEVEL_ENABLE_SERVICE,
+    LEVEL_STATE_TOPIC,
     MODE_TOPIC,
     NO_WALL_SERVICE,
     STOP_LOCK_TOPIC,
@@ -154,6 +167,15 @@ class ExpansionNode(Node):
         )
         self._hold_note: str | None = None
         self._ticks = 0
+        # Level loop (#82): platform roll and pitch (rad) from the IMU with
+        # the mount taken off, and when they came.
+        self.leveler = Leveler(config.level)
+        self.imu_rpy = config.imu.rpy
+        self._level_active = False
+        self._level_note: str | None = None
+        self._tilt: tuple[float, float] | None = None
+        self._tilt_at: float | None = None
+        self._trim: Trim = NO_TRIM
 
         self.hinge_pub = self.create_publisher(
             Float64MultiArray, HINGE_COMMANDS_TOPIC, QUEUE_DEPTH
@@ -200,6 +222,13 @@ class ExpansionNode(Node):
         )
         self.hold_state_pub = self.create_publisher(
             String, HOLD_STATE_TOPIC, QUEUE_DEPTH
+        )
+        self.create_subscription(
+            Imu, IMU_DATA_TOPIC, self.on_imu, qos_profile_sensor_data
+        )
+        self.create_service(SetBool, LEVEL_ENABLE_SERVICE, self.on_level_enable)
+        self.level_state_pub = self.create_publisher(
+            String, LEVEL_STATE_TOPIC, QUEUE_DEPTH
         )
         self.create_timer(self.period_s, self.tick)
 
@@ -320,6 +349,92 @@ class ExpansionNode(Node):
                 )
             )
 
+    # --- level loop (#82) --------------------------------------------------
+    def on_imu(self, msg: Imu) -> None:
+        # The raw IMU topic has no orientation; only the filtered one counts.
+        if msg.orientation_covariance[0] == COVARIANCE_NOT_PROVIDED:
+            return
+        q = msg.orientation
+        self._tilt = platform_tilt((q.x, q.y, q.z, q.w), self.imu_rpy)
+        self._tilt_at = self._now()
+
+    def tilt(self) -> tuple[float, float] | None:
+        """Platform roll and pitch (rad), None while the IMU is quiet."""
+        if self._tilt_at is None or self._tilt is None:
+            return None
+        if self._now() - self._tilt_at > self.leveler.settings.imu_timeout_s:
+            return None
+        return self._tilt
+
+    @property
+    def level_active(self) -> bool:
+        return self._level_active
+
+    def on_level_enable(
+        self, request: SetBool.Request, response: SetBool.Response
+    ) -> SetBool.Response:
+        error = None
+        tilt = self.tilt()
+        if not request.data:
+            self._stop_level("turned off")
+        elif self._mode not in CLIMB_MODES:
+            error = "press wall nearby first"
+        elif tilt is None:
+            error = "no orientation from the IMU"
+        elif self.leveler.tilt_fault(*tilt) is not None:
+            error = "the platform tilts past the limit"
+        else:
+            self._level_active = True
+            self._level_note = None
+            self.get_logger().info("level on")
+        response.success = error is None
+        response.message = error or (
+            "level on" if request.data else "level off"
+        )
+        return response
+
+    def _stop_level(self, why: str) -> None:
+        if self._level_active:
+            self._level_active = False
+            self.get_logger().info(f"level off: {why}")
+        self._level_note = why
+        self._trim = NO_TRIM
+
+    def level_tick(self) -> None:
+        """Update the trims, stop on a tilt fault and report the state."""
+        tilt = self.tilt()
+        fault = None
+        if tilt is not None:
+            fault = self.leveler.tilt_fault(*tilt)
+        if self._level_active and self._mode not in CLIMB_MODES:
+            self._stop_level(f"mode {self._mode.value if self._mode else '?'}")
+        if self._level_active and fault is not None:
+            self._stop_level(fault)
+            self.get_logger().warning(f"level: {fault}, wheels stopped")
+            self._still(fault)
+        if self._level_active and tilt is not None:
+            self._trim = self.leveler.trim(*tilt)
+        else:
+            self._trim = NO_TRIM
+        if self._ticks % HOLD_STATE_EVERY == 0:
+            roll, pitch = tilt if tilt is not None else (math.nan, math.nan)
+            self.level_state_pub.publish(
+                String(
+                    data=json.dumps(
+                        {
+                            "active": self._level_active,
+                            "imu_ok": tilt is not None,
+                            "roll_deg": _deg(roll),
+                            "pitch_deg": _deg(pitch),
+                            "front_rear_m_s": round(self._trim.front_rear, 4),
+                            "left_right_m_s": round(self._trim.left_right, 4),
+                            "fault": fault,
+                            "note": self._level_note,
+                        }
+                    )
+                )
+            )
+
     def on_climb(self, msg: Float64) -> None:
         speed = float(msg.data)
         if not math.isfinite(speed):
@@ -350,23 +465,13 @@ class ExpansionNode(Node):
             return 0.0
         return self._side
 
-    def climb_wheels(self, speed: float, side: float = 0.0) -> Wheels:
-        """Wheel speeds in rad/s on the wall: up is the front pair one way
-        and the rear pair the other; sideways (+ left) is the ground
-        pattern (`mecanum.wheel_speeds`) with the rear pair flipped too.
-        Scaled down together so no wheel passes the climb speed cap."""
-        # The rear pair faces the other wall, so it turns the other way for
-        # sideways too (found live: the ground pattern twists the robot).
-        surface = (
-            speed - side,
-            speed + side,
-            -speed - side,
-            -speed + side,
+    def climb_wheels(
+        self, speed: float, side: float = 0.0, trim: Trim = NO_TRIM
+    ) -> Wheels:
+        """Wheel speeds (rad/s) on the wall, see `talos_servo.climb`."""
+        return climb_wheel_speeds(
+            speed, side, self.wheel_radius_m, self.max_climb, trim
         )
-        largest = max(abs(v) for v in surface)
-        scale = min(1.0, self.max_climb / largest) if largest else 1.0
-        fl, fr, rl, rr = (v * scale / self.wheel_radius_m for v in surface)
-        return (fl, fr, rl, rr)
 
     def on_joint_state(self, msg: JointState) -> None:
         names = list(msg.name)
@@ -438,10 +543,11 @@ class ExpansionNode(Node):
             self.tick_clamp(self._clamp)
             return
         self.hold_tick()
+        self.level_tick()
         rate = self.requested_rate()
         climb = self.requested_climb()
         side = self.requested_side()
-        if (climb or side) and not rate:
+        if (climb or side or self._trim) and not rate:
             self.climb_tick(climb, side)
             return
         why = self.blocked() if rate else None
@@ -529,7 +635,7 @@ class ExpansionNode(Node):
             self._ask(True)
             self._still("waiting for the wheel controller")
             return
-        self._send_wheels(self.climb_wheels(speed, side))
+        self._send_wheels(self.climb_wheels(speed, side, self._trim))
         self._moving = True
         self._note(None)
 
@@ -605,6 +711,10 @@ class ExpansionNode(Node):
         if self._granted and self.hinge_motion_client.service_is_ready():
             self.call_hinge_motion(False)
             self._granted = False
+
+
+def _deg(rad: float) -> float | None:
+    return round(math.degrees(rad), 2) if math.isfinite(rad) else None
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
