@@ -90,6 +90,23 @@ def test_ctrl_c_still_sends_a_stop():
     assert sent[-1] == teleop.STOPPED
 
 
+def test_drive_that_fails_partway_still_gets_a_stop():
+    # A drive() that raises may already have set some wheel speeds.
+    clock = FakeClock()
+    sent: list[tuple[float, float, float]] = []
+
+    def drive(*v: float) -> None:
+        sent.append(v)
+        if len(sent) == 1:
+            raise OSError("serial write failed")
+
+    with pytest.raises(OSError):
+        teleop.run(
+            drive, Keys(["w"], clock), linear=0.1, angular=0.5, clock=clock
+        )
+    assert sent == [(0.1, 0.0, 0.0), teleop.STOPPED]
+
+
 def test_terminal_keys_need_a_terminal(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
     with pytest.raises(RuntimeError), teleop.terminal_keys():

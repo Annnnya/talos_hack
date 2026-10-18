@@ -82,8 +82,10 @@ def run(
             if clock() - last_key_at > KEY_TIMEOUT_S:
                 command = STOPPED
             if command != STOPPED or sent != STOPPED or stop_now:
-                drive(*command)
+                # Set first: a drive() that raises partway may already have
+                # moved some wheels, so `finally` must still stop them.
                 sent = command
+                drive(*command)
             tick()
     finally:
         if sent != STOPPED:
