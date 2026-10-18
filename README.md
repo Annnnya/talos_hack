@@ -6,6 +6,18 @@ driven by Feetech STS/SMS serial bus servos on one bus, plus an MPU6050 IMU.
 Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything
 goes through PRs.
 
+## Start the robot
+
+On the Pi, from the repo folder (no arguments: the servo port is found by
+itself, the IMU chain starts too):
+
+```
+pixi run -e ros robot
+```
+
+Then open `http://<pi>:8000`, press **Release STOP** and drive. Details
+and options are under "Run the robot" below.
+
 ## Architecture
 
 **One rule: one `Robot` owns the servo bus, one node owns the `Robot`.**
@@ -239,8 +251,8 @@ mux_status and the web UI.
 
 ```
 cd web && npm install && npm run build      # once, Node 20+
-pixi run -e ros robot                       # port from $TALOS_SERVO_PORT
-pixi run -e ros robot port:=/dev/ttyACM0 camera:=true imu:=true
+pixi run -e ros robot                       # finds the servo port itself
+pixi run -e ros robot camera:=true          # plus the camera
 ```
 
 Open `http://<pi>.local:8000` and press **Release STOP**: STOP is on at
@@ -249,10 +261,10 @@ Ctrl+C stops everything, and the wheels with it.
 
 | Option | Default | Adds |
 | --- | --- | --- |
-| `port:=` | `$TALOS_SERVO_PORT` | servo serial port |
+| `port:=` | found | servo port: `$TALOS_SERVO_PORT`, else the one adapter under `/dev/serial/by-id`, else `/dev/ttyACM0` |
 | `web:=` | `true` | web UI on :8000 |
 | `camera:=` | `false` | camera node |
-| `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
+| `imu:=` | `true` | IMU node, Madgwick filter, EKF (`false` on a bench without the IMU) |
 | `ros2_control:=` | `true` | `false`: the old robot node drives instead |
 | `viz:=` | `false` | EKF for the live robot in RViz (see below) |
 
@@ -368,7 +380,7 @@ base:
 | `/robot/no_wall` | `std_srvs/Trigger` | clamping: no wall found, mode kept |
 | `/robot/bend/calibrate/<step>` | `std_srvs/Trigger` | hinge calibration, used by `talos-servo calibrate-bend` |
 | `/expansion/rate` | `std_msgs/Float64` | in: open (+) or close (-) the hinge, rad/s |
-| `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
+| `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered (the web page reads the tilt from `/imu/data`) |
 | `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
 | `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
 | `/camera/take_snapshot` | `std_srvs/Trigger` | capture and publish one snapshot |
@@ -586,15 +598,33 @@ Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
 `sudo raspi-config` (Interface Options, I2C), reboot, and check that
 `i2cdetect -y 1` shows `68`.
 
+`pixi run -e ros robot` starts the whole chain. One piece at a time:
+
 ```
 pixi run -e ros imu-node     # keep the robot still while the gyro zeroes
 pixi run -e ros imu-filter   # orientation, config/imu_filter.yaml
-pixi run -e ros imu-tf       # where the IMU sits (zeros until mounted)
+pixi run -e ros imu-tf       # base_link -> imu_link without ros2_control
 pixi run -e ros ekf          # fuses /odom and gyro, config/ekf.yaml
 ```
 
 The EKF uses wheel velocities and the gyro yaw rate only: mecanum wheels slip,
 and the IMU has no magnetometer.
+
+### Where the IMU sits (#91)
+
+The board lies flat on the central platform, x axis forward, so `imu` in
+`config/robot.yaml` is all zeros. The URDF `imu_joint` reads it, so under
+ros2_control robot_state_publisher publishes `base_link -> imu_link`; the
+old robot node path runs `static_transform_publisher` with the same values.
+If the board is ever moved, measure `xyz` (m, from the hinge axis centre)
+and `rpy` (rad, the chip's axes against x forward, y left, z up) and put
+them there.
+
+The joystick page shows the platform roll and pitch from `/imu/data` with
+the mount taken off ("Platform: pitch, roll"). Check it with the robot flat
+on a level floor: both within 1 deg of zero. Lifting the front must raise
+the pitch reading; if it drops, the board is mounted backwards, so set
+`rpy: [0, 0, 3.1416]`.
 
 ## Camera
 
