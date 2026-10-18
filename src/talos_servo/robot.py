@@ -29,12 +29,13 @@ import math
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from talos_servo.bus import (
     DEFAULT_ACCELERATION,
     MAX_ACCELERATION,
+    MAX_POSITION,
     MAX_SPEED,
     MODE_POSITION,
     MODE_WHEEL,
@@ -431,6 +432,68 @@ class Robot:
 
             self._command(j, apply)
 
+    def read_position(self, joint: str) -> tuple[int, bool]:
+        """Read a joint now, not on its round robin turn: its position in
+        joint steps and whether it is moving. Raises ServoError."""
+        with self._lock:
+            j = self._get(joint)
+            self._command(j, lambda: self._read(j))
+            return j.position, j.moving
+
+    # --- position limits -------------------------------------------------
+    def set_position_limits(
+        self, joint: str, min_pos: int, max_pos: int
+    ) -> None:
+        """Clamp the joint's moves to min_pos..max_pos instead of the config
+        limits, e.g. to calibrate the hinge over the whole servo turn."""
+        if not 0 <= min_pos <= max_pos <= MAX_POSITION:
+            raise CommandError(
+                f"limits must satisfy 0 <= min <= max <= {MAX_POSITION}, "
+                f"got {min_pos}..{max_pos}"
+            )
+        with self._lock:
+            j = self._position_joint(joint)
+            j.min_pos, j.max_pos = min_pos, max_pos
+
+    def reset_position_limits(self, joint: str) -> None:
+        """Back to the config limits."""
+        with self._lock:
+            j = self._position_joint(joint)
+            cfg = self._configs[joint]
+            j.min_pos, j.max_pos = cfg.min_pos, cfg.max_pos
+
+    def update_hinge(self, config: RobotConfig) -> None:
+        """Take the hinge model, converter and limits from `config` (the
+        same robot with a new bend calibration). Everything else stays."""
+        model, hinge = config.model, config.hinge
+        if model is None or hinge is None:
+            raise CommandError("the new config has no hinge")
+        name = model.hinge_joint
+        new = next((c for c in config.joints if c.name == name), None)
+        with self._lock:
+            old = self._configs.get(name)
+            if (
+                new is None
+                or old is None
+                or (new.id, new.inverted) != (old.id, old.inverted)
+            ):
+                raise CommandError(
+                    f"{name} changed in the robot config since start: "
+                    "restart the robot"
+                )
+            self._configs[name] = new
+            self.config = replace(
+                self.config,
+                model=model,
+                hinge=hinge,
+                bend_calibration=config.bend_calibration,
+                joints=tuple(
+                    new if c.name == name else c for c in self.config.joints
+                ),
+            )
+            j = self.joints[name]
+            j.min_pos, j.max_pos = new.min_pos, new.max_pos
+
     # --- helpers (call with _lock held) ----------------------------------
     def _speed_joints(self) -> list[str]:
         return [name for name, c in self._configs.items() if c.control == SPEED]
@@ -617,6 +680,12 @@ class Robot:
 
     def _position_from_bus(self, j: Joint, raw: int) -> int:
         return joint_position(raw, self._configs[j.name].inverted)
+
+    def _position_joint(self, joint: str) -> Joint:
+        j = self._get(joint)
+        if j.control != POSITION:
+            raise CommandError(f"{joint} is a speed joint, it has no limits")
+        return j
 
     def _get(self, joint: str) -> Joint:
         try:

@@ -12,6 +12,13 @@ from types import MappingProxyType
 
 import yaml
 
+from talos_servo.bend_calibration import (
+    BendCalibration,
+    CalibrationError,
+    apply_calibration,
+    calibration_path,
+    load_calibration,
+)
 from talos_servo.bus import (
     MAX_POSITION,
     MAX_SERVO_ID,
@@ -178,13 +185,20 @@ class RobotConfig:
     # The hinge angle converter, built on load from model.bend_flat_steps;
     # None without one.
     hinge: Hinge | None = field(default=None, compare=False)
+    # The saved bend calibration in use (#84), None when the model values
+    # from robot.yaml apply.
+    bend_calibration: BendCalibration | None = None
 
     @property
     def enabled_joints(self) -> tuple[JointConfig, ...]:
         return tuple(j for j in self.joints if j.enabled)
 
 
-def parse_config(data: dict) -> RobotConfig:
+def parse_config(
+    data: dict, calibration: BendCalibration | None = None
+) -> RobotConfig:
+    """The robot config from parsed YAML. `calibration` overrides the
+    hinge flat position and min angle."""
     raw_joints = data.get("joints") or {}
     if not isinstance(raw_joints, dict) or not raw_joints:
         raise ConfigError("config needs at least one entry under 'joints'")
@@ -223,7 +237,11 @@ def parse_config(data: dict) -> RobotConfig:
                 raw_model, config.base, {j.name: j for j in joints}
             ),
         )
+        if calibration is not None:
+            config = _calibrate(config, calibration)
         config = _clamp_hinge(config)
+    elif calibration is not None:
+        raise ConfigError("a bend calibration needs a model section")
     raw_expansion = data.get("expansion")
     if raw_expansion is not None:
         config = replace(
@@ -265,12 +283,42 @@ def _clamp_hinge(config: RobotConfig) -> RobotConfig:
     )
 
 
-def load_config(path: str | Path) -> RobotConfig:
+def _calibrate(config: RobotConfig, cal: BendCalibration) -> RobotConfig:
+    model = config.model
+    assert model is not None
+    joint = next(j for j in config.joints if j.name == model.hinge_joint)
+    return replace(
+        config,
+        model=apply_calibration(model, joint, cal),
+        bend_calibration=cal,
+    )
+
+
+def load_config(
+    path: str | Path, calibration: str | Path | None = None
+) -> RobotConfig:
+    """The robot config at `path`, with the bend calibration from
+    `calibration` (default: see `bend_calibration.calibration_path`) if
+    that file exists."""
+    data = read_config_data(path)
+    cal_path = calibration_path(path, calibration)
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        cal = load_calibration(cal_path)
+        return parse_config(data, cal)
+    except CalibrationError as exc:
+        raise ConfigError(
+            f"bend calibration {cal_path}: {exc}. Delete the file to fall "
+            "back to the model values in the robot config, then run "
+            "`talos-servo calibrate-bend` again"
+        ) from exc
+
+
+def read_config_data(path: str | Path) -> dict:
+    """The robot config file as parsed YAML."""
+    try:
+        return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except OSError as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from exc
-    return parse_config(data)
 
 
 def _parse_joint(name: str, raw: dict) -> JointConfig:

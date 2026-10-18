@@ -33,6 +33,16 @@ if TYPE_CHECKING:
 
 # Opening angle when the robot lies flat.
 FLAT_RAD = math.pi
+# A reading this far outside the hinge step range is not a real angle (the
+# servo wrapped past flat or misread), so it is reported as unknown.
+READ_MARGIN_STEPS = 64
+
+
+def alpha_at(steps: int, flat_steps: int, leg_gear_ratio: float) -> float:
+    """Opening angle (rad) at `steps` with flat at `flat_steps`, both in
+    joint steps."""
+    per_step = RAD_PER_STEP * alpha_per_servo_rad(leg_gear_ratio)
+    return FLAT_RAD + (steps - flat_steps) * per_step
 
 
 class HingeRangeError(ValueError):
@@ -45,6 +55,7 @@ class Hinge:
 
     def __init__(self, model: ModelConfig, flat_steps: int) -> None:
         self.joint = model.hinge_joint
+        self._gear = model.leg_gear_ratio
         self.min_rad = model.bend_min_rad
         self.max_rad = model.bend_max_rad
         self.flat_steps = flat_steps
@@ -64,7 +75,7 @@ class Hinge:
 
     def alpha(self, steps: int) -> float:
         """Opening angle (rad) at a servo position in joint steps."""
-        return FLAT_RAD + (steps - self.flat_steps) * self._rad_per_step
+        return alpha_at(steps, self.flat_steps, self._gear)
 
     def alpha_rate(self, step_speed: int) -> float:
         """Opening speed (rad/s) at a servo speed in steps/s."""
