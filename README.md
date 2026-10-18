@@ -254,7 +254,10 @@ uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
 Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
-joint, and so does the last browser disconnecting. For UI work with hot reload,
+joint, and so does the last browser disconnecting. `/` has a STOP ALL button
+too and keeps its own connection. Leaving a page closes its connection: if no
+other browser is open, that runs STOP ALL, which also stops wheels the CLI or
+a ROS node is driving. For UI work with hot reload,
 run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
