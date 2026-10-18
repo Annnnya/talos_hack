@@ -50,8 +50,13 @@ def control_nodes(root: Path, config_path: str) -> list[Node]:
     model and controllers from the repo at `root`."""
     # Forward slashes: xacro reads the path inside a Python string literal.
     config = Path(config_path).resolve().as_posix()
+    mappings = {"robot_config": config}
+    model = load_config(config_path).model
+    if model is not None:
+        # The calibrated max fold, which robot.yaml alone does not hold.
+        mappings["bend_min_deg"] = repr(model.bend_min_deg)
     description = xacro.process_file(
-        str(root / XACRO), mappings={"robot_config": config}
+        str(root / XACRO), mappings=mappings
     ).toxml()
     return [
         Node(
