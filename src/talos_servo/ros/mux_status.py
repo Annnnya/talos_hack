@@ -8,6 +8,11 @@ Mirrors the rules of twist_mux so the UIs can show who is in control:
   priority is the highest priority of the locks that are on
 - An input counts when it has not expired and its priority is not below the
   lock priority. The highest priority one drives
+
+Taken from twist_mux 4.5.0 (`TwistMux::hasPriority` and the topic handles
+in `twist_mux.cpp`); re-check these rules when twist_mux is upgraded. Its
+diagnostics only say whether each input is masked and the lock priority,
+not which input drives, so they cannot replace this copy.
 """
 
 from __future__ import annotations
