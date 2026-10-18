@@ -158,7 +158,8 @@ Its config is in `config/ros2_control.yaml`.
   for the EKF. `enable_odom_tf` is false, so the EKF alone publishes
   odom -> base_link.
 - **Modes:** the mode node activates it in `free` and `aligning`.
-  `clamping` and `climbing` list no controllers until #76 and #92, so the
+  `clamping` hands the wheels to `wheel_velocity_controller` for the
+  expansion node (#76). `climbing` lists no controller until #92, so the
   base stops there.
 
 `tests/test_ros2_control_config.py` checks the values against
@@ -186,10 +187,44 @@ ros2 topic echo /odom
 ros2 topic echo /dynamic_joint_states
 ```
 
-`wheel_velocity_controller` (one rad/s value per wheel) is still configured
-for bench tests but not spawned, since it claims the same wheels. Load it by
-hand after deactivating the mecanum controller. It keeps its last command:
-publish zeros to stop.
+`wheel_velocity_controller` (one rad/s value per wheel) is spawned
+inactive, since it claims the same wheels. The mode node switches it in for
+the expansion node (below). It keeps its last command: publish zeros to
+stop.
+
+## Opening and closing the hinge (#76)
+
+`expansion_node.py` (`pixi run -e ros expansion-node`, started by
+`pixi run -e ros robot`) moves the hinge and turns the wheels with it, so
+they roll instead of dragging. The math is in `talos_servo.expansion` and
+[hinge_kinematics.md](hinge_kinematics.md).
+
+- **Input:** `std_msgs/Float64` on `/expansion/rate`, the opening speed in
+  rad/s: positive expands, negative collapses, 0 stops. Repeat it at least
+  every `expansion.command_timeout_s` (0.5 s) or the motion stops. It is
+  capped at `expansion.max_rate_rad_s` (0.15).
+- **Output:** small hinge goal steps on `/bend_position_controller/commands`
+  and the four wheel speeds on `/wheel_velocity_controller/commands`, at
+  `expansion.rate_hz`. The bridge moves the hinge servo at one fixed speed
+  (`DEFAULT_MOVE_SPEED`, about 0.31 rad/s), so the goal steps set the hinge
+  speed, and `max_rate_rad_s` must stay below it. If the hinge falls more
+  than `max_lead_rad` behind its goal (a wall, a stall), the goal and the
+  wheels wait for it.
+- **Limits:** no expanding at `model.bend_max_deg`, no collapsing at
+  `model.bend_min_deg`, and nothing while the hinge angle is unknown.
+- **Modes:** only `free` and `clamping`, never while STOP is on or its beats
+  are missing. Clamping runs `wheel_velocity_controller` anyway. In `free`
+  the node first asks the mode node (`/robot/hinge_motion`) to swap it in
+  for `mecanum_drive_controller` (`modes.hinge_motion`), and gives the
+  wheels back when it stops. Driving the base does nothing meanwhile.
+- **Stopping:** on rate 0, timeout, STOP, a mode change, a limit and exit
+  the wheels get zeros, and the hinge keeps its last goal, so a clamped
+  robot keeps holding.
+
+```
+ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: false}"
+ros2 topic pub -r 10 /expansion/rate std_msgs/msg/Float64 "{data: 0.1}"
+```
 
 ## Open points
 

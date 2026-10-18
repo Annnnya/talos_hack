@@ -1,8 +1,7 @@
 # Controllers for the whole robot (description/talos.urdf.xacro), started by
 # launch/robot.launch.py and launch/ros2_control.launch.py. The base drives
 # through mecanum_drive_controller (#65), the hinge through a forward command
-# controller until the expansion controller (#76) exists. See
-# docs/ros2_control.md.
+# controller fed by the expansion node (#76). See docs/ros2_control.md.
 #
 # The mecanum geometry and limits copy the base section of config/robot.yaml;
 # tests/test_ros2_control_config.py checks that they match.
@@ -16,8 +15,8 @@ controller_manager:
     mecanum_drive_controller:
       type: mecanum_drive_controller/MecanumDriveController
 
-    # Bench only, not spawned: it claims the wheels like the mecanum one.
-    # Load it by hand after deactivating mecanum_drive_controller.
+    # Spawned inactive: it claims the wheels like the mecanum one. The mode
+    # node swaps it in for clamping and while the hinge moves (#76).
     wheel_velocity_controller:
       type: velocity_controllers/JointGroupVelocityController
 

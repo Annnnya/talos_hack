@@ -87,8 +87,8 @@ def test_no_transmission(robot):
     assert robot.find("ros2_control/transmission") is None
 
 
-# Defined for bench use but never spawned: it claims the same wheels as the
-# mecanum controller.
+# Spawned inactive: it claims the same wheels as the mecanum controller, and
+# the mode node switches between the two.
 BENCH_ONLY = {"wheel_velocity_controller"}
 
 

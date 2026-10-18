@@ -61,6 +61,7 @@ MODES = ModesConfig(
         "climbing": ("wall",),
     },
     switch_timeout_s=0.5,
+    hinge_motion=("expand",),
 )
 WAIT = 3.0
 # Discovery plus a few reconcile rounds.
@@ -453,3 +454,73 @@ def test_stop_does_not_wait_for_a_controller_switch(node, cm, listener):
         wait_for(lambda: listener.last() is False, WAIT)
     finally:
         switching.join(WAIT)
+
+
+def hinge_motion(node: ModeNode, wanted: bool) -> SetBool.Response:
+    return node.on_hinge_motion(
+        SetBool.Request(data=wanted), SetBool.Response()
+    )
+
+
+def test_hinge_motion_swaps_the_free_controllers(node, cm):
+    set_stop(node, False)
+    response = hinge_motion(node, True)
+    assert response.success, response.message
+    assert node.hinge_motion
+    assert cm.active == {"expand"}
+    assert node.mode is Mode.FREE
+    response = hinge_motion(node, False)
+    assert response.success, response.message
+    assert cm.active == {"drive"}
+
+
+def test_hinge_motion_in_clamping_keeps_the_controllers(node, cm):
+    node.request(Event.WALL_NEARBY)
+    node.request(Event.ALIGNED)
+    set_stop(node, False)
+    requests = len(cm.requests)
+    response = hinge_motion(node, True)
+    assert response.success, response.message
+    assert cm.active == {"expand"}
+    assert len(cm.requests) == requests
+
+
+def test_hinge_motion_is_refused_while_aligning(node, cm):
+    node.request(Event.WALL_NEARBY)
+    set_stop(node, False)
+    response = hinge_motion(node, True)
+    assert not response.success
+    assert "aligning" in response.message
+    assert not node.hinge_motion
+
+
+def test_hinge_motion_is_refused_while_stopped(node, cm):
+    response = hinge_motion(node, True)
+    assert not response.success
+    assert "STOP" in response.message
+    assert cm.active == {"drive"}
+
+
+def test_rejected_hinge_swap_keeps_the_base(node, cm):
+    set_stop(node, False)
+    cm.ok = False
+    response = hinge_motion(node, True)
+    assert not response.success
+    assert not node.hinge_motion
+    assert cm.active == {"drive"}
+
+
+def test_stop_ends_hinge_motion(node, cm):
+    set_stop(node, False)
+    hinge_motion(node, True)
+    set_stop(node, True)
+    assert not node.hinge_motion
+    wait_for(lambda: cm.active == {"drive"}, RECONCILE_WAIT)
+
+
+def test_mode_change_ends_hinge_motion(node, cm):
+    set_stop(node, False)
+    hinge_motion(node, True)
+    node.request(Event.WALL_NEARBY)
+    assert not node.hinge_motion
+    assert cm.active == {"drive", "align"}

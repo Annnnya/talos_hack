@@ -2,9 +2,10 @@
 
 Starts what driving needs: the ros2_control stack (robot_state_publisher,
 controller_manager, mecanum_drive_controller for the base, #65) with the
-hardware bridge on the servo port, the mode node (STOP lock), twist_mux,
-mux_status and the web server. The camera and the IMU chain (IMU node,
-Madgwick filter, IMU transform, EKF) are opt-in.
+hardware bridge on the servo port, the mode node (STOP lock), the expansion
+node (hinge, #76), twist_mux, mux_status and the web server. The camera
+and the IMU chain (IMU node, Madgwick filter, IMU transform, EKF) are
+opt-in.
 
     pixi run -e ros robot
     pixi run -e ros robot camera:=true imu:=true port:=/dev/ttyACM0
@@ -84,8 +85,11 @@ def processes(
             *("talos-robot-ros", "--port", port, "--config", config)
         ]
         mux_out = "/cmd_vel"
+    cmds["mode_node"] = ["talos-mode-ros", "--config", config]
+    if ros2_control:
+        # Feeds the hinge and wheel controllers, so only with ros2_control.
+        cmds["expansion_node"] = ["talos-expansion-ros", "--config", config]
     cmds |= {
-        "mode_node": ["talos-mode-ros", "--config", config],
         "twist_mux": [
             *("ros2", "run", "twist_mux", "twist_mux", "--ros-args"),
             *("--params-file", twist_mux, "-r", f"cmd_vel_out:={mux_out}"),
