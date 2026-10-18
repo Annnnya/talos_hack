@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 from conftest import BASE, SMALL, FakeClock, config
-from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE
+from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE, SMS_STS_TORQUE_ENABLE
 
-from talos_servo.bus import MAX_POSITION, MODE_WHEEL, _speed_packet
+from talos_servo.bus import MAX_POSITION, MODE_WHEEL, ServoError, _speed_packet
 from talos_servo.robot import (
+    FAULT_CLEAR_S,
     RETRY_OFFLINE_EVERY,
     SOURCE_ROBOT,
     CommandError,
@@ -267,3 +268,135 @@ def test_last_command_age_grows(robot, clock):
         "client": None,
         "age": 12.3,
     }
+
+
+# --- safe state --------------------------------------------------------------
+
+
+def torque_writes(sdk) -> list[tuple]:
+    return [
+        c
+        for c in sdk.handler.calls
+        if c[0] == "write1" and c[2] == SMS_STS_TORQUE_ENABLE
+    ]
+
+
+def move_calls(sdk) -> list[tuple]:
+    return [c for c in sdk.handler.calls if c[0] == "move"]
+
+
+def lose_bend(sdk, robot) -> None:
+    """Make bend stop answering and tick until the round robin reads it."""
+    sdk.fail[("read_block", 1)] = (COMM_RX_TIMEOUT, 0)
+    for _ in robot.joints:
+        robot.tick()
+    assert not robot.joints["bend"].online
+
+
+def test_wheel_write_error_brakes_and_latches(sdk, robot):
+    robot.spin("wheel", 300)
+    robot.tick()
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    robot.tick()
+    assert "wheel write error" in robot.fault
+    assert robot.joints["wheel"].target_speed == 0
+    del sdk.fail[("sync_write", 254)]
+    robot.tick()
+    assert speed_of(last_speeds(sdk)[2]) == 0
+    with pytest.raises(CommandError, match="safe state"):
+        robot.spin("wheel", 300)
+    assert torque_writes(sdk) == []
+
+
+def test_stops_are_accepted_while_latched(sdk, base):
+    base.hold_safe("test")
+    base.drive(0.0, 0.0, 0.0)
+    base.spin("fl", 0)
+    base.stop("fl")
+    base.stop_all()
+    with pytest.raises(CommandError, match="safe state"):
+        base.drive(0.1, 0.0, 0.0)
+
+
+def test_lost_hinge_brakes_the_wheels_and_holds_its_goal(sdk, robot):
+    robot.move("bend", 2500, 100)
+    robot.spin("wheel", 300)
+    robot.tick()
+    moves = len(move_calls(sdk))
+    lose_bend(sdk, robot)
+    assert "bend stopped answering" in robot.fault
+    assert robot.joints["wheel"].target_speed == 0
+    assert speed_of(last_speeds(sdk)[2]) == 0
+    with pytest.raises(CommandError, match="safe state"):
+        robot.move("bend", 2600, 100)
+    assert len(move_calls(sdk)) == moves
+    assert robot.joints["bend"].target == 2500
+    assert torque_writes(sdk) == []
+
+
+def test_fault_holds_while_the_lost_joint_stays_offline(sdk, robot, clock):
+    lose_bend(sdk, robot)
+    for _ in range(3 * RETRY_OFFLINE_EVERY):
+        clock.now += FAULT_CLEAR_S
+        robot.tick()
+    assert robot.fault is not None
+
+
+def test_fault_clears_once_the_bus_is_healthy_for_a_while(sdk, robot, clock):
+    lose_bend(sdk, robot)
+    del sdk.fail[("read_block", 1)]
+    for _ in range(RETRY_OFFLINE_EVERY):
+        robot.tick()
+    assert robot.joints["bend"].online
+    assert robot.fault is not None
+    clock.now += FAULT_CLEAR_S
+    robot.tick()
+    assert robot.fault is None
+    robot.spin("wheel", 300)
+    robot.tick()
+    assert speed_of(last_speeds(sdk)[2]) == 300
+
+
+def test_servo_missing_at_open_does_not_latch(sdk, clock):
+    sdk.fail[("ping", 2)] = (COMM_RX_TIMEOUT, 0)
+    robot = Robot(sdk.bus(), config(SMALL), clock=clock)
+    robot.open()
+    for _ in range(RETRY_OFFLINE_EVERY):
+        robot.tick()
+    assert robot.fault is None
+    robot.move("bend", 2500, 100)
+
+
+def test_failed_command_latches_the_safe_state(sdk, robot):
+    robot.spin("wheel", 300)
+    sdk.fail[("move", 1)] = (COMM_RX_TIMEOUT, 0)
+    with pytest.raises(ServoError):
+        robot.move("bend", 2500, 100)
+    assert robot.fault.startswith("bend")
+    assert robot.joints["wheel"].target_speed == 0
+
+
+def test_hold_safe_never_raises(sdk, robot):
+    robot.spin("wheel", 300)
+    sdk.fail[("sync_write", 254)] = (COMM_RX_TIMEOUT, 0)
+    sdk.fail[("speed", 2)] = (COMM_RX_TIMEOUT, 0)
+    robot.hold_safe("imu says falling")
+    assert robot.fault == "imu says falling"
+    assert robot.joints["wheel"].target_speed == 0
+
+
+def test_close_brakes_and_never_turns_torque_off(sdk, robot):
+    robot.move("bend", 2500, 100)
+    robot.spin("wheel", 300)
+    robot.tick()
+    moves = len(move_calls(sdk))
+    robot.close()
+    assert speed_of(last_speeds(sdk)[2]) == 0
+    assert len(move_calls(sdk)) == moves
+    assert torque_writes(sdk) == []
+
+
+def test_open_starts_without_a_fault(sdk, robot):
+    robot.close()
+    robot.open()
+    assert robot.fault is None
