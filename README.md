@@ -244,7 +244,8 @@ base:
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 | `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
 | `/keyboard/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, keyboard |
-| `/robot/stop_lock` | `std_msgs/Bool` | in: true stops the mux |
+| `/robot/set_stop` | `std_srvs/SetBool` | true: STOP, false: release |
+| `/robot/stop_lock` | `std_msgs/Bool` | out: STOP state, 10 Hz |
 | `/robot/active_input` | `std_msgs/String` | out: who drives |
 
 `/cmd_vel` and `velocity_cmd` stop the wheels unless repeated within
@@ -256,9 +257,12 @@ base:
 `twist_mux` merges `/web/cmd_vel` and `/keyboard/cmd_vel` into `/cmd_vel`
 (`config/twist_mux.yaml`). The keyboard has the higher priority, so it wins
 while a key is held; an input that is quiet for 0.5 s stops counting and the
-other one takes over. `true` on `/robot/stop_lock` blocks both until someone
-publishes `false`. `mux-status` publishes `keyboard`, `web`, `none` or
-`locked` on `/robot/active_input` for the UIs.
+other one takes over. STOP blocks both: the mode node owns it, starts with
+STOP on and repeats it on `/robot/stop_lock` every 0.1 s. Release it with
+`/robot/set_stop` `false`. The lock times out after 0.5 s, so the mux stays
+locked while the mode node is not running, and a restarted twist_mux is
+locked again by the next beat. `mux-status` publishes `keyboard`, `web`,
+`none` or `locked` on `/robot/active_input` for the UIs.
 
 **`/robot/stop_lock` is not a working STOP yet.** The web UI and
 `drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
@@ -266,15 +270,13 @@ them onto their mux inputs, so the lock does not stop them. Running
 `twist-mux` next to them also adds a second publisher on `/cmd_vel`. Use the
 STOP button or `/robot/stop_all` to stop the robot.
 
-The lock only lives in twist_mux's memory: if twist_mux restarts while STOP
-is on, it comes back unlocked and the next message drives again (#103).
-
 ```
+pixi run -e ros mode-node
 pixi run -e ros twist-mux
 pixi run -e ros mux-status
 ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/Twist   "{linear: {x: 0.05}}"
-ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: true}"
-ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: false}"
+ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: false}"
+ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: true}"
 ros2 topic echo /robot/active_input
 ```
 
