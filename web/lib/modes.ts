@@ -56,28 +56,6 @@ export const MODE_STYLE: Record<Mode, string> = {
   climbing: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
 };
 
-/** The climbing flow, left to right in the state machine diagram. */
-export const MODE_ORDER: readonly Mode[] = ["free", "aligning", "clamping", "climbing"];
-
-export interface ModeTransition {
-  from: Mode;
-  to: Mode;
-  /** What triggers it, short enough for the diagram. */
-  label: string;
-}
-
-/**
- * Mode changes, the same as `TRANSITIONS` in src/talos_servo/modes.py.
- * Release (back to free from every mode) is not listed: the diagram draws it
- * once for all modes.
- */
-export const MODE_TRANSITIONS: readonly ModeTransition[] = [
-  { from: "free", to: "aligning", label: "wall nearby (N)" },
-  { from: "aligning", to: "clamping", label: "aligned" },
-  { from: "clamping", to: "climbing", label: "walls touched" },
-  { from: "climbing", to: "clamping", label: "not moving up" },
-];
-
 /** `active_input` values from mux_status. */
 export function describeInput(input: string | null): string {
   switch (input) {
