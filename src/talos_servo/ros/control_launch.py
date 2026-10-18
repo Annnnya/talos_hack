@@ -28,10 +28,15 @@ ODOM_REMAP = (f"/{BASE_CONTROLLER}/odometry", "/odom")
 SPAWNED = ("joint_state_broadcaster", BASE_CONTROLLER)
 # Only spawned while the hinge is enabled: it claims the hinge joint.
 HINGE_CONTROLLER = "bend_position_controller"
+# Per-wheel speeds for the expansion node (#76). Loaded but inactive: it
+# claims the same wheels as the base controller, and the mode node switches
+# between the two.
+WHEEL_CONTROLLER = "wheel_velocity_controller"
+INACTIVE = (WHEEL_CONTROLLER,)
 
 
 def spawned(config_path: str) -> tuple[str, ...]:
-    """Controllers to spawn for this robot config."""
+    """Controllers to spawn active for this robot config."""
     config = load_config(config_path)
     model = config.model
     enabled = {j.name for j in config.enabled_joints}
@@ -71,5 +76,13 @@ def control_nodes(root: Path, config_path: str) -> list[Node]:
                 arguments=[name],
             )
             for name in spawned(config)
+        ),
+        *(
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=[name, "--inactive"],
+            )
+            for name in INACTIVE
         ),
     ]

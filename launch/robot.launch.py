@@ -2,12 +2,18 @@
 
 Starts what driving needs: the ros2_control stack (robot_state_publisher,
 controller_manager, mecanum_drive_controller for the base, #65) with the
-hardware bridge on the servo port, the mode node (STOP lock), twist_mux,
-mux_status and the web server. The camera and the IMU chain (IMU node,
-Madgwick filter, IMU transform, EKF) are opt-in.
+hardware bridge on the servo port, the mode node (STOP lock), the expansion
+node (hinge, #76), twist_mux, mux_status and the web server. The camera
+and the IMU chain (IMU node, Madgwick filter, IMU transform, EKF) are
+opt-in.
 
     pixi run -e ros robot
     pixi run -e ros robot camera:=true imu:=true port:=/dev/ttyACM0
+    pixi run -e ros robot viz:=true   # then `pixi run -e viz view-live`
+
+`viz:=true` shows the live robot in RViz (#127): the joints already reach
+robot_state_publisher through ros2_control, and the EKF (started even
+without the IMU) publishes odom -> base_link from wheel odometry.
 
 `ros2_control:=false` drives with the old robot node instead (needed for the
 per-motor `/debug` page: under ros2_control the controllers own the joints).
@@ -59,6 +65,7 @@ def processes(
     camera: bool = False,
     imu: bool = False,
     ros2_control: bool = True,
+    viz: bool = False,
 ) -> dict[str, list[str]]:
     """Name and command of every process to start, in start order.
 
@@ -78,8 +85,11 @@ def processes(
             *("talos-robot-ros", "--port", port, "--config", config)
         ]
         mux_out = "/cmd_vel"
+    cmds["mode_node"] = ["talos-mode-ros", "--config", config]
+    if ros2_control:
+        # Feeds the hinge and wheel controllers, so only with ros2_control.
+        cmds["expansion_node"] = ["talos-expansion-ros", "--config", config]
     cmds |= {
-        "mode_node": ["talos-mode-ros", "--config", config],
         "twist_mux": [
             *("ros2", "run", "twist_mux", "twist_mux", "--ros-args"),
             *("--params-file", twist_mux, "-r", f"cmd_vel_out:={mux_out}"),
@@ -111,6 +121,9 @@ def processes(
             *("ros2", "run", "tf2_ros", "static_transform_publisher"),
             *("--frame-id", "base_link", "--child-frame-id", "imu_link"),
         ]
+    # The only odom -> base_link publisher, so RViz needs it too. Without the
+    # IMU it runs on wheel odometry alone.
+    if imu or viz:
         cmds["ekf"] = [
             *("ros2", "run", "robot_localization", "ekf_node"),
             *("--ros-args", "--params-file", str(CONFIG_DIR / "ekf.yaml")),
@@ -128,6 +141,7 @@ def _robot(context: LaunchContext) -> list:
     config = str(Path(LaunchConfiguration("config").perform(context)).resolve())
     web = _flag(context, "web")
     ros2_control = _flag(context, "ros2_control")
+    viz = _flag(context, "viz")
     # Fail before anything starts, not with half a robot running.
     if not port:
         raise RuntimeError(
@@ -138,6 +152,10 @@ def _robot(context: LaunchContext) -> list:
             f"no web UI in {UI_DIR}: run `cd web && npm install && npm run "
             "build` once, or pass web:=false"
         )
+    # Without ros2_control nothing runs robot_state_publisher, and the robot
+    # node reports the raw hinge servo angle, not the model one.
+    if viz and not ros2_control:
+        raise RuntimeError("viz:=true needs ros2_control:=true")
     cmds = processes(
         port,
         config,
@@ -145,6 +163,7 @@ def _robot(context: LaunchContext) -> list:
         camera=_flag(context, "camera"),
         imu=_flag(context, "imu"),
         ros2_control=ros2_control,
+        viz=viz,
     )
     actions: list = control_nodes(ROOT, config) if ros2_control else []
     for name, cmd in cmds.items():
@@ -196,6 +215,11 @@ def generate_launch_description() -> LaunchDescription:
                 "imu",
                 default_value="false",
                 description="IMU node, filter, IMU transform and EKF",
+            ),
+            DeclareLaunchArgument(
+                "viz",
+                default_value="false",
+                description="EKF for the live robot in RViz (view-live)",
             ),
             OpaqueFunction(function=_robot),
         ]

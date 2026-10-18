@@ -16,10 +16,13 @@ from talos_servo.bus import (
     MAX_POSITION,
     MAX_SERVO_ID,
     MAX_SPEED,
+    RAD_PER_STEP,
     STEPS_PER_TURN,
     joint_position,
 )
+from talos_servo.defaults import DEFAULT_MOVE_SPEED
 from talos_servo.hinge import Hinge, HingeRangeError
+from talos_servo.model import alpha_per_servo_rad
 
 SPEED = "speed"
 POSITION = "position"
@@ -39,6 +42,10 @@ DEFAULT_SWITCH_TIMEOUT_S = 2.0
 MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 # Hinge opening angle when the robot lies flat.
 FLAT_DEG = 180.0
+# Expansion (#76): low on purpose, well below the hinge servo speed.
+DEFAULT_EXPANSION_RATE_RAD_S = 0.15
+DEFAULT_EXPANSION_HZ = 50.0
+DEFAULT_EXPANSION_LEAD_RAD = 0.05
 
 # Joint names are ROS names too (topics, services, JointState), so keep them
 # plain.
@@ -119,6 +126,8 @@ class ModesConfig:
 
     controllers: Mapping[str, tuple[str, ...]]
     switch_timeout_s: float = DEFAULT_SWITCH_TIMEOUT_S
+    # Replace the free mode's controllers while the hinge opens or closes.
+    hinge_motion: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Read-only like the rest of the frozen config.
@@ -133,8 +142,26 @@ class ModesConfig:
     def managed(self) -> frozenset[str]:
         """Every controller named by any mode."""
         return frozenset(
-            c for names in self.controllers.values() for c in names
+            c
+            for names in (*self.controllers.values(), self.hinge_motion)
+            for c in names
         )
+
+
+@dataclass(frozen=True)
+class ExpansionConfig:
+    """Opening and closing the hinge (`talos_servo.expansion`).
+
+    `max_rate_rad_s` caps the opening speed, `rate_hz` is how often the hinge
+    goal and the wheel speeds are sent, `max_lead_rad` is how far the goal
+    may run ahead of the measured angle and `command_timeout_s` stops a
+    motion whose rate is not repeated.
+    """
+
+    max_rate_rad_s: float = DEFAULT_EXPANSION_RATE_RAD_S
+    rate_hz: float = DEFAULT_EXPANSION_HZ
+    max_lead_rad: float = DEFAULT_EXPANSION_LEAD_RAD
+    command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
 
 
 @dataclass(frozen=True)
@@ -143,6 +170,7 @@ class RobotConfig:
     base: BaseConfig | None = None
     modes: ModesConfig | None = None
     model: ModelConfig | None = None
+    expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -196,6 +224,11 @@ def parse_config(data: dict) -> RobotConfig:
             ),
         )
         config = _clamp_hinge(config)
+    raw_expansion = data.get("expansion")
+    if raw_expansion is not None:
+        config = replace(
+            config, expansion=_parse_expansion(raw_expansion, config.model)
+        )
     return config
 
 
@@ -325,12 +358,52 @@ def _parse_modes(raw: dict) -> ModesConfig:
                 f"modes.controllers.{mode} must be a list of controller names"
             )
         controllers[mode] = tuple(names)
+    hinge_motion = raw.get("hinge_motion") or []
+    if not isinstance(hinge_motion, list) or not all(
+        isinstance(n, str) and n for n in hinge_motion
+    ):
+        raise ConfigError("modes.hinge_motion must be a list of controllers")
     return ModesConfig(
         controllers=controllers,
         switch_timeout_s=_positive(
             raw, "switch_timeout_s", DEFAULT_SWITCH_TIMEOUT_S
         ),
+        hinge_motion=tuple(hinge_motion),
     )
+
+
+def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("expansion must be a mapping")
+    try:
+        expansion = ExpansionConfig(
+            max_rate_rad_s=_positive(
+                raw, "max_rate_rad_s", DEFAULT_EXPANSION_RATE_RAD_S
+            ),
+            rate_hz=_positive(raw, "rate_hz", DEFAULT_EXPANSION_HZ),
+            max_lead_rad=_positive(
+                raw, "max_lead_rad", DEFAULT_EXPANSION_LEAD_RAD
+            ),
+            command_timeout_s=_positive(
+                raw, "command_timeout_s", DEFAULT_COMMAND_TIMEOUT_S
+            ),
+        )
+    except ConfigError as exc:
+        raise ConfigError(f"expansion: {exc}") from exc
+    if model is not None:
+        # The bridge moves the hinge servo at DEFAULT_MOVE_SPEED: a faster
+        # goal stream leaves the hinge behind and the wheels ahead.
+        servo = (
+            DEFAULT_MOVE_SPEED
+            * RAD_PER_STEP
+            * alpha_per_servo_rad(model.leg_gear_ratio)
+        )
+        if expansion.max_rate_rad_s >= servo:
+            raise ConfigError(
+                f"expansion.max_rate_rad_s must stay below the hinge servo "
+                f"speed {servo:.3f} rad/s, got {expansion.max_rate_rad_s}"
+            )
+    return expansion
 
 
 def _parse_model(

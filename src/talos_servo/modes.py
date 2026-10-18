@@ -37,6 +37,9 @@ TRANSITIONS: dict[tuple[Mode, Event], Mode] = {
 # Modes where the hinge presses on the walls. Releasing it there drops the
 # robot, so STOP only stops the wheels.
 HOLDING_MODES = frozenset({Mode.CLAMPING, Mode.CLIMBING})
+# Modes where the expansion node may open and close the hinge (#76). In
+# free the mode node first swaps the base controller for per-wheel speeds.
+HINGE_MODES = frozenset({Mode.FREE, Mode.CLAMPING})
 
 # Body velocity axes a driver may use in each mode, for every interface.
 # Climbing cannot turn on the walls, and aligning and clamping move the robot

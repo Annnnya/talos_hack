@@ -149,6 +149,15 @@ ros2 topic echo /dynamic_joint_states                 # effort = current
 
 The hinge does not move at startup: send a new goal to move it.
 
+To open or close the hinge with the wheels rolling along, publish a rate in
+rad/s (positive opens) to the expansion node (#76), started by
+`pixi run -e ros robot`. Release STOP first. Details are in
+[docs/ros2_control.md](docs/ros2_control.md#opening-and-closing-the-hinge-76).
+
+```
+ros2 topic pub -r 10 /expansion/rate std_msgs/msg/Float64 "{data: 0.1}"
+```
+
 ### Robot model (#64)
 
 `description/talos.urdf.xacro` is the robot for ROS: the `bend` hinge, the
@@ -187,6 +196,22 @@ Drag the `bend` slider from 3.14 (flat) down to 1.57 (max fold): the legs
 fold symmetrically and the platform stays level. Check the model with
 `pixi run -e ros check-model` (`check_urdf`) or print it with
 `pixi run -e ros model-urdf`.
+
+To watch the live robot instead (#127), start it with `viz:=true` on the Pi
+and open RViz on a laptop on the same network and `ROS_DOMAIN_ID`:
+
+```
+pixi run -e ros robot viz:=true    # on the Pi
+pixi run -e viz view-live          # on the laptop
+```
+
+The hinge and wheels follow the servos through ros2_control's
+`/joint_states`, and the model moves in the `odom` frame. Without the IMU the
+EKF runs on wheel odometry alone, so the pose drifts; it does not follow the
+robot up a chimney. `viz:=true` needs ros2_control (the default). Do not run
+`view-model` at the same time: its sliders publish `/joint_states` too. If
+the laptop sees no topics over Wi-Fi, multicast discovery is blocked: set up
+a Fast DDS discovery server or a CycloneDDS peer list.
 
 ## Quick start
 
@@ -229,6 +254,7 @@ Ctrl+C stops everything, and the wheels with it.
 | `camera:=` | `false` | camera node |
 | `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
 | `ros2_control:=` | `true` | `false`: the old robot node drives instead |
+| `viz:=` | `false` | EKF for the live robot in RViz (see below) |
 
 The per-motor `/debug` page needs `ros2_control:=false`: under ros2_control
 the controllers own the joints, so single-joint commands are not served.
@@ -329,6 +355,8 @@ base:
 | `/robot/mode`, `/robot/mode_reason` | `std_msgs/String` | out: latched |
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
+| `/robot/hinge_motion` | `std_srvs/SetBool` | free: wheels to the expansion node |
+| `/expansion/rate` | `std_msgs/Float64` | in: open (+) or close (-) the hinge, rad/s |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
 | `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
 | `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
@@ -439,8 +467,9 @@ Python in `talos_servo.modes`.
 | any | release (`/robot/release`) | `free` |
 
 - Controllers per mode come from `modes.controllers` in `config/robot.yaml`:
-  `mecanum_drive_controller` in `free` and `aligning`, none yet in
-  `clamping` and `climbing` (#76, #92), so the base stops there.
+  `mecanum_drive_controller` in `free` and `aligning`,
+  `wheel_velocity_controller` for the expansion node in `clamping` and none
+  yet in `climbing` (#92), so the base stops there.
   The node diffs the new mode's set against the controllers
   controller_manager reports as active, and a switch that controller_manager
   rejects keeps the old mode. Every second it also puts the active
@@ -452,6 +481,10 @@ Python in `talos_servo.modes`.
   instead.
 - In `clamping` and `climbing` STOP stops the wheels but the hinge keeps
   holding the walls.
+- `/robot/hinge_motion` (`std_srvs/SetBool`) is for the expansion node: in
+  `free` it swaps `mecanum_drive_controller` for `wheel_velocity_controller`
+  while the hinge moves. Refused outside `free` and `clamping` and while
+  STOP is on.
 
 ```
 ros2 topic echo /robot/mode
@@ -523,8 +556,18 @@ with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
-Wire the MPU6050 to the Pi's I2C pins (VCC to 3.3 V on pin 1, GND pin 6, SDA
-pin 3, SCL pin 5, AD0 to GND for 0x68), enable I2C in `raspi-config`, and check
+Wire the MPU6050 to the Pi 5's I2C pins:
+
+| MPU6050 | Pi header |
+|---|---|
+| VCC | pin 1 (3.3 V) |
+| GND | pin 6 (GND) |
+| SDA | pin 3 (GPIO2) |
+| SCL | pin 5 (GPIO3) |
+| AD0 | GND for address 0x68 (or 3.3 V for 0x69) |
+
+Power it from 3.3 V: the Pi GPIO pins are not 5 V tolerant. Enable I2C with
+`sudo raspi-config` (Interface Options, I2C), reboot, and check that
 `i2cdetect -y 1` shows `68`.
 
 ```

@@ -11,8 +11,14 @@ import pytest
 pytest.importorskip("launch_ros")
 
 ROOT = Path(__file__).resolve().parent.parent
-DRIVE = ["hardware_bridge", "mode_node", "twist_mux", "mux_status"]
-ROBOT_NODE_DRIVE = ["robot_node", *DRIVE[1:]]
+DRIVE = [
+    "hardware_bridge",
+    "mode_node",
+    "expansion_node",
+    "twist_mux",
+    "mux_status",
+]
+ROBOT_NODE_DRIVE = ["robot_node", "mode_node", "twist_mux", "mux_status"]
 IMU = ["imu_node", "imu_filter", "imu_tf", "ekf"]
 CONTROLLER_REFERENCE = "/mecanum_drive_controller/reference"
 
@@ -39,6 +45,36 @@ def test_flags_add_the_camera_and_the_imu_chain(launch):
         "/dev/ttyX", "robot.yaml", web=False, camera=True, imu=True
     )
     assert list(cmds) == [*DRIVE, "camera_node", *IMU]
+
+
+def test_viz_adds_the_ekf_without_the_imu(launch):
+    # The EKF alone publishes odom -> base_link, which RViz needs.
+    cmds = launch.processes("/dev/ttyX", "robot.yaml", web=False, viz=True)
+    assert list(cmds) == [*DRIVE, "ekf"]
+
+
+def test_viz_with_the_imu_starts_one_ekf(launch):
+    cmds = launch.processes(
+        "/dev/ttyX", "robot.yaml", web=False, imu=True, viz=True
+    )
+    assert list(cmds) == [*DRIVE, *IMU]
+
+
+def test_viz_needs_ros2_control(launch):
+    from launch import LaunchContext
+
+    context = LaunchContext()
+    context.launch_configurations.update(
+        {
+            "port": "/dev/ttyX",
+            "config": str(ROOT / "config" / "robot.yaml"),
+            "web": "false",
+            "ros2_control": "false",
+            "viz": "true",
+        }
+    )
+    with pytest.raises(RuntimeError, match="viz"):
+        launch._robot(context)
 
 
 def test_robot_node_instead_of_ros2_control(launch):
@@ -111,8 +147,21 @@ def test_controller_odometry_feeds_the_ekf():
 
 
 def test_control_nodes_build_from_the_robot_config():
-    from talos_servo.ros.control_launch import control_nodes, spawned
+    from talos_servo.ros.control_launch import (
+        INACTIVE,
+        control_nodes,
+        spawned,
+    )
 
     config = str(ROOT / "config" / "robot.yaml")
     # robot_state_publisher, controller_manager and one spawner each.
-    assert len(control_nodes(ROOT, config)) == 2 + len(spawned(config))
+    expected = 2 + len(spawned(config)) + len(INACTIVE)
+    assert len(control_nodes(ROOT, config)) == expected
+
+
+def test_live_rviz_watches_the_ekf_frame():
+    yaml = pytest.importorskip("yaml")
+    ekf = yaml.safe_load((ROOT / "config" / "ekf.yaml").read_text())
+    rviz = yaml.safe_load((ROOT / "description" / "view_live.rviz").read_text())
+    fixed = rviz["Visualization Manager"]["Global Options"]["Fixed Frame"]
+    assert fixed == ekf["/**"]["ros__parameters"]["odom_frame"]
