@@ -114,12 +114,19 @@ two legs and the four mecanum wheels, plus `imu_link` and `camera_link`. It
 reads its sizes, limits and joint names from the `model` and `base` sections
 of `config/robot.yaml`, so change them there.
 
-The robot is an inverted V: the hinge on top with the platform, a leg of
-length `leg_length_m` down to each wheel pair. `bend` is the opening angle
-between the legs in radians: pi (180 deg) flat, `bend_min_deg` at max fold.
+The robot is an inverted V: the hinge on top with the platform, a leg down
+to each wheel pair. Each leg is half of `base.wheelbase_m` (the flat
+wheelbase) long. The hinge joint (`model.hinge_joint`, `bend`) is the
+opening angle between the legs in radians: pi (180 deg) flat,
+`bend_min_deg` at max fold.
 The legs follow it through mimic joints, each tilting by half the fold, so
 the platform stays level. The wheelbase is `2 * l * sin(bend / 2)`
 (`talos_servo.model.wheelbase_m`).
+
+The `<ros2_control>` block drives only the four wheels for now. The hinge
+joins it in #85, together with the conversion from opening angle to servo
+angle (`talos_servo.model.alpha_per_servo_rad`) and the flat offset from the
+calibration in #84.
 
 View it in RViz2 (needs a display; installs RViz only in the `viz`
 environment, not on the Pi; works on Linux and Windows):
@@ -196,7 +203,7 @@ base:
            rear_right_wheel]
   wheelbase_m: 0.31
   track_width_m: 0.128
-  steps_per_meter: 1000.0
+  wheel_radius_m: 0.03     # steps per metre = 4096 / (2 * pi * r)
   max_linear_speed: 0.1    # m/s
   max_angular_speed: 0.5   # rad/s
 ```

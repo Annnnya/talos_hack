@@ -44,6 +44,8 @@ model:
   # Each leg gear turns this many times the servo. Both legs move, so the
   # opening angle changes 2 * 0.5 = 1 times the servo angle.
   leg_gear_ratio: 0.5
-  # Max fold. Placeholder until measured on the robot (#84).
+  # Max fold. Placeholder until measured on the robot (#84). These are the
+  # model limits only: the servo clamp is joints.bend min_pos/max_pos, still
+  # a full turn, and #84 tightens it to match once the hinge is measured.
   bend_min_deg: 90
   bend_max_deg: 180

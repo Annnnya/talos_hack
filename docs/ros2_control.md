@@ -96,6 +96,14 @@ Checked in the plugin source (0.3.0):
   that, for example by having the bridge ignore position goals until the
   first one that differs from the plugin's initial value, or by always
   starting a position controller that holds the measured angle.
+- **Adding the hinge:** the robot model (#64) leaves `bend` out of
+  `<ros2_control>` until this issue. To add it: enable it in
+  `config/robot.yaml` (the bridge drops a whole command that names a
+  disabled joint), give its interfaces an `initial_value` (pi, flat), and
+  convert the opening angle to servo steps with
+  `talos_servo.model.alpha_per_servo_rad` plus the flat offset measured in
+  #84. Without that, alpha = pi/2 lands on step 1024 wherever the real zero
+  is.
 - `/dynamic_joint_states` will only show position, velocity and effort.
   #85 should say current is in `effort` and load is on the readout topic.
 
