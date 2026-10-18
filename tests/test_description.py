@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 XACRO = ROOT / "description" / "talos.urdf.xacro"
 CONFIG = load_config(ROOT / "config" / "robot.yaml")
 COMMAND_INTERFACE = {SPEED: "velocity", POSITION: "position"}
-HINGE = "bend"
+HINGE = CONFIG.model.hinge_joint
 LEGS = ("front_leg_joint", "rear_leg_joint")
 
 
@@ -30,10 +30,15 @@ def joints(robot: ET.Element) -> dict[str, ET.Element]:
     return {j.get("name"): j for j in robot.findall("joint")}
 
 
-def test_every_configured_joint_is_in_the_model(robot):
-    names = joints(robot)
-    for joint in CONFIG.joints:
-        assert joint.name in names
+def test_model_joints_match_the_config(robot):
+    """Both ways: every servo is in the model and every moving model joint
+    is a servo. Leg joints only mimic the hinge."""
+    moving = {
+        name
+        for name, joint in joints(robot).items()
+        if joint.get("type") != "fixed" and joint.find("mimic") is None
+    }
+    assert moving == {j.name for j in CONFIG.joints}
 
 
 def test_bend_limits_match_the_config(robot):

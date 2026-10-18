@@ -76,11 +76,13 @@ class BaseConfig:
 class ModelConfig:
     """Body geometry shared with the URDF (`description/talos.urdf.xacro`).
 
-    `bend` is the hinge opening angle between the legs: 180 deg flat, smaller
-    when folded. Each leg gear turns `leg_gear_ratio` times the servo.
+    The `hinge_joint` (`bend`) position is the opening angle between the
+    legs: 180 deg flat, smaller when folded. Each leg gear turns
+    `leg_gear_ratio` times the servo.
     `leg_length_m` (hinge to wheel axle) is half the flat `base.wheelbase_m`.
     """
 
+    hinge_joint: str
     leg_length_m: float
     leg_gear_ratio: float
     bend_min_deg: float
@@ -140,7 +142,12 @@ def parse_config(data: dict) -> RobotConfig:
         )
     raw_model = data.get("model")
     if raw_model is not None:
-        config = replace(config, model=_parse_model(raw_model, config.base))
+        config = replace(
+            config,
+            model=_parse_model(
+                raw_model, config.base, {j.name: j for j in joints}
+            ),
+        )
     return config
 
 
@@ -215,12 +222,21 @@ def _parse_base(raw: dict, joints: dict[str, JointConfig]) -> BaseConfig:
     )
 
 
-def _parse_model(raw: dict, base: BaseConfig | None) -> ModelConfig:
+def _parse_model(
+    raw: dict, base: BaseConfig | None, joints: dict[str, JointConfig]
+) -> ModelConfig:
     if base is None:
         raise ConfigError(
             "model needs a base section: the legs and wheels come from it"
         )
+    hinge = str(raw.get("hinge_joint", ""))
+    joint = joints.get(hinge)
+    if joint is None or joint.control != POSITION:
+        raise ConfigError(
+            f"model.hinge_joint: {hinge!r} must name a position joint"
+        )
     model = ModelConfig(
+        hinge_joint=hinge,
         leg_length_m=base.wheelbase_m / 2,
         leg_gear_ratio=_positive(raw, "leg_gear_ratio"),
         bend_min_deg=_positive(raw, "bend_min_deg"),

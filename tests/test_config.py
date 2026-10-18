@@ -70,6 +70,7 @@ def test_base_is_optional():
 
 
 MODEL = {
+    "hinge_joint": "bend",
     "leg_gear_ratio": 0.5,
     "bend_min_deg": 90,
     "bend_max_deg": 180,
@@ -98,6 +99,8 @@ def test_model_is_optional():
         ({"bend_min_deg": 180}, "bend_min_deg < bend_max_deg"),
         ({"bend_max_deg": 200}, "bend_max_deg <= 180"),
         ({"leg_gear_ratio": 0}, "positive"),
+        ({"hinge_joint": "nope"}, "hinge_joint"),
+        ({"hinge_joint": "fl"}, "position joint"),
     ],
 )
 def test_invalid_model_is_rejected(change, message):

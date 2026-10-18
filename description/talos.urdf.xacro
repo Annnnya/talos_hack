@@ -26,6 +26,7 @@
   <xacro:property name="track" value="${base['track_width_m']}"/>
   <!-- bend is the hinge opening angle alpha: pi flat, bend_min at max
        fold. -->
+  <xacro:property name="hinge" value="${model['hinge_joint']}"/>
   <xacro:property name="bend_min" value="${radians(model['bend_min_deg'])}"/>
   <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
   <!-- Servo radians per radian of alpha. Each leg gear turns
@@ -73,7 +74,7 @@
   <!-- bend_link has no body. It only carries the hinge angle, which the legs
        follow through their mimic joints. -->
   <link name="bend_link"/>
-  <joint name="bend" type="revolute">
+  <joint name="${hinge}" type="revolute">
     <parent link="base_link"/>
     <child link="bend_link"/>
     <axis xyz="0 1 0"/>
@@ -102,7 +103,7 @@
              upper="${max(sign * (pi - bend_min) / 2,
                           sign * (pi - bend_max) / 2)}"
              effort="${bend_effort}" velocity="${bend_velocity}"/>
-      <mimic joint="bend" multiplier="${-sign / 2}"
+      <mimic joint="${hinge}" multiplier="${-sign / 2}"
              offset="${sign * pi / 2}"/>
     </joint>
   </xacro:macro>
@@ -185,7 +186,7 @@
     <!-- Position in hinge radians (alpha). Before #85 starts this joint,
          read the open point on unclaimed position joints in
          docs/ros2_control.md: the plugin would otherwise command 0 rad. -->
-    <joint name="bend">
+    <joint name="${hinge}">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
@@ -197,7 +198,7 @@
     <transmission name="bend_transmission">
       <plugin>transmission_interface/SimpleTransmission</plugin>
       <actuator name="bend_servo" role="actuator1"/>
-      <joint name="bend" role="joint1">
+      <joint name="${hinge}" role="joint1">
         <mechanical_reduction>${bend_reduction}</mechanical_reduction>
       </joint>
     </transmission>

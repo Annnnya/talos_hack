@@ -39,6 +39,8 @@ base:
 # The robot is an inverted V: the bend hinge on top, a leg down to each wheel
 # pair. bend is the opening angle between the legs: 180 flat, smaller folded.
 model:
+  # The position joint that opens and closes the hinge.
+  hinge_joint: bend
   # Each leg gear turns this many times the servo. Both legs move, so the
   # opening angle changes 2 * 0.5 = 1 times the servo angle.
   leg_gear_ratio: 0.5
