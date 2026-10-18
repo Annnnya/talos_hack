@@ -35,10 +35,16 @@ export interface ServoState {
   last_command: LastCommand | null;
 }
 
+/** Robot modes from the mode node (src/talos_servo/modes.py). */
+export type Mode = "free" | "aligning" | "clamping" | "climbing";
+
 export interface Limits {
   pos_max: number;
   speed_max: number;
   acc_max: number;
+  /** Base speed limits for drive (m/s, rad/s); null when the config has no base. */
+  linear_max: number | null;
+  angular_max: number | null;
 }
 
 /** Shared by every browser, kept by the server until it restarts. */
@@ -55,6 +61,13 @@ export type ServerMessage =
       limits: Limits;
       settings: Record<string, ServoSettings>;
       servos: ServoState[];
+      /** True while STOP locks twist_mux; null without ROS. */
+      stopped: boolean | null;
+      /** From the mode node; null until heard or without ROS. */
+      mode: Mode | null;
+      mode_reason: string | null;
+      /** twist_mux input driving now: "web", "keyboard", "none" or "locked". */
+      active_input: string | null;
     }
   | { type: "error"; message: string };
 
@@ -64,6 +77,14 @@ export type ClientMessage =
   | { type: "torque"; joint: string; enabled: boolean }
   | { type: "stop"; joint: string }
   | { type: "stop_all" }
+  /** Release STOP so twist_mux drives again, ROS only. */
+  | { type: "release_stop" }
+  /** Ask the mode node to start aligning (free only), ROS only. */
+  | { type: "wall_nearby" }
+  /** Release the walls and go back to free, ROS only. */
+  | { type: "release" }
+  /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
+  | { type: "drive"; vx: number; vy: number; wz: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;

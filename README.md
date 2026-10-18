@@ -57,6 +57,7 @@ serial port. Then nothing else can use the servos.
 | `src/talos_servo/cli.py` | The `talos-servo` command |
 | `src/talos_servo/teleop.py` | Keyboard driving for `talos-servo drive` |
 | `src/talos_servo/ros/` | `robot_node`, `imu_node`, the ROS client |
+| `src/talos_servo/ros/camera_node.py` | Raspberry Pi CSI camera node |
 | `src/talos_servo/web/` | FastAPI server for the web UI |
 | `web/` | Next.js UI, built into `web/out` |
 | `deploy/` | systemd units for the Pi |
@@ -70,6 +71,7 @@ flowchart LR
     subgraph pi["Raspberry Pi (ROS 2 Jazzy)"]
         NODE["robot_node<br/>owns the servo port"]
         IMUN["imu_node"]
+      CAM["camera_node<br/>Camera Module 3"]
         FILT["imu_filter_madgwick"]
         EKF["robot_localization<br/>ekf_node"]
         MUX["twist_mux<br/>+ mux_status"]
@@ -82,6 +84,7 @@ flowchart LR
     NODE -- "/joint_states · /diagnostics" --> WEB
     MUX -- "/cmd_vel" --> NODE
     NODE <--> SERVOS
+    CAM --> CAMERA["/camera/image/compressed"]
     NODE -- "/odom" --> EKF
     IMUN <--> MPU
     IMUN -- "/imu/data_raw" --> FILT
@@ -138,6 +141,10 @@ hardware bridge turns the opening angle into servo steps
 (`talos_servo.hinge`) from the fixed flat servo position
 `model.bend_flat_steps` (the horn is aligned to the leg).
 
+How fast the wheels must turn while the hinge opens or closes, with test
+vectors for the expansion controller (#76), is in
+[docs/hinge_kinematics.md](docs/hinge_kinematics.md).
+
 View it in RViz2 (needs a display; installs RViz only in the `viz`
 environment, not on the Pi; works on Linux and Windows):
 
@@ -165,7 +172,7 @@ Find the servo adapter and set it once per shell (or pass `--port`):
 
 ```
 uv run talos-servo ports
-export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_...  # bash
+export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-if00  # bash
 $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 ```
 
@@ -181,7 +188,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `talos-servo web` | Browser UI on port 8000 |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
-| `pixi run -e ros drive` | `talos-servo drive --ros` |
+| `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP |
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
 | `pixi run -e ros imu-node` | IMU as ROS topics |
 | `pixi run -e ros mode-node` | Robot mode, switches controllers per mode |
@@ -193,6 +200,13 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
   node instead of the port, so these can run next to each other.
 - `ping`, `spin`, `monitor` and `set-id` without `--ros` are bench tools: they
   take servo ids and work without a config.
+- `drive --ros` publishes on `/keyboard/cmd_vel`, so it needs `twist-mux`.
+  Space also turns STOP on for every input (`/robot/set_stop`) and Enter
+  releases it. N calls `/robot/wall_nearby` and L `/robot/release` on the
+  mode node, without freezing the keys during a slow switch. It
+  prints the mode, why it changed and which input drives, also when the web
+  changes them. Q/E do nothing while climbing, and the drive keys do nothing
+  while aligning or clamping. Quitting stops only the keyboard input.
 - Every command stops what it started on exit, including Ctrl+C.
 - New servos ship with id 1. Connect them one at a time and give each its own
   id with `set-id` before chaining them.
@@ -251,10 +265,15 @@ base:
 | `/robot/wall_nearby` | `std_srvs/Trigger` | free -> aligning |
 | `/robot/release` | `std_srvs/Trigger` | any mode -> free |
 | `/imu/data_raw`, `/imu/data` | `sensor_msgs/Imu` | out: IMU, filtered |
+| `/camera/image/compressed` | `sensor_msgs/CompressedImage` | out: low-resolution JPEG stream |
+| `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
+| `/camera/take_snapshot` | `std_srvs/Trigger` | capture and publish one snapshot |
+| `/camera/stream` | `std_srvs/SetBool` | enable/disable camera stream |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 | `/web/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, web |
 | `/keyboard/cmd_vel` | `geometry_msgs/Twist` | in: twist_mux, keyboard |
-| `/robot/stop_lock` | `std_msgs/Bool` | in: true stops the mux |
+| `/robot/set_stop` | `std_srvs/SetBool` | true: STOP, false: release |
+| `/robot/stop_lock` | `std_msgs/Bool` | out: STOP state, 10 Hz |
 | `/robot/active_input` | `std_msgs/String` | out: who drives |
 
 `/cmd_vel` and `velocity_cmd` stop the wheels unless repeated within
@@ -266,25 +285,32 @@ base:
 `twist_mux` merges `/web/cmd_vel` and `/keyboard/cmd_vel` into `/cmd_vel`
 (`config/twist_mux.yaml`). The keyboard has the higher priority, so it wins
 while a key is held; an input that is quiet for 0.5 s stops counting and the
-other one takes over. `true` on `/robot/stop_lock` blocks both until someone
-publishes `false`. `mux-status` publishes `keyboard`, `web`, `none` or
-`locked` on `/robot/active_input` for the UIs.
+other one takes over. STOP blocks both: the mode node owns it, starts with
+STOP on and repeats it on `/robot/stop_lock` every 0.1 s. Release it with
+`/robot/set_stop` `false`. The lock times out after 0.5 s, so the mux stays
+locked while the mode node is not running, and a restarted twist_mux is
+locked again by the next beat. `mux-status` publishes `keyboard`, `web`,
+`none` or `locked` on `/robot/active_input` for the UIs.
 
-**`/robot/stop_lock` is not a working STOP yet.** The web UI and
-`drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
-them onto their mux inputs, so the lock does not stop them. Running
-`twist-mux` next to them also adds a second publisher on `/cmd_vel`. Use the
-STOP button or `/robot/stop_all` to stop the robot.
+The web server (`web-ros`) sends the browser's `drive` messages on
+`/web/cmd_vel`. The browser re-sends them every 100 ms while a button is held
+and sends one stop on release, so a closed tab drops out of the mux within
+0.5 s.
 
-The lock only lives in twist_mux's memory: if twist_mux restarts while STOP
-is on, it comes back unlocked and the next message drives again (#103).
+`drive --ros` sends the keys on `/keyboard/cmd_vel`. STOP from anywhere wins
+over every input: the web **STOP ALL** button (or Space on the page) and
+Space in `drive --ros` turn it on through `/robot/set_stop`, so an input
+that is still sending cannot drive again. Release it with **Release STOP**
+on the web pages (shown while STOP is on), Enter on either, or
+`/robot/set_stop` `false`.
 
 ```
+pixi run -e ros mode-node
 pixi run -e ros twist-mux
 pixi run -e ros mux-status
 ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/Twist   "{linear: {x: 0.05}}"
-ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: true}"
-ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: false}"
+ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: false}"
+ros2 service call /robot/set_stop std_srvs/srv/SetBool "{data: true}"
 ros2 topic echo /robot/active_input
 ```
 
@@ -377,11 +403,13 @@ uv run talos-servo web                    # or: pixi run -e ros web-ros
 ```
 
 Open `http://<pi>.local:8000/debug`. **STOP ALL** (or Space) stops every speed
-joint, and so does the last browser disconnecting. `/` has a STOP ALL button
-too and keeps its own connection. Leaving a page closes its connection: if no
-other browser is open, that runs STOP ALL, which also stops wheels the CLI or
-a ROS node is driving. For UI work with hot reload,
-run `npm run dev` in `web/` with `NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
+joint, including wheels the CLI or a ROS node is driving, and over ROS turns
+STOP on (see twist_mux above); **Release STOP** (or Enter) lets the base
+drive again. `/` has both buttons too and keeps its own connection. When the
+last browser disconnects, the server stops only what the web commanded: the
+joints it spins and its twist_mux input. Over ROS, keyboard driving carries
+on. For UI work with hot reload, run `npm run dev` in `web/` with
+`NEXT_PUBLIC_BRIDGE_URL=ws://<pi>:8000/ws`.
 
 ## IMU and pose estimate
 
@@ -398,6 +426,37 @@ pixi run -e ros ekf          # fuses /odom and gyro, config/ekf.yaml
 
 The EKF uses wheel velocities and the gyro yaw rate only: mecanum wheels slip,
 and the IMU has no magnetometer.
+
+## Camera
+
+The camera node uses Raspberry Pi OS's `rpicam-still` and `rpicam-vid` tools,
+so it does not add Python camera libraries or a custom service package. Install
+`rpicam-apps` on the Pi, then run the node:
+
+```
+pixi run -e ros camera-node
+```
+
+Camera index 0 is the default for the Camera Module 3 connected to CSI 0.
+`/camera/take_snapshot` (`std_srvs/Trigger`) captures a full-resolution JPEG
+and publishes it once on `/camera/snapshot/compressed`. `/camera/stream`
+(`std_srvs/SetBool`) toggles 15 FPS 640x360 JPEG frames on
+`/camera/image/compressed`. Taking a snapshot temporarily pauses an active
+stream and resumes it after capture. Resolution, frame rate, and camera index
+are in `config/camera.yaml`.
+
+Run `pixi run -e viz view-model` on a computer with a graphical display to see
+the robot model plus live and snapshot image displays. Call these services to
+control the camera from a second terminal after `pixi shell -e viz`:
+
+```
+ros2 service call /camera/take_snapshot std_srvs/srv/Trigger "{}"
+ros2 service call /camera/stream std_srvs/srv/SetBool "{data: true}"
+ros2 service call /camera/stream std_srvs/srv/SetBool "{data: false}"
+```
+
+Do not launch RViz from a headless SSH session on the Pi. The camera node must
+be running, and the Pi and viewer must use the same ROS domain.
 
 ## Deploy on the Pi
 

@@ -1,0 +1,9 @@
+/talos_camera:
+  ros__parameters:
+    camera_index: 0
+    snapshot_width: 4608
+    snapshot_height: 2592
+    stream_width: 640
+    stream_height: 360
+    stream_fps: 15
+    frame_id: camera_optical_frame

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import NamedTuple
 
 
 class Mode(str, Enum):
@@ -36,6 +37,15 @@ TRANSITIONS: dict[tuple[Mode, Event], Mode] = {
 # Modes where the hinge presses on the walls. Releasing it there drops the
 # robot, so STOP only stops the wheels.
 HOLDING_MODES = frozenset({Mode.CLAMPING, Mode.CLIMBING})
+
+
+class RobotStatus(NamedTuple):
+    """Shared robot state from the mode node and mux_status, as clients see
+    it. Each field is None until heard, and always None without ROS."""
+
+    mode: str | None
+    mode_reason: str | None
+    active_input: str | None
 
 
 class InvalidTransition(ValueError):

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:  # config needs pyyaml
     from talos_servo.config import RobotConfig
+    from talos_servo.modes import RobotStatus
 
 
 class RobotBackend(Protocol):
@@ -29,7 +30,43 @@ class RobotBackend(Protocol):
     # `source` and `client` say who sent a command (see SOURCE_* in robot.py);
     # the UI shows it next to the sliders.
     def stop_all(self, *, source: str = ..., client: str | None = None) -> None:
-        """Best effort, never raises: it runs when the last browser leaves."""
+        """Stop every speed joint, and over ROS turn STOP on. Best effort,
+        never raises."""
+
+    def stop_own(self, *, source: str = ..., client: str | None = None) -> None:
+        """Stop only what this backend commanded, so another interface keeps
+        driving. Best effort, never raises: it runs when the last browser
+        leaves."""
+
+    def release_stop(
+        self, *, source: str = ..., client: str | None = None
+    ) -> None:
+        """Release STOP so twist_mux drives again. Over ROS only."""
+
+    def stopped(self) -> bool | None:
+        """True while STOP locks twist_mux; None without twist_mux."""
+
+    def robot_status(self) -> RobotStatus:
+        """Mode, mode reason and active twist_mux input, each None until
+        heard or without ROS."""
+
+    def wall_nearby(self) -> None:
+        """Ask the mode node to start aligning. Over ROS only."""
+
+    def release_walls(self) -> None:
+        """Ask the mode node to release the walls and go back to free. Over
+        ROS only."""
+
+    def drive(
+        self,
+        linear_x: float,
+        linear_y: float,
+        angular_z: float,
+        *,
+        source: str = ...,
+        client: str | None = None,
+    ) -> None:
+        """Drive the base (m/s, m/s, rad/s). Stops unless repeated."""
 
     def stop(
         self, joint: str, *, source: str = ..., client: str | None = None

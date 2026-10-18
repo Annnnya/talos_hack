@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 import types
 
 import pytest
-from conftest import SMALL, config, wait_for
+from conftest import BASE, SMALL, config, wait_for
 from fastapi.testclient import TestClient
 
 from talos_servo import cli
-from talos_servo.robot import Robot
+from talos_servo.modes import RobotStatus
+from talos_servo.robot import CommandError, Robot
 from talos_servo.web import server
 from talos_servo.web.server import create_app
 
@@ -52,7 +54,18 @@ def test_initial_state_lists_enabled_joints(client):
     assert [s["name"] for s in msg["servos"]] == ["bend", "wheel"]
     assert [s["control"] for s in msg["servos"]] == ["position", "speed"]
     assert msg["limits"]["speed_max"] == 500
+    # SMALL has no base, so there is nothing to drive.
+    assert msg["limits"]["linear_max"] is None
+    assert msg["limits"]["angular_max"] is None
     assert msg["ros"] is False
+    # No twist_mux on the direct bus, so no STOP lock to report.
+    assert msg["stopped"] is None
+    # No mode node or twist_mux either.
+    assert (msg["mode"], msg["mode_reason"], msg["active_input"]) == (
+        None,
+        None,
+        None,
+    )
     assert all(s["last_command"] is None for s in msg["servos"])
 
 
@@ -181,6 +194,188 @@ def test_last_client_stop_survives_connection_task_cancel(
             ),
         )
     wait_for(lambda: robot.joints["wheel"].target_speed == 0)
+
+
+def test_last_client_leaving_stops_only_what_the_web_commanded(
+    client, robot, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(robot, "stop_own", lambda **who: calls.append(who))
+    monkeypatch.setattr(
+        robot, "stop_all", lambda **who: pytest.fail("stop_all called")
+    )
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+    wait_for(lambda: calls)
+    assert calls == [{"source": "web"}]
+
+
+# --- drive
+# ------------------------------------------------------------------------
+
+
+class DriveRecorder:
+    """Just enough backend for `_dispatch` to call `drive` on."""
+
+    def __init__(self, mode: str | None = None) -> None:
+        self.calls: list[tuple[tuple[float, ...], dict]] = []
+        self.mode = mode
+
+    def drive(self, *velocity: float, **who: object) -> None:
+        self.calls.append((velocity, who))
+
+    def robot_status(self) -> RobotStatus:
+        return RobotStatus(self.mode, None, None)
+
+
+def drive(**velocity: object) -> dict:
+    return {"type": "drive", "vx": 0.0, "vy": 0.0, "wz": 0.0} | velocity
+
+
+def test_drive_passes_velocity_and_sender():
+    backend = DriveRecorder()
+    msg = drive(vx=0.1, vy=-0.2, wz=0.3)
+    server._dispatch(backend, msg, "abc", ros=True)()
+    assert backend.calls == [
+        ((0.1, -0.2, 0.3), {"source": "web", "client": "abc"})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("msg", "error"),
+    [
+        ({"type": "drive", "vy": 0.0, "wz": 0.0}, KeyError),
+        (drive(vx="fast"), ValueError),
+        (drive(vy=None), TypeError),
+        (drive(wz=math.nan), CommandError),
+        (drive(vx=math.inf), CommandError),
+        (drive(vy=True), CommandError),
+    ],
+)
+def test_bad_drive_is_rejected(msg, error):
+    backend = DriveRecorder()
+    with pytest.raises(error):
+        server._dispatch(backend, msg, ros=True)
+    assert backend.calls == []
+
+
+def test_rotating_while_climbing_is_rejected():
+    backend = DriveRecorder(mode="climbing")
+    with pytest.raises(CommandError, match="climbing"):
+        server._dispatch(backend, drive(wz=0.3), ros=True)
+    assert backend.calls == []
+
+
+@pytest.mark.parametrize("mode", ["climbing", "free", None])
+def test_straight_drive_is_allowed_in_every_mode(mode):
+    backend = DriveRecorder(mode=mode)
+    server._dispatch(backend, drive(vx=0.1, vy=0.1), ros=True)()
+    assert [velocity for velocity, _ in backend.calls] == [(0.1, 0.1, 0.0)]
+
+
+def test_rotating_in_free_is_allowed():
+    backend = DriveRecorder(mode="free")
+    server._dispatch(backend, drive(wz=0.3), ros=True)()
+    assert [velocity for velocity, _ in backend.calls] == [(0.0, 0.0, 0.3)]
+
+
+def test_drive_without_ros_is_an_error(client, robot):
+    # The base is shared through twist_mux, so there is no direct drive path.
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json(drive(vx=0.1))
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+    assert robot.joints["wheel"].target_speed == 0
+
+
+def test_release_stop_without_ros_is_an_error(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "release_stop"})
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+
+
+def test_release_stop_reaches_the_backend():
+    calls = []
+
+    class Recorder:
+        def release_stop(self, **who):
+            calls.append(who)
+
+    server._dispatch(Recorder(), {"type": "release_stop"}, "abc", ros=True)()
+    assert calls == [{"source": "web", "client": "abc"}]
+
+
+class ModeRecorder:
+    """Just enough backend for the mode commands."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def wall_nearby(self) -> None:
+        self.calls.append("wall_nearby")
+
+    def release_walls(self) -> None:
+        self.calls.append("release_walls")
+
+
+@pytest.mark.parametrize(
+    ("kind", "method"),
+    [("wall_nearby", "wall_nearby"), ("release", "release_walls")],
+)
+def test_mode_commands_reach_the_backend(kind, method):
+    backend = ModeRecorder()
+    command = server._dispatch(backend, {"type": kind}, "abc", ros=True)
+    assert backend.calls == []
+    command()
+    assert backend.calls == [method]
+
+
+@pytest.mark.parametrize("kind", ["wall_nearby", "release"])
+def test_mode_commands_without_ros_are_an_error(client, kind):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": kind})
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+
+
+def test_state_reports_the_robot_status(robot, monkeypatch):
+    status = RobotStatus("climbing", "wall contact", "keyboard")
+    monkeypatch.setattr(robot, "robot_status", lambda: status)
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        msg = ws.receive_json()
+    assert msg["mode"] == "climbing"
+    assert msg["mode_reason"] == "wall contact"
+    assert msg["active_input"] == "keyboard"
+
+
+def test_a_held_bad_drive_reports_its_error_once(client):
+    # The browser re-sends drive every 100 ms; one error is enough.
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(3):
+            ws.send_json(drive(vx=0.1))
+        # A different error marks the end of the drive replies.
+        ws.send_json({"type": "stop", "joint": "nope"})
+        errors = []
+        while not errors or "--ros" in errors[-1]:
+            msg = receive_until(ws, lambda m: m["type"] == "error")
+            errors.append(msg["message"])
+    assert sum("--ros" in e for e in errors) == 1
+
+
+def test_state_reports_the_base_speed_limits(sdk):
+    robot = Robot(sdk.bus(), config(BASE))
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        limits = ws.receive_json()["limits"]
+    assert (limits["linear_max"], limits["angular_max"]) == (0.2, 1.0)
 
 
 def test_server_shutdown_closes_the_port(sdk, robot):

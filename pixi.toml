@@ -73,6 +73,8 @@ ros-jazzy-xacro = "*"
 robot-node = "talos-robot-ros"
 # Keyboard driving through the robot node
 drive = "talos-servo drive --ros"
+# CSI camera node: snapshots and a low-rate stream
+camera-node = "talos-camera-ros --ros-args --params-file config/camera.yaml"
 imu-node = "talos-imu-ros"
 # Robot mode (free, aligning, clamping, climbing); switches controllers
 mode-node = "talos-mode-ros"

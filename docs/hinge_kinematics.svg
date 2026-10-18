@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="250" viewBox="0 0 420 250" font-family="sans-serif" font-size="14">
+  <rect width="420" height="250" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+  <!-- ground -->
+  <line x1="20" y1="200" x2="400" y2="200" stroke="#888888" stroke-width="2"/>
+  <!-- legs -->
+  <line x1="210" y1="50" x2="90" y2="170" stroke="#222222" stroke-width="4"/>
+  <line x1="210" y1="50" x2="330" y2="170" stroke="#222222" stroke-width="4"/>
+  <!-- opening angle -->
+  <path d="M188,72 A31,31 0 0 0 232,72" fill="none" stroke="#2c6fbb" stroke-width="2"/>
+  <text x="203" y="100" fill="#2c6fbb">&#945;</text>
+  <!-- hinge -->
+  <circle cx="210" cy="50" r="9" fill="#ffffff" stroke="#222222" stroke-width="3"/>
+  <text x="225" y="38" fill="#222222">hinge (bend servo)</text>
+  <!-- leg length -->
+  <text x="125" y="100" fill="#222222">l</text>
+  <text x="290" y="100" fill="#222222">l</text>
+  <!-- wheels -->
+  <circle cx="90" cy="170" r="30" fill="none" stroke="#222222" stroke-width="3"/>
+  <circle cx="330" cy="170" r="30" fill="none" stroke="#222222" stroke-width="3"/>
+  <line x1="330" y1="170" x2="330" y2="140" stroke="#888888" stroke-width="1.5"/>
+  <text x="336" y="160" fill="#888888">r</text>
+  <text x="62" y="230" fill="#222222">rear pair</text>
+  <text x="300" y="230" fill="#222222">front pair</text>
+  <!-- wheel travel when expanding -->
+  <line x1="50" y1="125" x2="15" y2="125" stroke="#c0392b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="22" y="115" fill="#c0392b">v</text>
+  <line x1="370" y1="125" x2="405" y2="125" stroke="#c0392b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="390" y="115" fill="#c0392b">v</text>
+  <!-- wheelbase -->
+  <line x1="90" y1="244" x2="330" y2="244" stroke="#2c6fbb" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="203" y="240" fill="#2c6fbb">d</text>
+</svg>

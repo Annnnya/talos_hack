@@ -80,6 +80,23 @@ def test_lock_with_timeout_is_on_until_it_hears_false():
     assert mux.active(2.6) == LOCKED
 
 
+def test_stop_heartbeat_survives_a_mux_restart():
+    beat = MuxEntry("stop", "/robot/stop_lock", 0.5, 100)
+    mux = MuxState([WEB], [beat])
+    mux.on_lock("stop", False, 1.0)
+    mux.on_input("web", 1.0)
+    assert mux.active(1.1) == "web"
+    mux.on_lock("stop", True, 1.2)
+    # A restarted mux has heard nothing: locked, then kept locked by the
+    # next true beat while the web keeps sending.
+    restarted = MuxState([WEB], [beat])
+    restarted.on_input("web", 1.25)
+    assert restarted.active(1.25) == LOCKED
+    restarted.on_lock("stop", True, 1.3)
+    restarted.on_input("web", 1.35)
+    assert restarted.active(1.4) == LOCKED
+
+
 def test_lock_below_an_input_does_not_mask_it():
     low = MuxEntry("low", "/low_lock", 0.0, 15)
     mux = MuxState([KEYBOARD, WEB], [low])
