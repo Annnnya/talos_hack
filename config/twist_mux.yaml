@@ -23,7 +23,9 @@
         priority: 10
     locks:
       # STOP from any interface: publish true to stop the base, false to
-      # release it. Timeout 0 keeps the lock until it is released.
+      # release it. Timeout 0 keeps the lock until it is released. It only
+      # lives in twist_mux's memory, so a twist_mux restart clears STOP
+      # (#103).
       stop:
         topic: /robot/stop_lock
         timeout: 0.0

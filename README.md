@@ -214,15 +214,22 @@ while a key is held; an input that is quiet for 0.5 s stops counting and the
 other one takes over. `true` on `/robot/stop_lock` blocks both until someone
 publishes `false`. `mux-status` publishes `keyboard`, `web`, `none` or
 `locked` on `/robot/active_input` for the UIs.
-The web UI and `drive --ros` still publish straight to `/cmd_vel` until
-#68 and #73 move them onto their mux inputs.
+
+**`/robot/stop_lock` is not a working STOP yet.** The web UI and
+`drive --ros` still publish straight to `/cmd_vel` until #68 and #73 move
+them onto their mux inputs, so the lock does not stop them. Running
+`twist-mux` next to them also adds a second publisher on `/cmd_vel`. Use the
+STOP button or `/robot/stop_all` to stop the robot.
+
+The lock only lives in twist_mux's memory: if twist_mux restarts while STOP
+is on, it comes back unlocked and the next message drives again (#103).
 
 ```
 pixi run -e ros twist-mux
 pixi run -e ros mux-status
 ros2 topic pub -r 10 /web/cmd_vel geometry_msgs/msg/Twist   "{linear: {x: 0.05}}"
-ros2 topic pub --once /robot/stop_lock std_msgs/msg/Bool "{data: true}"
-ros2 topic pub --once /robot/stop_lock std_msgs/msg/Bool "{data: false}"
+ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: true}"
+ros2 topic pub --once -w 1 /robot/stop_lock std_msgs/msg/Bool "{data: false}"
 ros2 topic echo /robot/active_input
 ```
 
