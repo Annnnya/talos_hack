@@ -164,7 +164,7 @@ def test_model_is_optional():
         ({"bend_flat_steps": True}, "whole step"),
         # 90 deg of fold needs 1024 steps below flat.
         ({"bend_flat_steps": 1000}, "outside one servo turn"),
-        ({"bend_flat_steps": 4096}, "outside one servo turn"),
+        ({"bend_flat_steps": 4096}, r"0\.\.4095"),
     ],
 )
 def test_invalid_model_is_rejected(change, message):
@@ -172,19 +172,62 @@ def test_invalid_model_is_rejected(change, message):
         parse_config({**BASE, "model": {**MODEL, **change}})
 
 
-def test_bend_flat_steps_defaults_to_the_start_position():
-    assert parse_config({**BASE, "model": MODEL}).model.bend_flat_steps is None
+def hinge_data(bend: dict | None = None, **model_changes) -> dict:
+    data = with_changes(BASE, bend={"enabled": True, **(bend or {})})
+    return {**data, "model": {**MODEL, **model_changes}}
 
 
-def test_bend_flat_steps_is_parsed():
-    data = {**BASE, "model": {**MODEL, "bend_flat_steps": 3000}}
-    assert parse_config(data).model.bend_flat_steps == 3000
+def bend_joint(data: dict):
+    return next(j for j in parse_config(data).joints if j.name == "bend")
+
+
+def test_enabled_hinge_needs_a_flat_position():
+    with pytest.raises(ConfigError, match="bend_flat_steps is required"):
+        parse_config(hinge_data())
+
+
+def test_disabled_hinge_needs_no_flat_position():
+    assert parse_config({**BASE, "model": MODEL}).hinge() is None
+
+
+def test_bend_limits_narrow_to_the_hinge_range():
+    # 90 deg of fold is 1024 steps below flat (1:1 with the servo).
+    joint = bend_joint(hinge_data(bend_flat_steps=4095))
+    assert (joint.min_pos, joint.max_pos) == (3071, 4095)
+
+
+def test_tighter_bend_limits_are_kept():
+    data = hinge_data({"min_pos": 3500, "max_pos": 4000}, bend_flat_steps=4095)
+    joint = bend_joint(data)
+    assert (joint.min_pos, joint.max_pos) == (3500, 4000)
+
+
+def test_bend_limits_outside_the_hinge_range_are_rejected():
+    data = hinge_data({"min_pos": 0, "max_pos": 2000}, bend_flat_steps=4095)
+    with pytest.raises(ConfigError, match="does not overlap"):
+        parse_config(data)
+
+
+def test_inverted_hinge_flat_is_a_raw_servo_position():
+    # Raw 0 on an inverted servo is joint step 4095.
+    data = hinge_data({"inverted": True}, bend_flat_steps=0)
+    assert parse_config(data).hinge().flat_steps == 4095
+    joint = bend_joint(data)
+    assert (joint.min_pos, joint.max_pos) == (3071, 4095)
 
 
 def test_repo_config_is_valid():
     config = load_config(ROBOT_CONFIG)
     assert config.model is not None
     assert config.base is not None
+
+
+def test_repo_config_clamps_bend_to_the_hinge_range():
+    config = load_config(ROBOT_CONFIG)
+    hinge = config.hinge()
+    assert hinge is not None
+    bend = next(j for j in config.joints if j.name == hinge.joint)
+    assert (bend.min_pos, bend.max_pos) == hinge.step_range
 
 
 def test_steps_per_meter_follow_the_wheel_radius():
