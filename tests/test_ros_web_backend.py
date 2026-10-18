@@ -373,7 +373,13 @@ def test_cli_over_ros_rejects_unknown_joints_before_connecting():
 
 
 def recording_backend(sent: list, **kwargs) -> RosBackend:
-    backend = make_backend(cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC, **kwargs)
+    # The base config: drive refuses a config without a base.
+    backend = RosBackend(
+        BASE_CONFIG,
+        context=rclpy.get_default_context(),
+        cmd_vel_topic=KEYBOARD_CMD_VEL_TOPIC,
+        **kwargs,
+    )
     real_drive = backend.drive
 
     def record(*v):
@@ -430,7 +436,7 @@ def test_drive_over_ros_warns_without_twist_mux(robot_node):
 
 
 def test_drive_over_ros_publishes_on_the_keyboard_input(
-    robot_node, robot, listener
+    base_node, base_robot, listener
 ):
     received = listener(KEYBOARD_CMD_VEL_TOPIC)
     sent: list = []
@@ -449,7 +455,7 @@ def test_drive_over_ros_publishes_on_the_keyboard_input(
     assert sent[-1] == (0.0, 0.0, 0.0)
     wait_for(lambda: any(m.linear.x == 0.1 for m in received), WAIT)
     # The robot node only listens on /cmd_vel, which twist_mux feeds.
-    assert robot.joints["wheel"].target_speed == 0
+    assert not any(base_wheel_speeds(base_robot))
 
 
 class FakeModeNode:
@@ -492,7 +498,7 @@ class FakeModeNode:
 
 
 @pytest.fixture
-def mode_node():
+def fake_mode_node():
     def start(**kwargs) -> FakeModeNode:
         fake = FakeModeNode(**kwargs)
         executor.add_node(fake.node)
@@ -517,8 +523,10 @@ def wait_for_status(
     wait_for(lambda: backend.robot_status() == (mode, reason, active), WAIT)
 
 
-def test_keyboard_follows_the_mode_from_any_interface(robot_node, mode_node):
-    fake = mode_node()
+def test_keyboard_follows_the_mode_from_any_interface(
+    base_node, fake_mode_node
+):
+    fake = fake_mode_node()
     sent: list = []
     backend = recording_backend(sent)
     lines: list[str] = []
@@ -551,8 +559,10 @@ def test_keyboard_follows_the_mode_from_any_interface(robot_node, mode_node):
     assert "mode: climbing (wall contact) | driving: web" in lines
 
 
-def test_rejected_release_is_printed_and_driving_goes_on(robot_node, mode_node):
-    fake = mode_node(release_ok=False)
+def test_rejected_release_is_printed_and_driving_goes_on(
+    base_node, fake_mode_node
+):
+    fake = fake_mode_node(release_ok=False)
     sent: list = []
     backend = recording_backend(sent)
     lines: list[str] = []
