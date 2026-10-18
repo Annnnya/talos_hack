@@ -467,6 +467,15 @@ class RosBackend:
             Float64(data=finite_clamp(rate, limit))
         )
 
+    def climb(self, speed: float) -> None:
+        """Publish one climb speed (m/s, + up, 0 stops) for the expansion
+        node, clamped to `expansion.max_climb_speed_m_s`. Stops unless
+        repeated."""
+        limit = self.config.expansion.max_climb_speed_m_s
+        self._require_node().climb_pub.publish(
+            Float64(data=finite_clamp(speed, limit))
+        )
+
     def hinge_state(self) -> dict[str, Any] | None:
         """Hinge readout for calibrating `model.bend_flat_steps`, or None
         without a hinge. `angle_deg` and `raw_steps` are None while the

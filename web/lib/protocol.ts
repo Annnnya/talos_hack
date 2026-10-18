@@ -45,6 +45,8 @@ export interface Limits {
   /** Base speed limits for drive (m/s, rad/s); null when the config has no base. */
   linear_max: number | null;
   angular_max: number | null;
+  /** m/s cap of the Up and Down buttons. */
+  climb_max: number;
 }
 
 /** Hinge readout for calibrating model.bend_flat_steps (ROS only). */
@@ -104,6 +106,8 @@ export type ClientMessage =
   | { type: "drive"; vx: number; vy: number; wz: number }
   /** Hinge opening speed (rad/s, + opens, 0 stops), ROS only. Re-send while held. */
   | { type: "hinge"; rate: number }
+  /** Climb speed (m/s, + up, 0 stops), ROS only. Re-send while held. */
+  | { type: "climb"; speed: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;

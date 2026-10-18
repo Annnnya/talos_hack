@@ -1,93 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import type { ClientMessage, HingeState } from "@/lib/protocol";
-import { DRIVE_RESEND_MS } from "@/lib/useDrive";
+import { type Sign, useHold } from "@/lib/useHold";
 
-type Sign = 1 | -1;
-
-/** Desktop keys, the same as `talos-servo drive`: R opens, F closes. */
 const HINGE_KEYS: Record<string, Sign> = { r: 1, f: -1 };
 
-/**
- * Hold-to-move for the hinge through the expansion node. Sends the rate at
- * once and re-sends it while held (the node stops it after its timeout);
- * letting go, hiding the tab or losing focus sends one stop.
- */
-function useHingeHold(send: (msg: ClientMessage) => void, rate: number, enabled: boolean) {
-  const [held, setHeld] = useState<Sign | null>(null);
-  const heldRef = useRef<Sign | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sendRef = useRef(send);
-  sendRef.current = send;
-
-  const release = useCallback(() => {
-    if (timer.current !== null) clearInterval(timer.current);
-    timer.current = null;
-    if (heldRef.current !== null) sendRef.current({ type: "hinge", rate: 0 });
-    heldRef.current = null;
-    setHeld(null);
-  }, []);
-
-  const start = useCallback(
-    (sign: Sign) => {
-      if (!enabled || heldRef.current === sign) return;
-      release();
-      const msg: ClientMessage = { type: "hinge", rate: sign * rate };
-      heldRef.current = sign;
-      setHeld(sign);
-      sendRef.current(msg);
-      timer.current = setInterval(() => sendRef.current(msg), DRIVE_RESEND_MS);
-    },
-    [enabled, rate, release],
-  );
-
-  const end = useCallback(
-    (sign: Sign) => {
-      if (heldRef.current === sign) release();
-    },
-    [release],
-  );
-
-  useEffect(() => {
-    if (!enabled) release();
-  }, [enabled, release]);
-
-  useEffect(() => {
-    const onDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || e.ctrlKey || e.metaKey || e.altKey) return;
-      const sign = HINGE_KEYS[e.key.toLowerCase()];
-      if (!sign) return;
-      e.preventDefault();
-      if (!e.repeat) start(sign);
-    };
-    const onUp = (e: KeyboardEvent) => {
-      const sign = HINGE_KEYS[e.key.toLowerCase()];
-      if (sign) end(sign);
-    };
-    const onVisibility = () => {
-      if (document.hidden) release();
-    };
-    window.addEventListener("keydown", onDown);
-    window.addEventListener("keyup", onUp);
-    window.addEventListener("blur", release);
-    window.addEventListener("pagehide", release);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("keydown", onDown);
-      window.removeEventListener("keyup", onUp);
-      window.removeEventListener("blur", release);
-      window.removeEventListener("pagehide", release);
-      document.removeEventListener("visibilitychange", onVisibility);
-      release();
-    };
-  }, [start, end, release]);
-
-  return { held, start, end };
-}
-
-function HoldButton({
+export function HoldButton({
   label,
   hint,
   sign,
@@ -137,7 +56,11 @@ export default function HingePanel({
   send: (msg: ClientMessage) => void;
   enabled: boolean;
 }) {
-  const { held, start, end } = useHingeHold(send, hinge.max_rate, enabled);
+  const message = useCallback(
+    (sign: Sign | 0): ClientMessage => ({ type: "hinge", rate: sign * hinge.max_rate }),
+    [hinge.max_rate],
+  );
+  const { held, start, end } = useHold(send, message, enabled, HINGE_KEYS);
   const unknown = hinge.angle_deg === null;
 
   return (

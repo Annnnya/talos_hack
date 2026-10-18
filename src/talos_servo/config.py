@@ -44,6 +44,8 @@ MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 FLAT_DEG = 180.0
 # Expansion (#76): low on purpose, well below the hinge servo speed.
 DEFAULT_EXPANSION_RATE_RAD_S = 0.15
+# Low on purpose; the wheels top out near 0.15 m/s.
+DEFAULT_CLIMB_SPEED_M_S = 0.05
 DEFAULT_EXPANSION_HZ = 50.0
 DEFAULT_EXPANSION_LEAD_RAD = 0.05
 
@@ -159,6 +161,8 @@ class ExpansionConfig:
     """
 
     max_rate_rad_s: float = DEFAULT_EXPANSION_RATE_RAD_S
+    # Wheel surface speed cap (m/s) for climbing.
+    max_climb_speed_m_s: float = DEFAULT_CLIMB_SPEED_M_S
     rate_hz: float = DEFAULT_EXPANSION_HZ
     max_lead_rad: float = DEFAULT_EXPANSION_LEAD_RAD
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
@@ -379,6 +383,9 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
         expansion = ExpansionConfig(
             max_rate_rad_s=_positive(
                 raw, "max_rate_rad_s", DEFAULT_EXPANSION_RATE_RAD_S
+            ),
+            max_climb_speed_m_s=_positive(
+                raw, "max_climb_speed_m_s", DEFAULT_CLIMB_SPEED_M_S
             ),
             rate_hz=_positive(raw, "rate_hz", DEFAULT_EXPANSION_HZ),
             max_lead_rad=_positive(

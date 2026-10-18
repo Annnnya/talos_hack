@@ -138,7 +138,7 @@ def test_unknown_mode_allows_every_axis(mode):
     [
         ("free", True),
         ("clamping", True),
-        ("aligning", False),
+        ("aligning", True),
         ("climbing", False),
         (None, True),
     ],

@@ -61,6 +61,10 @@ class RobotBackend(Protocol):
         """Hinge opening speed (rad/s, + opens). Stops unless repeated. Over
         ROS only."""
 
+    def climb(self, speed: float) -> None:
+        """Climb speed (m/s, + up): front wheels one way, rear the other.
+        Stops unless repeated. Over ROS only."""
+
     def hinge_state(self) -> dict[str, Any] | None:
         """Hinge angle and raw servo step for calibration; None without ROS
         or without a hinge."""

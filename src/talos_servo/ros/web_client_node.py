@@ -20,6 +20,7 @@ from std_srvs.srv import SetBool, Trigger
 from talos_servo.defaults import QUEUE_DEPTH, ROBOT_NS
 from talos_servo.ros.names import (
     ACTIVE_INPUT_TOPIC,
+    CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
     LATCHED,
     MODE_REASON_TOPIC,
@@ -70,6 +71,9 @@ class WebClientNode(Node):
         # Hinge opening speed for the expansion node (#76).
         self.expansion_pub = self.create_publisher(
             Float64, EXPANSION_RATE_TOPIC, QUEUE_DEPTH
+        )
+        self.climb_pub = self.create_publisher(
+            Float64, CLIMB_TOPIC, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH

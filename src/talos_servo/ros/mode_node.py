@@ -58,6 +58,7 @@ from talos_servo.defaults import (
 )
 from talos_servo.modes import (
     HINGE_MODES,
+    SWAP_MODES,
     Event,
     InvalidTransition,
     Mode,
@@ -321,7 +322,11 @@ class ModeNode(Node):
 
     def target(self, mode: Mode) -> tuple[str, ...]:
         """Controllers that should be active in `mode` right now."""
-        if mode is Mode.FREE and self._hinge_motion and self.modes.hinge_motion:
+        if (
+            mode in SWAP_MODES
+            and self._hinge_motion
+            and self.modes.hinge_motion
+        ):
             return self.modes.hinge_motion
         return self.modes.for_mode(mode.value)
 

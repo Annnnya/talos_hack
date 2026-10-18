@@ -420,6 +420,9 @@ class Robot:
     def move_hinge(self, rate: float) -> None:
         raise CommandError("the hinge buttons need `talos-servo web --ros`")
 
+    def climb(self, speed: float) -> None:
+        raise CommandError("climbing needs `talos-servo web --ros`")
+
     def hinge_state(self) -> dict[str, Any] | None:
         """The hinge readout comes from the hardware bridge, over ROS."""
         return None

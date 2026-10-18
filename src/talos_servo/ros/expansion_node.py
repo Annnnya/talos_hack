@@ -48,8 +48,9 @@ from talos_servo.defaults import (
     STOP_LOCK_TIMEOUT_S,
 )
 from talos_servo.expansion import STILL, Expansion, Wheels
-from talos_servo.modes import HINGE_MODES, Mode
+from talos_servo.modes import CLIMB_MODES, HINGE_MODES, SWAP_MODES, Mode
 from talos_servo.ros.names import (
+    CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
     HINGE_COMMANDS_TOPIC,
     HINGE_MOTION_SERVICE,
@@ -88,6 +89,10 @@ class ExpansionNode(Node):
         self._now = clock
         self._rate = 0.0
         self._rate_stamp: float | None = None
+        self._climb = 0.0
+        self._climb_stamp: float | None = None
+        self.max_climb = self.settings.max_climb_speed_m_s
+        self.wheel_radius_m = config.base.wheel_radius_m
         self._alpha = math.nan
         self._mode: Mode | None = None
         self._stopped = True
@@ -107,6 +112,9 @@ class ExpansionNode(Node):
         )
         self.create_subscription(
             Float64, EXPANSION_RATE_TOPIC, self.on_rate, QUEUE_DEPTH
+        )
+        self.create_subscription(
+            Float64, CLIMB_TOPIC, self.on_climb, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, self.on_joint_state, QUEUE_DEPTH
@@ -135,6 +143,26 @@ class ExpansionNode(Node):
     def on_rate(self, msg: Float64) -> None:
         self._rate = self.expansion.clamp_rate(float(msg.data))
         self._rate_stamp = self._now()
+
+    def on_climb(self, msg: Float64) -> None:
+        speed = float(msg.data)
+        if not math.isfinite(speed):
+            speed = 0.0
+        self._climb = max(-self.max_climb, min(self.max_climb, speed))
+        self._climb_stamp = self._now()
+
+    def requested_climb(self) -> float:
+        """The last climb speed, or 0 once it is older than the timeout."""
+        if self._climb_stamp is None:
+            return 0.0
+        if self._now() - self._climb_stamp > self.settings.command_timeout_s:
+            return 0.0
+        return self._climb
+
+    def climb_wheels(self, speed: float) -> Wheels:
+        """Front pair one way, rear pair the other, in rad/s."""
+        w = speed / self.wheel_radius_m
+        return (w, w, -w, -w)
 
     def on_joint_state(self, msg: JointState) -> None:
         try:
@@ -183,6 +211,10 @@ class ExpansionNode(Node):
 
     def tick(self) -> None:
         rate = self.requested_rate()
+        climb = self.requested_climb()
+        if climb and not rate:
+            self.climb_tick(climb)
+            return
         why = self.blocked() if rate else None
         if rate == 0.0 or why is not None:
             self.halt(why)
@@ -198,6 +230,23 @@ class ExpansionNode(Node):
         self._moving = step.wheels != STILL
         self._note(step.held)
 
+    def climb_tick(self, speed: float) -> None:
+        """Turn the front and rear pairs opposite ways; the hinge keeps its
+        goal so a clamped robot keeps pressing on the walls."""
+        why = self.blocked()
+        if why is None and self._mode not in CLIMB_MODES:
+            why = f"cannot climb while {self._mode.value}"
+        if why is not None:
+            self.halt(why)
+            return
+        if self._needs_swap() and not self._granted:
+            self._ask(True)
+            self._still("waiting for the wheel controller")
+            return
+        self._send_wheels(self.climb_wheels(speed))
+        self._moving = True
+        self._note(None)
+
     def halt(self, why: str | None = None) -> None:
         """Stop the wheels, keep the hinge goal and give the wheels back."""
         self._still(why)
@@ -212,7 +261,7 @@ class ExpansionNode(Node):
         self._note(why)
 
     def _needs_swap(self) -> bool:
-        return self.needs_grant and self._mode is Mode.FREE
+        return self.needs_grant and self._mode in SWAP_MODES
 
     def _send_wheels(self, wheels: Wheels) -> None:
         self.wheel_pub.publish(Float64MultiArray(data=list(wheels)))

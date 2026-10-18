@@ -22,6 +22,9 @@ HINGE_MOTION_SERVICE = f"{ROBOT_NS}/hinge_motion"
 # Expansion node (#76) in, and the controllers it feeds
 # (config/ros2_control.yaml) out.
 EXPANSION_RATE_TOPIC = "/expansion/rate"
+# Climb speed in m/s (std_msgs/Float64, + up): front wheels one way, rear
+# wheels the other. Repeat it like the rate.
+CLIMB_TOPIC = "/expansion/climb"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
 

@@ -30,6 +30,7 @@ export function useBridge() {
     acc_max: 254,
     linear_max: null,
     angular_max: null,
+    climb_max: 0,
   });
   const [ros, setRos] = useState(false);
   const [stopped, setStopped] = useState<boolean | null>(null);
