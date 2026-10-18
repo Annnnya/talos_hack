@@ -55,6 +55,7 @@ ros-jazzy-ros-base = "*"
 ros-jazzy-diagnostic-msgs = "*"
 ros-jazzy-imu-filter-madgwick = "*"
 ros-jazzy-robot-localization = "*"
+ros-jazzy-twist-mux = "*"
 
 [feature.ros.tasks]
 # The only program on the servo port; everything else goes through it
@@ -72,6 +73,10 @@ ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.
 # Web UI through the running robot node, so it can share the robot
 # with other ROS nodes
 web-ros = "talos-servo web --ros"
+# Web and keyboard share /cmd_vel through one mux, with a STOP lock
+twist-mux = "ros2 run twist_mux twist_mux --ros-args --params-file config/twist_mux.yaml -r cmd_vel_out:=/cmd_vel"
+# Publishes which mux input drives the base on /robot/active_input
+mux-status = "talos-mux-status-ros --ros-args --params-file config/twist_mux.yaml"
 
 [environments]
 ros = ["ros"]
