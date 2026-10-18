@@ -194,19 +194,9 @@ class RobotNode(Node):
     def publish_readouts(self) -> None:
         """Numeric readouts for every online joint; offline ones show up in
         /diagnostics."""
-        stamp = self.get_clock().now().to_msg()
-        for j in self.robot.snapshot():
-            if not j["online"]:
-                continue
-            self.readouts.publish(
-                j["name"],
-                stamp,
-                temperature=j["temp"],
-                voltage=j["voltage"],
-                current=j["current"],
-                load=j["load"],
-                moving=j["moving"],
-            )
+        self.readouts.publish_snapshot(
+            self.robot.snapshot(), self.get_clock().now().to_msg()
+        )
 
     def status_msg(self) -> DiagnosticArray:
         msg = DiagnosticArray()
@@ -317,10 +307,11 @@ def _yaw_quaternion(yaw: float) -> Quaternion:
     return Quaternion(z=math.sin(yaw / 2), w=math.cos(yaw / 2))
 
 
-def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
-    parser = argparse.ArgumentParser(
-        prog="talos-robot-ros", description=__doc__.splitlines()[0]
-    )
+def parse_args(
+    argv: Sequence[str], *, prog: str = "talos-robot-ros"
+) -> tuple[argparse.Namespace, list[str]]:
+    """Options of every node that owns the servo port."""
+    parser = argparse.ArgumentParser(prog=prog)
     parser.add_argument(
         "--config", default=DEFAULT_CONFIG, help="robot config (%(default)s)"
     )
