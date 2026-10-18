@@ -107,6 +107,33 @@ topic based hardware plugin plus `hardware_bridge_node`) and the bench check
 `pixi run -e ros ros2-control-check` are in
 [docs/ros2_control.md](docs/ros2_control.md).
 
+### Robot model (#64)
+
+`description/talos.urdf.xacro` is the robot for ROS: the `bend` hinge, the
+two legs and the four mecanum wheels, plus `imu_link` and `camera_link`. It
+reads its sizes, limits and joint names from the `model` and `base` sections
+of `config/robot.yaml`, so change them there.
+
+The robot is an inverted V: the hinge on top with the platform, a leg of
+length `leg_length_m` down to each wheel pair. `bend` is the opening angle
+between the legs in radians: pi (180 deg) flat, `bend_min_deg` at max fold.
+The legs follow it through mimic joints, each tilting by half the fold, so
+the platform stays level. The wheelbase is `2 * l * sin(bend / 2)`
+(`talos_servo.model.wheelbase_m`).
+
+View it in RViz2 (needs a display; installs RViz only in the `viz`
+environment, not on the Pi; works on Linux and Windows):
+
+```
+pixi install -e viz
+pixi run -e viz view-model    # RViz2 plus a slider per joint
+```
+
+Drag the `bend` slider from 3.14 (flat) down to 1.57 (max fold): the legs
+fold symmetrically and the platform stays level. Check the model with
+`pixi run -e ros check-model` (`check_urdf`) or print it with
+`pixi run -e ros model-urdf`.
+
 ## Quick start
 
 Use [uv](https://docs.astral.sh/uv/) or [pixi](https://pixi.sh); both read
