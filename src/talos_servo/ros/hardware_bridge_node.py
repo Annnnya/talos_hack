@@ -29,6 +29,15 @@ hinge range (a wrap past flat), its position and velocity are NaN: unknown,
 never a guess. Its goals are dropped meanwhile: from a wrapped reading the
 servo would take the long way round.
 
+Safe state (`Robot.hold_safe`): wheels at speed 0 with torque on (braked), the
+hinge on its last goal with torque on. Torque is never turned off.
+- Deactivate or a dead controller_manager: the plugin just goes quiet, so the
+  wheels stop after `command_timeout_s` and the hinge keeps its goal
+- Read or write error: the `Robot` brakes at once and latches; moving
+  commands are refused (logged) until the lost joints answer again and wheel
+  writes work for `talos_servo.robot.FAULT_CLEAR_S`
+- Shutdown (Ctrl+C, SIGTERM, an exception): `Robot.close()` in `finally`
+
 Like the robot node, this is the only program on the servo port: do not run
 both. Run with `pixi run -e ros hardware-bridge`.
 """
@@ -104,6 +113,8 @@ class HardwareBridgeNode(Node):
         # Last goal sent per position joint. The plugin repeats the same goal
         # every cycle; only a change is written to the servo.
         self._goals: dict[str, int] = {}
+        # Last fault seen on the robot, to log changes only.
+        self._fault: str | None = None
 
         # The plugin subscribes best effort, so sensor data QoS fits.
         self.states_pub = self.create_publisher(
@@ -138,6 +149,21 @@ class HardwareBridgeNode(Node):
             self.get_logger().error(
                 f"tick failed: {exc}", throttle_duration_sec=1.0
             )
+        self._report_fault()
+
+    def _report_fault(self) -> None:
+        """Log once when the safe state latches and once when it clears."""
+        fault = self.robot.fault
+        if fault == self._fault:
+            return
+        if fault is None:
+            self.get_logger().info("fault cleared, following commands again")
+        else:
+            self.get_logger().error(
+                f"safe state: {fault}. Wheels braked, goals held, commands "
+                "that move are refused until the bus is healthy"
+            )
+        self._fault = fault
 
     def publish_states(self) -> None:
         self.states_pub.publish(self.states_msg())
