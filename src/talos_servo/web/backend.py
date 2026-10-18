@@ -85,6 +85,18 @@ class RobotBackend(Protocol):
         """Platform roll and pitch in degrees from the IMU (`roll_deg`,
         `pitch_deg`); None without ROS or while the IMU is quiet."""
 
+    def camera_streaming(self) -> bool | None:
+        """Camera stream state, or None when the camera node is unavailable."""
+
+    def camera_frame_sequence(self) -> int | None:
+        """Sequence number of the latest camera frame, or None without one."""
+
+    def camera_frame(self) -> bytes | None:
+        """Latest JPEG camera frame, or None when no frame is available."""
+
+    def camera_stream(self, enabled: bool) -> None:
+        """Enable or disable the camera stream. Over ROS only."""
+
     def drive(
         self,
         linear_x: float,

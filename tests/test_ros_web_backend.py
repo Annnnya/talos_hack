@@ -29,9 +29,9 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
-from sensor_msgs.msg import Imu, JointState  # noqa: E402
-from std_msgs.msg import Float64, String  # noqa: E402
-from std_srvs.srv import Trigger  # noqa: E402
+from sensor_msgs.msg import CompressedImage, Imu, JointState  # noqa: E402
+from std_msgs.msg import Bool, Float64, String  # noqa: E402
+from std_srvs.srv import SetBool, Trigger  # noqa: E402
 
 from talos_servo import teleop  # noqa: E402
 from talos_servo.bus import ServoError  # noqa: E402
@@ -42,12 +42,16 @@ from talos_servo.defaults import (  # noqa: E402
 from talos_servo.orientation import from_rpy  # noqa: E402
 from talos_servo.robot import SOURCE_CLI, CommandError, Robot  # noqa: E402
 from talos_servo.ros import cli_commands  # noqa: E402
+from talos_servo.ros.camera_node import CameraNode  # noqa: E402
 from talos_servo.ros.imu_convert import (  # noqa: E402
     not_provided_covariance,
 )
 from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.names import (  # noqa: E402
     ACTIVE_INPUT_TOPIC,
+    CAMERA_IMAGE_TOPIC,
+    CAMERA_STREAM_SERVICE,
+    CAMERA_STREAMING_TOPIC,
     EXPANSION_RATE_TOPIC,
     IMU_DATA_TOPIC,
     LATCHED,
@@ -187,6 +191,41 @@ def test_browser_sees_stop_and_can_release_it(robot_node, mode_node):
             wait_for(lambda: ws.receive_json()["stopped"] is False, WAIT)
             ws.send_json({"type": "stop_all"})
             wait_for(lambda: mode_node.stopped, WAIT)
+
+
+def test_camera_stream_controls_service_and_tracks_state(backend):
+    node = rclpy.create_node("fake_camera")
+    state_pub = node.create_publisher(Bool, CAMERA_STREAMING_TOPIC, LATCHED)
+    frame_pub = node.create_publisher(CompressedImage, CAMERA_IMAGE_TOPIC, 2)
+    jpeg = b"\xff\xd8camera-frame\xff\xd9"
+
+    def set_stream(request, response):
+        response.success = True
+        response.message = "updated"
+        state_pub.publish(Bool(data=request.data))
+        if request.data:
+            frame = CompressedImage()
+            frame.format = "jpeg"
+            frame.data = jpeg
+            frame_pub.publish(frame)
+        return response
+
+    node.create_service(SetBool, CAMERA_STREAM_SERVICE, set_stream)
+    with spinning(node):
+        backend.camera_stream(True)
+        wait_for(lambda: backend.camera_streaming() is True, WAIT)
+        wait_for(lambda: backend.camera_frame() == jpeg, WAIT)
+        assert backend.camera_frame_sequence() is not None
+        backend.camera_stream(False)
+        wait_for(lambda: backend.camera_streaming() is False, WAIT)
+        assert backend.camera_frame() is None
+        assert backend.camera_frame_sequence() is None
+
+
+def test_camera_node_publishes_initial_stream_state(backend):
+    camera = CameraNode()
+    with spinning(camera):
+        wait_for(lambda: backend.camera_streaming() is False, WAIT)
 
 
 def test_open_mirrors_robot_state(backend, robot):

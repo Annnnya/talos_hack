@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CameraPanel from "@/components/CameraPanel";
 import ClimbPanel from "@/components/ClimbPanel";
 import HingePanel from "@/components/HingePanel";
 import HoldPanel from "@/components/HoldPanel";
@@ -76,6 +77,8 @@ export default function Home() {
     hinge,
     hold,
     tilt,
+    cameraStreaming,
+    cameraFrameSequence,
     lastError,
     clearError,
     send,
@@ -196,6 +199,20 @@ export default function Home() {
           stopDisabled={!connected}
         />
       </div>
+
+      {ros && (
+        <CameraPanel
+          connected={connected}
+          streaming={cameraStreaming}
+          frameSequence={cameraFrameSequence}
+          onToggle={() =>
+            send({
+              type: "camera_stream",
+              enabled: cameraStreaming !== true,
+            })
+          }
+        />
+      )}
 
       {ros && (
         <SpeedSlider

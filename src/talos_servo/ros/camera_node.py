@@ -9,14 +9,21 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CompressedImage
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
+
+from talos_servo.ros.names import (
+    CAMERA_IMAGE_TOPIC,
+    CAMERA_STREAMING_TOPIC,
+    LATCHED,
+)
 
 DEFAULT_CAMERA_INDEX = 0
 DEFAULT_SNAPSHOT_WIDTH = 4608
 DEFAULT_SNAPSHOT_HEIGHT = 2592
 DEFAULT_STREAM_WIDTH = 640
 DEFAULT_STREAM_HEIGHT = 360
-DEFAULT_STREAM_FPS = 15
+DEFAULT_STREAM_FPS = 5
 SNAPSHOT_TIMEOUT_MS = 1000
 SNAPSHOT_PROCESS_TIMEOUT_S = 20.0
 CONTINUOUS_STREAM_TIMEOUT_MS = 0
@@ -80,7 +87,10 @@ class CameraNode(Node):
             )
 
         self._publisher = self.create_publisher(
-            CompressedImage, "/camera/image/compressed", 2
+            CompressedImage, CAMERA_IMAGE_TOPIC, 2
+        )
+        self._stream_state_publisher = self.create_publisher(
+            Bool, CAMERA_STREAMING_TOPIC, LATCHED
         )
         self._snapshot_publisher = self.create_publisher(
             CompressedImage,
@@ -108,6 +118,7 @@ class CameraNode(Node):
                 self._start_streaming()
             except Exception as exc:
                 self.get_logger().error(f"Could not start stream: {exc}")
+        self._publish_stream_state()
         state = "on" if self._stream_process is not None else "off"
         self.get_logger().info(
             f"Camera {self._camera_index} ready, stream {state}"
@@ -233,6 +244,7 @@ class CameraNode(Node):
                 f"No camera frame received within {STARTUP_TIMEOUT_S:g}s"
                 f" (rpicam-vid exit code: {exit_code})"
             )
+        self._publish_stream_state()
 
     def _stop_streaming(self) -> None:
         process, self._stream_process = self._stream_process, None
@@ -252,6 +264,12 @@ class CameraNode(Node):
         with self._frame_lock:
             self._latest_frame = None
             self._published_sequence = self._frame_sequence
+        self._publish_stream_state()
+
+    def _publish_stream_state(self) -> None:
+        self._stream_state_publisher.publish(
+            Bool(data=self._stream_process is not None)
+        )
 
     def _read_frames(self, process: subprocess.Popen[bytes]) -> None:
         if process.stdout is None:
@@ -282,6 +300,7 @@ class CameraNode(Node):
                 self._first_frame.set()
 
     def _publish_latest_frame(self) -> None:
+        self._publish_stream_state()
         process = self._stream_process
         if process is None:
             return

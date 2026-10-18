@@ -36,7 +36,7 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
-from sensor_msgs.msg import Imu, JointState
+from sensor_msgs.msg import CompressedImage, Imu, JointState
 from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
@@ -71,6 +71,7 @@ from talos_servo.ros.convert import (
     steps_to_rad,
 )
 from talos_servo.ros.imu_convert import COVARIANCE_NOT_PROVIDED
+from talos_servo.ros.names import CAMERA_STREAM_SERVICE
 from talos_servo.ros.robot_node import BASE_FRAME, CMD_VEL_TOPIC
 from talos_servo.ros.web_client_node import WebClientNode
 
@@ -151,6 +152,10 @@ class RosBackend:
         # Platform roll and pitch (rad) from the IMU, and when they came.
         self._tilt: tuple[float, float] | None = None
         self._tilt_at: float | None = None
+        self._camera_streaming: bool | None = None
+        self._camera_streaming_at: float | None = None
+        self._camera_frame: bytes | None = None
+        self._camera_frame_sequence = 0
 
     # --- lifecycle -------------------------------------------------------
     def open(self) -> None:
@@ -168,6 +173,8 @@ class RosBackend:
                 on_active_input=self._on_active_input,
                 on_hold_state=self._on_hold_state,
                 on_imu=self._on_imu,
+                on_camera_frame=self._on_camera_frame,
+                on_camera_streaming=self._on_camera_streaming,
                 cmd_vel_topic=self.cmd_vel_topic,
                 context=self._context,
             )
@@ -582,6 +589,64 @@ class RosBackend:
             "roll_deg": math.degrees(roll),
             "pitch_deg": math.degrees(pitch),
         }
+
+    def _on_camera_streaming(self, msg: Bool) -> None:
+        with self._lock:
+            self._camera_streaming = msg.data
+            self._camera_streaming_at = self._clock()
+            if not msg.data:
+                self._camera_frame = None
+
+    def camera_streaming(self) -> bool | None:
+        with self._lock:
+            if not self._camera_state_is_fresh():
+                return None
+            return self._camera_streaming
+
+    def _camera_state_is_fresh(self) -> bool:
+        return (
+            self._camera_streaming_at is not None
+            and self._clock() - self._camera_streaming_at <= STATUS_STALE_AFTER
+        )
+
+    def _on_camera_frame(self, msg: CompressedImage) -> None:
+        with self._lock:
+            if self._camera_streaming is False:
+                return
+            self._camera_frame = bytes(msg.data)
+            self._camera_frame_sequence += 1
+
+    def camera_frame_sequence(self) -> int | None:
+        with self._lock:
+            if (
+                self._camera_frame is None
+                or self._camera_streaming is not True
+                or not self._camera_state_is_fresh()
+            ):
+                return None
+            return self._camera_frame_sequence
+
+    def camera_frame(self) -> bytes | None:
+        with self._lock:
+            if (
+                self._camera_frame is None
+                or self._camera_streaming is not True
+                or not self._camera_state_is_fresh()
+            ):
+                return None
+            return self._camera_frame
+
+    def camera_stream(self, enabled: bool) -> None:
+        client = self._require_node().camera_stream_client
+        if not client.wait_for_service(timeout_sec=SERVICE_TIMEOUT):
+            raise CommandError(
+                f"camera stream: no {CAMERA_STREAM_SERVICE} service"
+            )
+        self._call(
+            client,
+            SetBool.Request(data=enabled),
+            "camera stream",
+        )
 
     def hinge_hold(self, enabled: bool, setpoint_a: float) -> None:
         """Set the hold setpoint (A), then turn the hold on or off."""

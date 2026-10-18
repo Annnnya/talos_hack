@@ -38,6 +38,11 @@ HOLD_STATE_TOPIC = "/hinge_hold/state"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
 
+# Camera node
+CAMERA_IMAGE_TOPIC = "/camera/image/compressed"
+CAMERA_STREAM_SERVICE = "/camera/stream"
+CAMERA_STREAMING_TOPIC = "/camera/streaming"
+
 # Hardware bridge: bend calibration (#84), std_srvs/Trigger services at
 # <node>/<hinge joint>/calibrate/<step>; the node runs as `robot`.
 CALIBRATE_START = "start"
