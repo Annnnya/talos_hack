@@ -31,6 +31,7 @@ const BUTTON =
 
 export default function Joystick({
   active,
+  allowed,
   disabled,
   onStart,
   onEnd,
@@ -38,6 +39,8 @@ export default function Joystick({
   stopDisabled,
 }: {
   active: Direction | null;
+  /** Directions the robot mode allows; the others are disabled. */
+  allowed: ReadonlySet<Direction>;
   disabled: boolean;
   onStart: (dir: Direction) => void;
   onEnd: (dir: Direction) => void;
@@ -66,7 +69,7 @@ export default function Joystick({
             aria-label={LABELS[dir].name}
             aria-pressed={on}
             title={`${LABELS[dir].name} (${KEY_FOR[dir]})`}
-            disabled={disabled}
+            disabled={disabled || !allowed.has(dir)}
             onPointerDown={down(dir)}
             onPointerUp={up(dir)}
             onPointerLeave={up(dir)}
