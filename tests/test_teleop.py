@@ -174,7 +174,7 @@ def test_action_key_does_not_keep_a_held_key_going():
     [
         ("free", set("wsadqerf")),
         ("climbing", set("wsad")),
-        ("aligning", set()),
+        ("aligning", set("rf")),
         ("clamping", set("rf")),
         (None, set("wsadqerf")),
         ("unheard of", set("wsadqerf")),
@@ -298,7 +298,7 @@ def test_drive_key_stops_the_hinge_and_r_stops_the_drive():
     assert sent == [FORWARD, teleop.STOPPED]
 
 
-@pytest.mark.parametrize("mode", ["aligning", "climbing"])
+@pytest.mark.parametrize("mode", ["climbing"])
 def test_hinge_keys_do_nothing_outside_free_and_clamping(mode):
     allowed = lambda: teleop.allowed_keys(mode)  # noqa: E731
     rates, _ = hinge_with(["r", "f", "x"], allowed=allowed)

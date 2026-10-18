@@ -16,7 +16,12 @@ leg_length_m: 0.155
 wheel_radius_m: 0.03
 
 vectors:
-  # max fold (bend_min_deg)
+  # measured max fold (bend_min_deg)
+  - {alpha_deg: 36, alpha_rate_rad_s: 0.5,
+     wheels_rad_s: [1.478448, 1.478448, -1.478448, -1.478448]}
+  - {alpha_deg: 36, alpha_rate_rad_s: -0.5,
+     wheels_rad_s: [-1.478448, -1.478448, 1.478448, 1.478448]}
+  # the old placeholder max fold
   - {alpha_deg: 90, alpha_rate_rad_s: 0.5,
      wheels_rad_s: [1.163346, 1.163346, -1.163346, -1.163346]}
   - {alpha_deg: 90, alpha_rate_rad_s: -0.5,
@@ -39,6 +44,11 @@ vectors:
   - {alpha_deg: 150, alpha_rate_rad_s: -0.5,
      wheels_rad_s: [-0.584308, -0.584308, 0.584308, 0.584308]}
   # flat (bend_max_deg): no roll, only the leg turn
+  # just inside flat (bend_max_deg)
+  - {alpha_deg: 179, alpha_rate_rad_s: 0.5,
+     wheels_rad_s: [0.261272, 0.261272, -0.261272, -0.261272]}
+  - {alpha_deg: 179, alpha_rate_rad_s: -0.5,
+     wheels_rad_s: [-0.261272, -0.261272, 0.261272, 0.261272]}
   - {alpha_deg: 180, alpha_rate_rad_s: 0.5,
      wheels_rad_s: [0.25, 0.25, -0.25, -0.25]}
   - {alpha_deg: 180, alpha_rate_rad_s: -0.5,
