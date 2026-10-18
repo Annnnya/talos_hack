@@ -58,6 +58,8 @@ export type ServerMessage =
       limits: Limits;
       settings: Record<string, ServoSettings>;
       servos: ServoState[];
+      /** True while STOP locks twist_mux; null without ROS. */
+      stopped: boolean | null;
     }
   | { type: "error"; message: string };
 
@@ -67,6 +69,8 @@ export type ClientMessage =
   | { type: "torque"; joint: string; enabled: boolean }
   | { type: "stop"; joint: string }
   | { type: "stop_all" }
+  /** Release STOP so twist_mux drives again, ROS only. */
+  | { type: "release_stop" }
   /** Body velocity (m/s, m/s, rad/s), ROS only. Re-send while held: see useDrive. */
   | { type: "drive"; vx: number; vy: number; wz: number }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
