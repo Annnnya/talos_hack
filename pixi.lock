@@ -141,6 +141,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.1-pyh5ded981_0.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-controller-manager-msgs-4.49.0-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-diagnostic-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-geometry-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-nav-msgs-5.3.8-hb0f4dca_25.conda
@@ -188,6 +189,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-ament-pep257-0.17.5-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-ament-uncrustify-0.17.5-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-builtin-interfaces-2.0.4-np2py312h1bab3cf_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-controller-manager-msgs-4.49.0-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-cyclonedds-0.10.5-py312h79554f9_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-diagnostic-msgs-5.3.8-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-distro-mutex-0.19.0-jazzy_25.conda
@@ -399,6 +401,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.1-pyh5ded981_0.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-controller-manager-msgs-4.49.0-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-diagnostic-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-geometry-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-nav-msgs-5.3.8-he8cfe8b_25.conda
@@ -446,6 +449,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-ament-pep257-0.17.5-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-ament-uncrustify-0.17.5-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-builtin-interfaces-2.0.4-np2py312h9c6c671_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-controller-manager-msgs-4.49.0-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-cyclonedds-0.10.5-py312h07e35d6_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-diagnostic-msgs-5.3.8-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-distro-mutex-0.19.0-jazzy_25.conda
@@ -885,6 +889,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.1-pyh5ded981_0.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-controller-manager-msgs-4.49.0-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-diagnostic-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-geometry-msgs-5.3.8-hb0f4dca_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-imu-filter-madgwick-2.1.6-hb0f4dca_25.conda
@@ -949,6 +954,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-common-interfaces-5.3.8-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-composition-interfaces-2.0.4-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-console-bridge-vendor-1.7.2-np2py312hd81cb55_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-controller-manager-msgs-4.49.0-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-cyclonedds-0.10.5-py312h79554f9_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-diagnostic-msgs-5.3.8-np2py312h1bab3cf_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-diagnostic-updater-4.2.7-np2py312h1bab3cf_25.conda
@@ -1354,6 +1360,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.1-pyh5ded981_0.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-controller-manager-msgs-4.49.0-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-diagnostic-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-geometry-msgs-5.3.8-he8cfe8b_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-imu-filter-madgwick-2.1.6-he8cfe8b_25.conda
@@ -1418,6 +1425,7 @@ environments:
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-common-interfaces-5.3.8-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-composition-interfaces-2.0.4-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-console-bridge-vendor-1.7.2-np2py312h85c815e_25.conda
+      - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-controller-manager-msgs-4.49.0-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-cyclonedds-0.10.5-py312h07e35d6_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-diagnostic-msgs-5.3.8-np2py312h9c6c671_25.conda
       - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-diagnostic-updater-4.2.7-np2py312h9c6c671_25.conda
@@ -12150,6 +12158,13 @@ packages:
     - zstd >=1.5.7,<1.6.0a0
   size: 387535
   timestamp: 1786599623274
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-controller-manager-msgs-4.49.0-hb0f4dca_25.conda
+  sha256: 5dfe2213fd30e62a58400b0c1263a18cf081dfc236d4480b3205d654c7159045
+  md5: 99c895dda8a7185d25dae865c7b1af09
+  depends:
+  - ros2-controller-manager-msgs ==4.49.0
+  size: 2089
+  timestamp: 1791433832142
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros-jazzy-diagnostic-msgs-5.3.8-hb0f4dca_25.conda
   sha256: dcfbdd88133059917d01e3fe77614ec1ea42df9f27d962f427b6bec12a6b9555
   md5: e71b4ec313800c339d41b8f633f70ca3
@@ -13186,6 +13201,26 @@ packages:
   license: Apache-2.0 OR BSD-3-Clause
   size: 28611
   timestamp: 1791430620569
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-controller-manager-msgs-4.49.0-np2py312h1bab3cf_25.conda
+  sha256: 914a4ae32b7b3a7016dfaf39d05dddf26622afa46ba2426f18d9576562cf6945
+  md5: 1ef8059206f3dfabef2ffc377007236e
+  depends:
+  - python
+  - ros2-builtin-interfaces
+  - ros2-distro-mutex 0.19.* jazzy_*
+  - ros2-lifecycle-msgs
+  - ros2-ros-workspace
+  - ros2-rosidl-default-runtime
+  - ros2-std-msgs
+  - libstdcxx >=15
+  - libgcc >=15
+  - __glibc >=2.28,<3.0.a0
+  - numpy >=1.25,<3
+  - python_abi 3.12.* *_cp312
+  - ros2-distro-mutex >=0.19.0,<0.20.0a0
+  license: BSD-3-Clause
+  size: 587561
+  timestamp: 1791433471705
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-64/ros2-cyclonedds-0.10.5-py312h79554f9_25.conda
   sha256: 70ae70779a100468d667a6b60b73e9de5f22bad3581237ebc8c7f32e1f42a64b
   md5: 5e11be3c940791e9abe9b52615cf0e74
@@ -16670,6 +16705,13 @@ packages:
   license: Apache-2.0 OR BSD-3-Clause
   size: 24624
   timestamp: 1791428379408
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-controller-manager-msgs-4.49.0-he8cfe8b_25.conda
+  sha256: 799573933ff4e6120f8fcada38ecc0a73eafc84cf5809e07ee915e5af45fc294
+  md5: bfeb82f652a6e0a6624a90cc9b1cad19
+  depends:
+  - ros2-controller-manager-msgs ==4.49.0
+  size: 2094
+  timestamp: 1791449979744
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros-jazzy-diagnostic-msgs-5.3.8-he8cfe8b_25.conda
   sha256: 2007e9b0fcaa2d8c4b765083ef9b4916174a4751874da2cb3e5c7e72c182800a
   md5: 3487ed1ae6c1f4ccc7e2019caccbfc8c
@@ -17706,6 +17748,26 @@ packages:
   license: Apache-2.0 OR BSD-3-Clause
   size: 28624
   timestamp: 1791447235518
+- conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-controller-manager-msgs-4.49.0-np2py312h9c6c671_25.conda
+  sha256: 9db218b0dbf9632207c7c998a7c5834637abe61cf9fb8375e43dba1e96830af5
+  md5: f740f6588ae5c44c9736b333519ce0a7
+  depends:
+  - python
+  - ros2-builtin-interfaces
+  - ros2-distro-mutex 0.19.* jazzy_*
+  - ros2-lifecycle-msgs
+  - ros2-ros-workspace
+  - ros2-rosidl-default-runtime
+  - ros2-std-msgs
+  - libstdcxx >=15
+  - libgcc >=15
+  - __glibc >=2.28,<3.0.a0
+  - python_abi 3.12.* *_cp312
+  - ros2-distro-mutex >=0.19.0,<0.20.0a0
+  - numpy >=1.25,<3
+  license: BSD-3-Clause
+  size: 598739
+  timestamp: 1791449696435
 - conda: https://conda.anaconda.org/robostack-jazzy/linux-aarch64/ros2-cyclonedds-0.10.5-py312h07e35d6_25.conda
   sha256: e819056554ef5fb8fe8dbcb280923f3f08005f28d7ef846455b5347d228587f3
   md5: 284a00e51f5d51a1f3db3072168c1c91
