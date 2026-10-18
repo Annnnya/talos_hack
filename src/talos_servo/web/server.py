@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from talos_servo.bus import (
@@ -156,6 +157,13 @@ def _dispatch(
             raise CommandError(f"setpoint must be 0 or more, got {setpoint}")
         setpoint = min(setpoint, controller.config.hinge_hold.max_current_a)
         return lambda: controller.hinge_hold(enabled, setpoint)
+    if kind == "camera_stream":
+        if not ros:
+            raise CommandError("camera streaming needs `talos-servo web --ros`")
+        enabled = msg.get("enabled")
+        if not isinstance(enabled, bool):
+            raise CommandError("enabled must be a boolean")
+        return lambda: controller.camera_stream(enabled)
     if kind == "wall_side":
         if not ros:
             raise CommandError(
@@ -244,6 +252,9 @@ def create_app(
             "hinge_hold": controller.hold_state(),
             # Platform roll and pitch from the IMU (#91); None without it.
             "tilt": controller.tilt(),
+            # None until a camera node publishes its latched state.
+            "camera_streaming": controller.camera_streaming(),
+            "camera_frame_sequence": controller.camera_frame_sequence(),
         }
 
     async def control_loop() -> None:
@@ -274,6 +285,17 @@ def create_app(
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "clients": len(hub.clients)}
+
+    @app.get("/api/camera/frame.jpg")
+    async def camera_frame() -> Response:
+        frame = controller.camera_frame()
+        if frame is None:
+            return Response(status_code=404)
+        return Response(
+            content=frame,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

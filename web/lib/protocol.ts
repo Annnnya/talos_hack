@@ -120,6 +120,10 @@ export type ServerMessage =
       hinge_hold: HoldState | null;
       /** Null without ROS or while the IMU chain is quiet. */
       tilt: TiltState | null;
+      /** Null without the camera node. */
+      camera_streaming: boolean | null;
+      /** Null until the camera node publishes a frame. */
+      camera_frame_sequence: number | null;
     }
   | { type: "error"; message: string };
 
@@ -145,6 +149,8 @@ export type ClientMessage =
   | { type: "wall_side"; speed: number }
   /** Hinge current hold on/off with its setpoint (A), ROS only. */
   | { type: "hinge_hold"; enabled: boolean; setpoint: number }
+  /** Enable or disable the camera stream, ROS only. */
+  | { type: "camera_stream"; enabled: boolean }
   | { type: "settings"; joint: string; move_speed?: number; acc?: number };
 
 export const STEPS_PER_TURN = 4096;

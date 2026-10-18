@@ -60,6 +60,8 @@ def test_initial_state_lists_enabled_joints(client):
     assert msg["ros"] is False
     # No twist_mux on the direct bus, so no STOP lock to report.
     assert msg["stopped"] is None
+    assert msg["camera_streaming"] is None
+    assert msg["camera_frame_sequence"] is None
     # No mode node or twist_mux either.
     assert (msg["mode"], msg["mode_reason"], msg["active_input"]) == (
         None,
@@ -67,6 +69,21 @@ def test_initial_state_lists_enabled_joints(client):
         None,
     )
     assert all(s["last_command"] is None for s in msg["servos"])
+
+
+def test_camera_frame_api_returns_jpeg(client, robot, monkeypatch):
+    frame = b"\xff\xd8camera-frame\xff\xd9"
+    monkeypatch.setattr(robot, "camera_frame", lambda: frame)
+    response = client.get("/api/camera/frame.jpg?frame=1")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.content == frame
+
+
+def test_camera_frame_api_is_unavailable_without_a_frame(client):
+    response = client.get("/api/camera/frame.jpg")
+    assert response.status_code == 404
 
 
 def test_each_browser_gets_its_own_client_id(client):
@@ -322,6 +339,37 @@ def test_release_stop_reaches_the_backend():
 
     server._dispatch(Recorder(), {"type": "release_stop"}, "abc", ros=True)()
     assert calls == [{"source": "web", "client": "abc"}]
+
+
+def test_camera_stream_reaches_the_backend():
+    calls = []
+
+    class CameraRecorder:
+        def camera_stream(self, enabled):
+            calls.append(enabled)
+
+    server._dispatch(
+        CameraRecorder(),
+        {"type": "camera_stream", "enabled": True},
+        ros=True,
+    )()
+    assert calls == [True]
+
+
+def test_camera_stream_requires_ros(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "camera_stream", "enabled": True})
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+
+
+def test_camera_stream_rejects_non_boolean_enabled():
+    with pytest.raises(CommandError, match="enabled must be a boolean"):
+        server._dispatch(
+            object(),
+            {"type": "camera_stream", "enabled": "false"},
+            ros=True,
+        )
 
 
 class ModeRecorder:

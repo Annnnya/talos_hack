@@ -385,6 +385,7 @@ base:
 | `/camera/snapshot/compressed` | `sensor_msgs/CompressedImage` | out: one full-resolution JPEG per request |
 | `/camera/take_snapshot` | `std_srvs/Trigger` | capture and publish one snapshot |
 | `/camera/stream` | `std_srvs/SetBool` | enable/disable camera stream |
+| `/camera/streaming` | `std_msgs/Bool` | latched camera stream status |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out: EKF pose |
 | `/web/cmd_vel` | `geometry_msgs/TwistStamped` | in: twist_mux, web |
 | `/keyboard/cmd_vel` | `geometry_msgs/TwistStamped` | in: twist_mux, keyboard |
@@ -563,6 +564,9 @@ Open `http://<pi>.local:8000` on a phone or laptop on the same network.
 - The header shows the connection, the mode and why it changed, and which
   input is driving (web, keyboard or nobody), also when `drive --ros`
   changes them.
+- The camera button starts or stops the camera stream when the camera node is
+  running; its icon and label reflect the reported stream state, and live
+  frames appear below the button.
 - On a desktop the keys are the same as in `drive --ros`: W/S, A/D, Q/E,
   Space, Enter, N and L.
 - Driving and the mode buttons need the ROS web server (`web --ros`) with the

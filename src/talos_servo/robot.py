@@ -444,6 +444,19 @@ class Robot:
         """The platform tilt comes from the IMU chain, over ROS."""
         return None
 
+    def camera_streaming(self) -> bool | None:
+        """The camera is controlled by its ROS node."""
+        return None
+
+    def camera_frame_sequence(self) -> int | None:
+        return None
+
+    def camera_frame(self) -> bytes | None:
+        return None
+
+    def camera_stream(self, enabled: bool) -> None:
+        raise CommandError("camera streaming needs `talos-servo web --ros`")
+
     def set_torque(self, joint: str, enabled: bool) -> None:
         with self._lock:
             j = self._get(joint)

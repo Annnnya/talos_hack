@@ -15,6 +15,17 @@ import type {
 
 export type ConnStatus = "connecting" | "connected" | "disconnected";
 
+export function cameraFrameUrl(sequence: number): string {
+  const bridge = process.env.NEXT_PUBLIC_BRIDGE_URL;
+  if (!bridge) return `/api/camera/frame.jpg?frame=${sequence}`;
+  const url = new URL(bridge);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = "/api/camera/frame.jpg";
+  url.search = `?frame=${sequence}`;
+  url.hash = "";
+  return url.toString();
+}
+
 function bridgeUrl() {
   // When served by talos-servo web (normal use), connect back to the same host.
   // For `npm run dev`, set NEXT_PUBLIC_BRIDGE_URL=ws://<pi>.local:8000/ws
@@ -42,6 +53,10 @@ export function useBridge() {
   const [hinge, setHinge] = useState<HingeState | null>(null);
   const [hold, setHold] = useState<HoldState | null>(null);
   const [tilt, setTilt] = useState<TiltState | null>(null);
+  const [cameraStreaming, setCameraStreaming] = useState<boolean | null>(null);
+  const [cameraFrameSequence, setCameraFrameSequence] = useState<number | null>(
+    null,
+  );
   const [settings, setSettings] = useState<Record<string, ServoSettings>>({});
   const [clientId, setClientId] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -71,6 +86,8 @@ export function useBridge() {
           setHinge(msg.hinge ?? null);
           setHold(msg.hinge_hold ?? null);
           setTilt(msg.tilt ?? null);
+          setCameraStreaming(msg.camera_streaming ?? null);
+          setCameraFrameSequence(msg.camera_frame_sequence ?? null);
           setSettings(msg.settings);
         } else if (msg.type === "error") {
           setLastError(msg.message);
@@ -109,6 +126,8 @@ export function useBridge() {
     hinge,
     hold,
     tilt,
+    cameraStreaming,
+    cameraFrameSequence,
     settings,
     clientId,
     lastError,
