@@ -123,7 +123,8 @@ The hinge does not move at startup: send a new goal to move it.
 ### Robot model (#64)
 
 `description/talos.urdf.xacro` is the robot for ROS: the `bend` hinge, the
-two legs and the four mecanum wheels, plus `imu_link` and `camera_link`. It
+two legs and the four mecanum wheels, plus `imu_link`, `camera_link` and
+`camera_optical_frame`. It
 reads its sizes, limits and joint names from the `model` and `base` sections
 of `config/robot.yaml`, so change them there.
 
@@ -441,12 +442,17 @@ Camera index 0 is the default for the Camera Module 3 connected to CSI 0.
 `/camera/take_snapshot` (`std_srvs/Trigger`) captures a full-resolution JPEG
 and publishes it once on `/camera/snapshot/compressed`. `/camera/stream`
 (`std_srvs/SetBool`) toggles 15 FPS 640x360 JPEG frames on
-`/camera/image/compressed`. Taking a snapshot temporarily pauses an active
-stream and resumes it after capture. Resolution, frame rate, and camera index
-are in `config/camera.yaml`.
+`/camera/image/compressed`. The stream starts on launch because
+`stream_on_start` is true in `config/camera.yaml`. Taking a snapshot
+temporarily pauses an active stream and resumes it after capture. Resolution,
+frame rate, and camera index are in `config/camera.yaml`. Images use the
+`camera_optical_frame` from the robot model.
 
 Run `pixi run -e viz view-model` on a computer with a graphical display to see
-the robot model plus live and snapshot image displays. Call these services to
+the robot model plus live and snapshot image displays. The `viz` environment
+installs the compressed image transport that RViz needs to decode the JPEG
+frames, and the snapshot display also gets the last snapshot taken before RViz
+opened. Call these services to
 control the camera from a second terminal after `pixi shell -e viz`:
 
 ```
