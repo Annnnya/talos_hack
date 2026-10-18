@@ -22,7 +22,7 @@ from talos_servo.bus import (
     ServoError,
 )
 from talos_servo.defaults import DEFAULT_MOVE_SPEED, WEB_CMD_VEL_TOPIC
-from talos_servo.modes import Mode
+from talos_servo.modes import drive_error
 from talos_servo.robot import SOURCE_WEB, CommandError, clamp
 from talos_servo.web.backend import RobotBackend
 
@@ -133,10 +133,11 @@ def _dispatch(
         if not ros:
             raise CommandError("driving the base needs `talos-servo web --ros`")
         vx, vy, wz = (_finite(msg, k) for k in ("vx", "vy", "wz"))
-        # The robot cannot turn on the walls; the climb controller also
-        # rejects it (#80).
-        if wz and controller.robot_status().mode == Mode.CLIMBING.value:
-            raise CommandError("cannot rotate while climbing")
+        # Same per-mode rule as the keyboard; the page greys the buttons
+        # out too, but a stale page must not drive the wheels while clamping.
+        error = drive_error(controller.robot_status().mode, vx, vy, wz)
+        if error:
+            raise CommandError(error)
         return lambda: controller.drive(vx, vy, wz, **who)
     if kind in MODE_COMMANDS:
         if not ros:

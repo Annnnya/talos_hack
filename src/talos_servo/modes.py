@@ -38,6 +38,51 @@ TRANSITIONS: dict[tuple[Mode, Event], Mode] = {
 # robot, so STOP only stops the wheels.
 HOLDING_MODES = frozenset({Mode.CLAMPING, Mode.CLIMBING})
 
+# Body velocity axes a driver may use in each mode, for every interface.
+# Climbing cannot turn on the walls, and aligning and clamping move the robot
+# by themselves.
+LINEAR_X, LINEAR_Y, ANGULAR_Z = "vx", "vy", "wz"
+ALL_AXES = frozenset({LINEAR_X, LINEAR_Y, ANGULAR_Z})
+DRIVE_AXES_BY_MODE: dict[Mode, frozenset[str]] = {
+    Mode.FREE: ALL_AXES,
+    Mode.CLIMBING: frozenset({LINEAR_X, LINEAR_Y}),
+    Mode.ALIGNING: frozenset(),
+    Mode.CLAMPING: frozenset(),
+}
+
+
+def allowed_axes(mode: str | None) -> frozenset[str]:
+    """Drive axes allowed in `mode`.
+
+    An unknown mode (no mode node running) allows every axis, like free.
+    That fails open on purpose: without the mode node its stop lock goes
+    quiet, so twist_mux is locked and nothing moves the robot anyway.
+    """
+    try:
+        return DRIVE_AXES_BY_MODE[Mode(mode)]
+    except ValueError:
+        return ALL_AXES
+
+
+def drive_error(
+    mode: str | None, vx: float, vy: float, wz: float
+) -> str | None:
+    """Why a drive is refused in `mode`, or None if it is allowed.
+
+    A zero twist always passes, so stopping works in every mode.
+    """
+    used = {
+        axis
+        for axis, value in ((LINEAR_X, vx), (LINEAR_Y, vy), (ANGULAR_Z, wz))
+        if value
+    }
+    allowed = allowed_axes(mode)
+    if used <= allowed:
+        return None
+    if allowed:
+        return f"cannot rotate while {mode}"
+    return f"cannot drive while {mode}"
+
 
 class RobotStatus(NamedTuple):
     """Shared robot state from the mode node and mux_status, as clients see
