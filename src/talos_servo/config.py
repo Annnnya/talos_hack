@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -17,6 +17,7 @@ from talos_servo.bus import (
     MAX_SERVO_ID,
     MAX_SPEED,
     STEPS_PER_TURN,
+    joint_position,
 )
 from talos_servo.hinge import Hinge, HingeRangeError
 
@@ -146,18 +147,13 @@ class RobotConfig:
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
+    # The hinge angle converter, built on load from model.bend_flat_steps;
+    # None without one.
+    hinge: Hinge | None = field(default=None, compare=False)
 
     @property
     def enabled_joints(self) -> tuple[JointConfig, ...]:
         return tuple(j for j in self.joints if j.enabled)
-
-    def hinge(self) -> Hinge | None:
-        """The hinge angle converter, or None without a flat position."""
-        model = self.model
-        if model is None or model.bend_flat_steps is None:
-            return None
-        joint = next(j for j in self.joints if j.name == model.hinge_joint)
-        return _hinge(model, joint)
 
 
 def parse_config(data: dict) -> RobotConfig:
@@ -203,20 +199,9 @@ def parse_config(data: dict) -> RobotConfig:
     return config
 
 
-def _hinge(model: ModelConfig, joint: JointConfig) -> Hinge:
-    """Build the hinge, turning the raw flat position into joint steps."""
-    raw = model.bend_flat_steps
-    assert raw is not None
-    flat = MAX_POSITION - raw if joint.inverted else raw
-    try:
-        return Hinge(model, flat)
-    except HingeRangeError as exc:
-        raise ConfigError(f"model.bend_flat_steps: {exc}") from exc
-
-
 def _clamp_hinge(config: RobotConfig) -> RobotConfig:
-    """Narrow the hinge joint's min_pos/max_pos to the model bend range, so
-    every move is clamped to it, whoever sends it."""
+    """Build the hinge and narrow its joint's min_pos/max_pos to the model
+    bend range, so every move is clamped to it, whoever sends it."""
     model = config.model
     assert model is not None
     joint = next(j for j in config.joints if j.name == model.hinge_joint)
@@ -227,7 +212,12 @@ def _clamp_hinge(config: RobotConfig) -> RobotConfig:
                 "enabled: the raw servo position when the robot lies flat"
             )
         return config
-    low, high = _hinge(model, joint).step_range
+    flat = joint_position(model.bend_flat_steps, joint.inverted)
+    try:
+        hinge = Hinge(model, flat)
+    except HingeRangeError as exc:
+        raise ConfigError(f"model.bend_flat_steps: {exc}") from exc
+    low, high = hinge.step_range
     min_pos, max_pos = max(joint.min_pos, low), min(joint.max_pos, high)
     if min_pos > max_pos:
         raise ConfigError(
@@ -238,6 +228,7 @@ def _clamp_hinge(config: RobotConfig) -> RobotConfig:
     return replace(
         config,
         joints=tuple(clamped if j is joint else j for j in config.joints),
+        hinge=hinge,
     )
 
 

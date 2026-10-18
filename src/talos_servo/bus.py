@@ -55,6 +55,13 @@ MAX_POSITION = 4095
 STEPS_PER_TURN = MAX_POSITION + 1
 RAD_PER_STEP = 2 * math.pi / STEPS_PER_TURN
 
+
+def joint_position(raw: int, inverted: bool) -> int:
+    """Joint steps for a raw servo position, or the other way round: an
+    inverted joint is mirrored over the turn, its own inverse."""
+    return MAX_POSITION - raw if inverted else raw
+
+
 # Present load is a 10-bit magnitude plus a sign bit; voltage is reported in 0.1
 # V.
 LOAD_SIGN_BIT = 10

@@ -187,7 +187,7 @@ def test_enabled_hinge_needs_a_flat_position():
 
 
 def test_disabled_hinge_needs_no_flat_position():
-    assert parse_config({**BASE, "model": MODEL}).hinge() is None
+    assert parse_config({**BASE, "model": MODEL}).hinge is None
 
 
 def test_bend_limits_narrow_to_the_hinge_range():
@@ -211,7 +211,7 @@ def test_bend_limits_outside_the_hinge_range_are_rejected():
 def test_inverted_hinge_flat_is_a_raw_servo_position():
     # Raw 0 on an inverted servo is joint step 4095.
     data = hinge_data({"inverted": True}, bend_flat_steps=0)
-    assert parse_config(data).hinge().flat_steps == 4095
+    assert parse_config(data).hinge.flat_steps == 4095
     joint = bend_joint(data)
     assert (joint.min_pos, joint.max_pos) == (3071, 4095)
 
@@ -224,7 +224,7 @@ def test_repo_config_is_valid():
 
 def test_repo_config_clamps_bend_to_the_hinge_range():
     config = load_config(ROBOT_CONFIG)
-    hinge = config.hinge()
+    hinge = config.hinge
     assert hinge is not None
     bend = next(j for j in config.joints if j.name == hinge.joint)
     assert (bend.min_pos, bend.max_pos) == hinge.step_range

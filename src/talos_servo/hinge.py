@@ -8,7 +8,7 @@ the servo angle, so with the flat servo position known:
 
 `steps` and `flat_steps` are joint steps as `Robot` reports them, after
 `inverted`, so folding always lowers the steps; flip `inverted` if the hinge
-folds the other way. `RobotConfig.hinge()` turns the raw
+folds the other way. `RobotConfig.hinge` turns the raw
 `model.bend_flat_steps` into joint steps.
 
 The servo runs in position mode, which covers one turn (0..4095) and never

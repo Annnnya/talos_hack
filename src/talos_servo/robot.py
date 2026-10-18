@@ -23,11 +23,11 @@ from typing import Any
 from talos_servo.bus import (
     DEFAULT_ACCELERATION,
     MAX_ACCELERATION,
-    MAX_POSITION,
     MODE_POSITION,
     MODE_WHEEL,
     ServoBus,
     ServoError,
+    joint_position,
 )
 from talos_servo.config import POSITION, SPEED, JointConfig, RobotConfig
 from talos_servo.mecanum import (
@@ -472,14 +472,10 @@ class Robot:
         return -speed if self._configs[j.name].inverted else speed
 
     def _position_to_bus(self, j: Joint, position: int) -> int:
-        return (
-            MAX_POSITION - position
-            if self._configs[j.name].inverted
-            else position
-        )
+        return joint_position(position, self._configs[j.name].inverted)
 
     def _position_from_bus(self, j: Joint, raw: int) -> int:
-        return self._position_to_bus(j, raw)  # mirroring is its own inverse
+        return joint_position(raw, self._configs[j.name].inverted)
 
     def _get(self, joint: str) -> Joint:
         try:
