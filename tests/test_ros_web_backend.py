@@ -29,7 +29,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from geometry_msgs.msg import TwistStamped  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
-from std_msgs.msg import String  # noqa: E402
+from std_msgs.msg import Float64, String  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
 from talos_servo import teleop  # noqa: E402
@@ -43,6 +43,7 @@ from talos_servo.ros import cli_commands  # noqa: E402
 from talos_servo.ros.mode_node import ModeNode  # noqa: E402
 from talos_servo.ros.names import (  # noqa: E402
     ACTIVE_INPUT_TOPIC,
+    EXPANSION_RATE_TOPIC,
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
@@ -912,3 +913,37 @@ def test_browser_drive_reaches_the_web_input_and_leaving_stops_only_it(
             assert velocity(web_input[-1]) == (0.1, 0.0, 0.0)
         wait_for(lambda: velocity(web_input[-1]) == (0.0, 0.0, 0.0), WAIT)
         assert base_robot.joints["fl"].target_speed == 100
+
+
+def test_drive_over_ros_moves_the_hinge_with_r(base_node):
+    received: list[Float64] = []
+    node = rclpy.create_node("expansion_listener")
+    node.create_subscription(Float64, EXPANSION_RATE_TOPIC, received.append, 10)
+    backend = recording_backend([])
+    rates: list[float] = []
+    real_move = backend.move_hinge
+
+    def record(rate: float) -> None:
+        rates.append(rate)
+        real_move(rate)
+
+    backend.move_hinge = record
+
+    def subscribed() -> str:
+        wait_for(
+            lambda: backend._node.expansion_pub.get_subscription_count(), WAIT
+        )
+        return "r"
+
+    with spinning(node):
+        cli_commands.drive_over_ros(
+            backend,
+            scripted_keys([subscribed, *["r"] * 4]),
+            linear=0.1,
+            angular=0.5,
+            out=lambda _line: None,
+        )
+        rate = BASE_CONFIG.expansion.max_rate_rad_s
+        assert rates == [rate] * 5 + [0.0]
+        wait_for(lambda: any(m.data == rate for m in received), WAIT)
+        wait_for(lambda: received[-1].data == 0.0, WAIT)

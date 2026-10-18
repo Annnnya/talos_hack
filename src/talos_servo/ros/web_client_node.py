@@ -14,12 +14,13 @@ from geometry_msgs.msg import TwistStamped
 from rclpy.context import Context
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.defaults import QUEUE_DEPTH, ROBOT_NS
 from talos_servo.ros.names import (
     ACTIVE_INPUT_TOPIC,
+    EXPANSION_RATE_TOPIC,
     LATCHED,
     MODE_REASON_TOPIC,
     MODE_TOPIC,
@@ -65,6 +66,10 @@ class WebClientNode(Node):
         )
         self.cmd_vel_pub = self.create_publisher(
             TwistStamped, cmd_vel_topic, QUEUE_DEPTH
+        )
+        # Hinge opening speed for the expansion node (#76).
+        self.expansion_pub = self.create_publisher(
+            Float64, EXPANSION_RATE_TOPIC, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, on_joint_states, QUEUE_DEPTH

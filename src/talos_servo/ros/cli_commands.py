@@ -83,7 +83,8 @@ def drive_over_ros(
 ) -> None:
     """Keyboard driving on the keyboard input of twist_mux.
 
-    N and L ask the mode node for wall nearby and release. Space also turns
+    N and L ask the mode node for wall nearby and release. R and F open and
+    close the hinge through the expansion node while held. Space also turns
     STOP on for every input and Enter releases it. The mode decides which
     drive keys work, and a status line shows the mode, why it changed and
     which input drives. Quitting stops only this input, so the web keeps
@@ -116,6 +117,8 @@ def drive_over_ros(
             },
             allowed=lambda: teleop.allowed_keys(backend.robot_status().mode),
             on_stop=calls.stop_call(lambda: backend.set_stop(True)),
+            hinge=backend.move_hinge,
+            hinge_rate=backend.config.expansion.max_rate_rad_s,
         )
     finally:
         calls.close(SERVICE_TIMEOUT)

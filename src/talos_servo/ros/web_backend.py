@@ -35,7 +35,7 @@ from rclpy.client import Client
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.bus import DEFAULT_ACCELERATION, ServoError
@@ -440,6 +440,17 @@ class RosBackend:
             finite_clamp(linear_x, base.max_linear_speed),
             finite_clamp(linear_y, base.max_linear_speed),
             finite_clamp(angular_z, base.max_angular_speed),
+        )
+
+    def move_hinge(self, rate: float) -> None:
+        """Publish one hinge opening speed (rad/s, + opens, 0 stops) for the
+        expansion node, clamped to `expansion.max_rate_rad_s`.
+
+        The hinge stops unless this is repeated, so call it in a loop.
+        """
+        limit = self.config.expansion.max_rate_rad_s
+        self._require_node().expansion_pub.publish(
+            Float64(data=finite_clamp(rate, limit))
         )
 
     def stop(

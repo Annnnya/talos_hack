@@ -3,8 +3,8 @@
 The loop only knows a `drive(vx, vy, wz)` callable, so the same code drives the
 robot directly (`Robot.drive`) or through ROS (`RosBackend.drive`, which
 publishes on the keyboard input of twist_mux). Over ROS the loop also gets
-one-shot action keys (wall nearby, release) and the drive keys the robot mode
-allows.
+one-shot action keys (wall nearby, release), the drive keys the robot mode
+allows and the hinge keys R and F, held like the drive keys (#95).
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from talos_servo.modes import (
     ANGULAR_Z,
     DRIVE_AXES_BY_MODE,
+    HINGE_MODES,
     LINEAR_X,
     LINEAR_Y,
     Mode,
@@ -33,7 +34,6 @@ WALL_NEARBY_KEY = "n"
 RELEASE_KEY = "l"
 # Enter releases STOP; terminals send either character for it.
 RELEASE_STOP_KEYS = frozenset({"\n", "\r"})
-# R and F stay free for expanding and collapsing the hinge (#95).
 HELP = (
     "W/S forward/back, A/D left/right, Q/E turn, space stops, X quits. Hold a "
     "key to keep going."
@@ -41,7 +41,8 @@ HELP = (
 ROS_HELP = (
     f"{HELP} Space also turns STOP on for every input, Enter releases it. "
     "N wall nearby, L release from the walls. Q/E are off while climbing, "
-    "the drive keys while aligning or clamping."
+    "the drive keys while aligning or clamping. Hold R/F to open/close the "
+    "hinge (free and clamping)."
 )
 
 # key -> (vx, vy, wz) as fractions of the linear and angular speed
@@ -54,6 +55,8 @@ KEYS: dict[str, tuple[float, float, float]] = {
     "e": (0.0, 0.0, -1.0),
 }
 STOPPED = (0.0, 0.0, 0.0)
+# key -> sign of the hinge opening speed: R expands, F collapses (#95).
+HINGE_KEYS: dict[str, float] = {"r": 1.0, "f": -1.0}
 # Same order as the fractions in KEYS.
 KEY_AXES = (LINEAR_X, LINEAR_Y, ANGULAR_Z)
 
@@ -74,6 +77,8 @@ DRIVE_KEYS_BY_MODE: dict[Mode, frozenset[str]] = {
 }
 
 Drive = Callable[[float, float, float], None]
+# Takes the hinge opening speed in rad/s, 0 stops.
+MoveHinge = Callable[[float], None]
 # Returns the key pressed within `timeout` seconds, or None.
 ReadKey = Callable[[float], str | None]
 
@@ -90,9 +95,15 @@ def velocity_for(
 
 
 def allowed_keys(mode: str | None) -> frozenset[str]:
-    """Drive keys allowed in `mode`. An unknown mode allows every key, see
-    `modes.allowed_axes`."""
-    return _keys_within(allowed_axes(mode))
+    """Drive and hinge keys allowed in `mode`. An unknown mode allows every
+    key, see `modes.allowed_axes`; the expansion node still refuses to move
+    the hinge without a mode."""
+    keys = _keys_within(allowed_axes(mode))
+    try:
+        hinge = Mode(mode) in HINGE_MODES
+    except ValueError:
+        hinge = True
+    return keys | frozenset(HINGE_KEYS) if hinge else keys
 
 
 def run(
@@ -105,6 +116,8 @@ def run(
     actions: Mapping[str, Callable[[], None]] | None = None,
     allowed: Callable[[], Collection[str]] | None = None,
     on_stop: Callable[[], None] | None = None,
+    hinge: MoveHinge | None = None,
+    hinge_rate: float = 0.0,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Drive from keys until X.
@@ -119,10 +132,15 @@ def run(
     out stops this input, like any other key that does not drive.
     `on_stop` runs after the stop that Space sends, e.g. to turn STOP on
     for every input.
+    With `hinge`, a held R or F sends +-`hinge_rate` to it the same way: one
+    0 on letting go, Space or another key, and a 0 on the way out. Without
+    it R and F stop the drive like any other key.
     """
     actions = actions or {}
     command = STOPPED
     sent = STOPPED
+    hinge_command = 0.0
+    hinge_sent = 0.0
     last_key_at = clock()
     try:
         while True:
@@ -136,24 +154,35 @@ def run(
                     return
                 if allowed is None or key.lower() in allowed():
                     command = velocity_for(key, linear, angular) or STOPPED
+                    sign = HINGE_KEYS.get(key.lower(), 0.0)
+                    hinge_command = sign * hinge_rate if hinge else 0.0
                 else:
                     command = STOPPED
+                    hinge_command = 0.0
                 stop_now = key == STOP_KEY
                 last_key_at = clock()
             if clock() - last_key_at > KEY_TIMEOUT_S:
                 command = STOPPED
+                hinge_command = 0.0
             if command != STOPPED or sent != STOPPED or stop_now:
                 # Set first: a drive() that raises partway may already have
                 # moved some wheels, so `finally` must still stop them.
                 sent = command
                 drive(*command)
+            if hinge is not None and (hinge_command or hinge_sent or stop_now):
+                hinge_sent = hinge_command
+                hinge(hinge_command)
             if stop_now and on_stop is not None:
                 on_stop()
             tick()
     finally:
-        if sent != STOPPED:
-            drive(*STOPPED)
-        tick()
+        try:
+            if sent != STOPPED:
+                drive(*STOPPED)
+        finally:
+            if hinge is not None and hinge_sent:
+                hinge(0.0)
+            tick()
 
 
 UNKNOWN = "?"
