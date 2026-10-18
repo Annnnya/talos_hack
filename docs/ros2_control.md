@@ -43,7 +43,9 @@ flowchart LR
   nodes that send commands to those controllers, not C++ controllers.
 - **Robot model:** `description/talos.urdf.xacro` (#64) holds the joints and
   the `<ros2_control>` block for the whole robot. `bend` is the hinge
-  opening in radians (pi flat). See "Robot model" in the README.
+  opening in radians (pi flat). See "Robot model" in the README. The sensor
+  frames come from it too: `imu_joint` reads `imu` in `config/robot.yaml`
+  (#91), so robot_state_publisher alone publishes `base_link -> imu_link`.
 
 ## Port ownership
 

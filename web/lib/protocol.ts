@@ -87,6 +87,12 @@ export interface HoldState {
   load_limited: boolean;
 }
 
+/** Platform roll and pitch from the IMU (#91), degrees. */
+export interface TiltState {
+  roll_deg: number;
+  pitch_deg: number;
+}
+
 /** Shared by every browser, kept by the server until it restarts. */
 export interface ServoSettings {
   move_speed: number;
@@ -112,6 +118,8 @@ export type ServerMessage =
       hinge: HingeState | null;
       /** Null without the expansion node. */
       hinge_hold: HoldState | null;
+      /** Null without ROS or while the IMU chain is quiet. */
+      tilt: TiltState | null;
     }
   | { type: "error"; message: string };
 

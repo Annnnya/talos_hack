@@ -145,13 +145,17 @@
   <xacro:wheel name="${wheels[3]}" leg="rear_leg" x="${-l}"
                y="${-track / 2}"/>
 
-  <!-- Sensors on the platform. Zero offsets until measured: #91 fills the
-       IMU, #77 the camera. -->
+  <!-- Sensors on the platform. The IMU mount comes from `imu` in the config
+       (#91); the camera offset is zero until measured (#77). -->
+  <xacro:property name="imu" value="${cfg.get('imu', dict())}"/>
+  <xacro:property name="imu_xyz" value="${imu.get('xyz', [0, 0, 0])}"/>
+  <xacro:property name="imu_rpy" value="${imu.get('rpy', [0, 0, 0])}"/>
   <link name="imu_link"/>
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="${imu_xyz[0]} ${imu_xyz[1]} ${imu_xyz[2]}"
+            rpy="${imu_rpy[0]} ${imu_rpy[1]} ${imu_rpy[2]}"/>
   </joint>
 
   <!-- The camera looks up at the ceiling: its x axis points along +z. -->

@@ -215,6 +215,16 @@ class HingeHoldConfig:
 
 
 @dataclass(frozen=True)
+class ImuMountConfig:
+    """Where the IMU sits on the central platform (#91): `xyz` in m and
+    `rpy` in rad from `base_link`, the same values the URDF `imu_joint` uses.
+    Zeros mean the board lies flat on the platform, its x axis forward."""
+
+    xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+@dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
@@ -222,6 +232,7 @@ class RobotConfig:
     model: ModelConfig | None = None
     expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
     hinge_hold: HingeHoldConfig = field(default_factory=HingeHoldConfig)
+    imu: ImuMountConfig = field(default_factory=ImuMountConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -294,6 +305,9 @@ def parse_config(
         config = replace(
             config, expansion=_parse_expansion(raw_expansion, config.model)
         )
+    raw_imu = data.get("imu")
+    if raw_imu is not None:
+        config = replace(config, imu=_parse_imu(raw_imu))
     return config
 
 
@@ -545,6 +559,30 @@ def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
         )
     except ConfigError as exc:
         raise ConfigError(f"hinge_hold: {exc}") from exc
+
+
+def _parse_imu(raw: dict) -> ImuMountConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("imu must be a mapping with xyz and rpy")
+    d = ImuMountConfig()
+    return ImuMountConfig(
+        xyz=_triple(raw, "xyz", d.xyz), rpy=_triple(raw, "rpy", d.rpy)
+    )
+
+
+def _triple(
+    raw: dict, key: str, default: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    value = raw.get(key, default)
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ConfigError(f"imu.{key} must be three numbers, got {value!r}")
+    try:
+        numbers = tuple(float(v) for v in value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"imu.{key} must be three numbers: {exc}") from exc
+    if not all(math.isfinite(v) for v in numbers):
+        raise ConfigError(f"imu.{key} must be finite, got {value!r}")
+    return numbers
 
 
 def _parse_model(

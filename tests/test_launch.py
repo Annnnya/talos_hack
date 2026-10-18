@@ -19,7 +19,10 @@ DRIVE = [
     "mux_status",
 ]
 ROBOT_NODE_DRIVE = ["robot_node", "mode_node", "twist_mux", "mux_status"]
-IMU = ["imu_node", "imu_filter", "imu_tf", "ekf"]
+# Under ros2_control the URDF carries the IMU mount; the robot node path
+# publishes it as a static transform (#91).
+IMU = ["imu_node", "imu_filter", "ekf"]
+ROBOT_NODE_IMU = ["imu_node", "imu_filter", "imu_tf", "ekf"]
 CONTROLLER_REFERENCE = "/mecanum_drive_controller/reference"
 
 
@@ -33,24 +36,99 @@ def launch():
     return module
 
 
-def test_defaults_start_the_drive_nodes_and_the_web(launch):
+def test_defaults_start_the_drive_nodes_the_web_and_the_imu(launch):
     assert list(launch.processes("/dev/ttyX", "robot.yaml")) == [
         *DRIVE,
         "web",
+        *IMU,
     ]
 
 
-def test_flags_add_the_camera_and_the_imu_chain(launch):
+def test_flags_add_the_camera_and_drop_the_imu_chain(launch):
     cmds = launch.processes(
-        "/dev/ttyX", "robot.yaml", web=False, camera=True, imu=True
+        "/dev/ttyX", "robot.yaml", web=False, camera=True, imu=False
     )
-    assert list(cmds) == [*DRIVE, "camera_node", *IMU]
+    assert list(cmds) == [*DRIVE, "camera_node"]
 
 
 def test_viz_adds_the_ekf_without_the_imu(launch):
     # The EKF alone publishes odom -> base_link, which RViz needs.
-    cmds = launch.processes("/dev/ttyX", "robot.yaml", web=False, viz=True)
+    cmds = launch.processes(
+        "/dev/ttyX", "robot.yaml", web=False, imu=False, viz=True
+    )
     assert list(cmds) == [*DRIVE, "ekf"]
+
+
+def test_the_imu_transform_comes_from_the_config_without_ros2_control(
+    launch,
+):
+    from talos_servo.config import ImuMountConfig
+
+    mount = ImuMountConfig(xyz=(0.01, 0.0, 0.05), rpy=(0.0, 0.0, 1.5))
+    cmds = launch.processes(
+        "/dev/ttyX", "robot.yaml", ros2_control=False, imu_mount=mount
+    )
+    assert list(cmds) == [*ROBOT_NODE_DRIVE, "web", *ROBOT_NODE_IMU]
+    tf = cmds["imu_tf"]
+    assert tf[tf.index("--x") + 1 : tf.index("--x") + 6] == [
+        "0.01",
+        "--y",
+        "0.0",
+        "--z",
+        "0.05",
+    ]
+    assert tf[tf.index("--yaw") + 1] == "1.5"
+
+
+def test_no_static_imu_transform_under_ros2_control(launch):
+    # robot_state_publisher publishes base_link -> imu_link from the URDF.
+    assert "imu_tf" not in launch.processes("/dev/ttyX", "robot.yaml")
+
+
+def test_the_port_is_found_without_an_argument(launch, monkeypatch):
+    from launch import LaunchContext
+
+    seen = {}
+
+    def processes(port, config, **kwargs):
+        seen["port"] = port
+        return {}
+
+    monkeypatch.setattr(launch, "find_servo_port", lambda: "/dev/ttyFound")
+    monkeypatch.setattr(launch, "control_nodes", lambda root, config: [])
+    monkeypatch.setattr(launch, "processes", processes)
+    context = LaunchContext()
+    context.launch_configurations.update(
+        {
+            "port": "",
+            "config": str(ROOT / "config" / "robot.yaml"),
+            "web": "false",
+            "ros2_control": "true",
+            "camera": "false",
+            "imu": "false",
+            "viz": "false",
+        }
+    )
+    launch._robot(context)
+    assert seen["port"] == "/dev/ttyFound"
+
+
+def test_no_port_anywhere_fails_before_starting(launch, monkeypatch):
+    from launch import LaunchContext
+
+    monkeypatch.setattr(launch, "find_servo_port", lambda: None)
+    context = LaunchContext()
+    context.launch_configurations.update(
+        {
+            "port": "",
+            "config": str(ROOT / "config" / "robot.yaml"),
+            "web": "false",
+            "ros2_control": "true",
+            "viz": "false",
+        }
+    )
+    with pytest.raises(RuntimeError, match="no servo port"):
+        launch._robot(context)
 
 
 def test_viz_with_the_imu_starts_one_ekf(launch):
@@ -78,7 +156,9 @@ def test_viz_needs_ros2_control(launch):
 
 
 def test_robot_node_instead_of_ros2_control(launch):
-    cmds = launch.processes("/dev/ttyX", "robot.yaml", ros2_control=False)
+    cmds = launch.processes(
+        "/dev/ttyX", "robot.yaml", ros2_control=False, imu=False
+    )
     assert list(cmds) == [*ROBOT_NODE_DRIVE, "web"]
 
 

@@ -64,8 +64,22 @@ function useSpeedPercent() {
 }
 
 export default function Home() {
-  const { status, servos, limits, ros, stopped, mode, modeReason, activeInput, hinge, hold, lastError, clearError, send } =
-    useBridge();
+  const {
+    status,
+    servos,
+    limits,
+    ros,
+    stopped,
+    mode,
+    modeReason,
+    activeInput,
+    hinge,
+    hold,
+    tilt,
+    lastError,
+    clearError,
+    send,
+  } = useBridge();
   const connected = status === "connected";
   // Same modes as HINGE_MODES in modes.py; an unknown mode is left to the
   // expansion node, which refuses without one.
@@ -152,6 +166,12 @@ export default function Home() {
           {modeReason && <span className="text-black/60 dark:text-white/60">{modeReason}</span>}
           <span className="ml-auto text-black/60 dark:text-white/60">Driving: {describeInput(activeInput)}</span>
         </div>
+      )}
+      {ros && (
+        <p className="text-sm tabular-nums text-black/60 dark:text-white/60" title="Platform roll and pitch from the IMU">
+          Platform:{" "}
+          {tilt ? `pitch ${tilt.pitch_deg.toFixed(1)}°, roll ${tilt.roll_deg.toFixed(1)}°` : "no IMU"}
+        </p>
       )}
       {ros && mode === null && connected && (
         <p className="text-sm text-black/60 dark:text-white/60">

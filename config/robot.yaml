@@ -82,6 +82,15 @@ model:
   # one servo turn from here. Fully open (flat) reads 164.
   bend_flat_steps: 164
 
+# Where the MPU6050 sits on the central platform (#91), from base_link: xyz
+# in m, rpy in rad. The URDF imu_joint and the platform tilt on the web page
+# read it. The board is screwed on chip-down (its raw z acceleration reads
+# -g on a level floor), so it is rolled half a turn; measure and fill these
+# in if it is ever moved.
+imu:
+  xyz: [0.0, 0.0, 0.0]
+  rpy: [3.14159265, 0.0, 0.0]
+
 # Opening and closing the hinge with the wheels rolling along (#76,
 # `talos-expansion-ros`). See docs/ros2_control.md.
 expansion:

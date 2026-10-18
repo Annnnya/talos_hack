@@ -70,10 +70,11 @@ ros-jazzy-xacro = "*"
 
 [feature.ros.tasks]
 # The whole robot in one command: ros2_control (mecanum_drive_controller and
-# the hardware bridge), mode node, twist_mux, mux_status and the web UI. Opt
-# in to more with camera:=true imu:=true, pass port:=/dev/ttyACM0 without
-# $TALOS_SERVO_PORT, and ros2_control:=false for the old robot node (needed by
-# the /debug page). viz:=true for the live robot in RViz (view-live). See
+# the hardware bridge), mode node, expansion node, twist_mux, mux_status, the
+# web UI and the IMU chain. No arguments needed: the servo port is found by
+# itself. Opt in to the camera with camera:=true, out of the IMU with
+# imu:=false, and ros2_control:=false for the old robot node (needed by the
+# /debug page). viz:=true for the live robot in RViz (view-live). See
 # launch/robot.launch.py
 robot = "ros2 launch launch/robot.launch.py"
 # The only program on the servo port; everything else goes through it
@@ -92,8 +93,8 @@ mode-node = "talos-mode-ros"
 expansion-node = "talos-expansion-ros"
 # Turns /imu/data_raw into /imu/data with an orientation quaternion
 imu-filter = "ros2 run imu_filter_madgwick imu_filter_madgwick_node --ros-args --params-file config/imu_filter.yaml"
-# Where the IMU sits on the robot. All zeros until the board is mounted: then measure it and
-# fill in --x --y --z (m) and --roll --pitch --yaw (rad)
+# base_link -> imu_link for the robot node path (ros2_control gets it from the URDF). The
+# values are `imu` in config/robot.yaml (#91): zeros, the board lies flat on the platform
 imu-tf = "ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id imu_link"
 # Fuses /odom and /imu/data_raw into /odometry/filtered and the odom -> base_link transform
 ekf = "ros2 run robot_localization ekf_node --ros-args --params-file config/ekf.yaml"
