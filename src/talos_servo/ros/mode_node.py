@@ -224,10 +224,12 @@ class ModeNode(Node):
 
     def on_wall_nearby(
         self, _request: Trigger.Request, response: Trigger.Response
-    ):
+    ) -> Trigger.Response:
         return self._trigger(Event.WALL_NEARBY, "wall nearby", response)
 
-    def on_release(self, _request: Trigger.Request, response: Trigger.Response):
+    def on_release(
+        self, _request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
         # Goes straight to free for now; the landing sequence is #86.
         return self._trigger(Event.RELEASE, "released", response)
 
