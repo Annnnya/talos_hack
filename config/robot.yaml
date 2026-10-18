@@ -1,6 +1,6 @@
 # The robot, in one file: every servo joint and the mecanum base.
 # The serial port and baud rate are not set here: pass --port / --baud or set TALOS_SERVO_PORT.
-# Changes take effect on restart (`talos-robot.service`, or the command you ran).
+# Changes take effect on restart (`talos.service`, or the command you ran).
 
 # Speed cap in steps/s for every joint. Low on purpose; the STS3215 tops out near 3000.
 max_speed: 1000

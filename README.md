@@ -96,12 +96,13 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    S1["talos-robot.service<br/>pixi run -e ros robot-node"]
-    S2["talos-web.service<br/>pixi run -e ros web-ros"]
-    S2 -- "Requires / PartOf" --> S1
-    S1 -- "opens TALOS_SERVO_PORT" --> PORT[("/dev/serial/by-id/...")]
-    S2 -- "ROS topics + services" --> S1
-    S2 -- "UI on :8000" --> LAN["Browsers on the LAN"]
+    S["talos.service<br/>pixi run -e ros robot"]
+    S --> L["launch/robot.launch.py"]
+    L --> NODE["robot_node"]
+    L --> REST["mode_node · twist_mux · mux_status"]
+    L --> WEB["talos-servo web --ros"]
+    NODE -- "opens TALOS_SERVO_PORT" --> PORT[("/dev/serial/by-id/...")]
+    WEB -- "UI on :8000" --> LAN["Browsers on the LAN"]
 ```
 
 ### ros2_control (in progress, #62)
@@ -177,6 +178,30 @@ export TALOS_SERVO_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B7B014358-
 $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 ```
 
+## Run the robot
+
+One command starts everything driving needs: the robot node, the mode node,
+twist_mux, mux_status and the web UI.
+
+```
+cd web && npm install && npm run build      # once, Node 20+
+pixi run -e ros robot                       # port from $TALOS_SERVO_PORT
+pixi run -e ros robot port:=/dev/ttyACM0 camera:=true imu:=true
+```
+
+Open `http://<pi>.local:8000` and press **Release STOP**: STOP is on at
+start. Drive from a laptop keyboard too with `pixi run -e ros drive`.
+Ctrl+C stops everything, and the wheels with it.
+
+| Option | Default | Adds |
+| --- | --- | --- |
+| `port:=` | `$TALOS_SERVO_PORT` | servo serial port |
+| `web:=` | `true` | web UI on :8000 |
+| `camera:=` | `false` | camera node |
+| `imu:=` | `false` | IMU node, filter, IMU transform, EKF |
+
+The single pixi tasks below still start one piece each, for debugging.
+
 ## Commands
 
 | Command | What it does |
@@ -188,6 +213,7 @@ $env:TALOS_SERVO_PORT = "COM5"                                     # PowerShell
 | `talos-servo drive` | Drive with the keyboard: W/S, A/D, Q/E, X |
 | `talos-servo web` | Browser UI on port 8000 |
 | `talos-servo imu --calibrate` | Stream the MPU6050 until Ctrl+C |
+| `pixi run -e ros robot` | The whole robot, see "Run the robot" |
 | `pixi run -e ros robot-node` | The robot node, the only program on the port |
 | `pixi run -e ros drive` | `talos-servo drive --ros`, plus N wall nearby, L release, Enter release STOP |
 | `pixi run -e ros web-ros` | `talos-servo web --ros` |
@@ -466,18 +492,18 @@ be running, and the Pi and viewer must use the same ROS domain.
 
 ## Deploy on the Pi
 
-Edit the user, paths and serial port in both units, then:
+`deploy/talos.service` runs `pixi run -e ros robot` on boot. Build the web
+UI once, edit the user, paths and serial port in the unit, then:
 
 ```
-sudo cp deploy/talos-robot.service deploy/talos-web.service \
-  /etc/systemd/system/
+sudo cp deploy/talos.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now talos-robot talos-web
-journalctl -u talos-robot -u talos-web -f
+sudo systemctl enable --now talos
+journalctl -u talos -f
 ```
 
-Moving from an older setup: `sudo systemctl disable --now talos-servo-bridge`
-first, since it holds the same port.
+Moving from an older setup: `sudo systemctl disable --now talos-robot
+talos-web talos-servo-bridge` first, since they hold the same port.
 
 ## Development
 

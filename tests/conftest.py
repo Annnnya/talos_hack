@@ -25,7 +25,7 @@ from talos_servo.imu import WHO_AM_I, WHO_AM_I_MPU6050
 
 # ROS tests publish on the real topic names (/cmd_vel, /robot/...). A private
 # domain that only reaches this machine keeps them away from a robot node
-# running on the same network, e.g. the Pi's talos-robot service.
+# running on the same network, e.g. the Pi's talos service.
 TEST_DOMAIN_BASE = 150
 TEST_DOMAIN_COUNT = 50
 os.environ["ROS_DOMAIN_ID"] = str(

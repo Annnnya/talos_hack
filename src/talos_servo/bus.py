@@ -171,7 +171,7 @@ class ServoBus:
             raise ServoError(
                 f"serial port {self.port_name} is already in use by another "
                 "process "
-                "(is talos-robot running?)"
+                "(is talos running?)"
             ) from exc
 
     def close(self) -> None:
