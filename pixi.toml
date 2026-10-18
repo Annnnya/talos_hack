@@ -67,19 +67,14 @@ ros-jazzy-ros2controlcli = "*"
 ros-jazzy-topic-based-ros2-control = "*"
 ros-jazzy-robot-state-publisher = "*"
 ros-jazzy-xacro = "*"
-ros-jazzy-rosidl-default-generators = "*"
-colcon-core = "*"
-colcon-ros = "*"
-colcon-cmake = "*"
 
 [feature.ros.tasks]
 # The only program on the servo port; everything else goes through it
 robot-node = "talos-robot-ros"
 # Keyboard driving through the robot node
 drive = "talos-servo drive --ros"
-# Build the snapshot service interface, then run the CSI camera node
-camera-interfaces = "colcon build --base-paths interfaces"
-camera-node = "bash -c 'source install/setup.sh && talos-camera-ros --ros-args --params-file config/camera.yaml'"
+# CSI camera node: snapshots and a low-rate stream
+camera-node = "talos-camera-ros --ros-args --params-file config/camera.yaml"
 imu-node = "talos-imu-ros"
 # Robot mode (free, aligning, clamping, climbing); switches controllers
 mode-node = "talos-mode-ros"
