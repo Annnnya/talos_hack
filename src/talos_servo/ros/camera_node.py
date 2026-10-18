@@ -33,10 +33,14 @@ class CameraNode(Node):
             self.declare_parameter("camera_index", DEFAULT_CAMERA_INDEX).value
         )
         self._snapshot_width = int(
-            self.declare_parameter("snapshot_width", DEFAULT_SNAPSHOT_WIDTH).value
+            self.declare_parameter(
+                "snapshot_width", DEFAULT_SNAPSHOT_WIDTH
+            ).value
         )
         self._snapshot_height = int(
-            self.declare_parameter("snapshot_height", DEFAULT_SNAPSHOT_HEIGHT).value
+            self.declare_parameter(
+                "snapshot_height", DEFAULT_SNAPSHOT_HEIGHT
+            ).value
         )
         self._stream_width = int(
             self.declare_parameter("stream_width", DEFAULT_STREAM_WIDTH).value
@@ -58,14 +62,19 @@ class CameraNode(Node):
         )
         if self._camera_index < 0:
             raise ValueError("camera_index must be zero or greater")
-        if min(
-            self._snapshot_width,
-            self._snapshot_height,
-            self._stream_width,
-            self._stream_height,
-            self._stream_fps,
-        ) <= 0:
-            raise ValueError("camera dimensions and stream_fps must be positive")
+        if (
+            min(
+                self._snapshot_width,
+                self._snapshot_height,
+                self._stream_width,
+                self._stream_height,
+                self._stream_fps,
+            )
+            <= 0
+        ):
+            raise ValueError(
+                "camera dimensions and stream_fps must be positive"
+            )
 
         self._publisher = self.create_publisher(
             CompressedImage, "/camera/image/compressed", 2
@@ -75,7 +84,9 @@ class CameraNode(Node):
             "/camera/snapshot/compressed",
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
         )
-        self.create_service(Trigger, "/camera/take_snapshot", self._take_snapshot)
+        self.create_service(
+            Trigger, "/camera/take_snapshot", self._take_snapshot
+        )
         self.create_service(SetBool, "/camera/stream", self._set_streaming)
         self._stream_timer = self.create_timer(
             1.0 / self._stream_fps, self._publish_latest_frame
@@ -123,7 +134,9 @@ class CameraNode(Node):
             )
             if result.returncode != 0:
                 detail = result.stderr.decode(errors="replace").strip()
-                raise RuntimeError(detail or f"rpicam-still exited {result.returncode}")
+                raise RuntimeError(
+                    detail or f"rpicam-still exited {result.returncode}"
+                )
             if not result.stdout.startswith(b"\xff\xd8"):
                 raise RuntimeError("rpicam-still did not return a JPEG image")
             snapshot = CompressedImage()
@@ -133,7 +146,9 @@ class CameraNode(Node):
             snapshot.data = result.stdout
             self._snapshot_publisher.publish(snapshot)
             response.success = True
-            response.message = "Snapshot published on /camera/snapshot/compressed"
+            response.message = (
+                "Snapshot published on /camera/snapshot/compressed"
+            )
         except Exception as exc:
             response.success = False
             response.message = str(exc)
@@ -143,7 +158,9 @@ class CameraNode(Node):
                     self._start_streaming()
                 except Exception as exc:
                     response.success = False
-                    response.message = f"Snapshot done; could not resume stream: {exc}"
+                    response.message = (
+                        f"Snapshot done; could not resume stream: {exc}"
+                    )
         return response
 
     def _set_streaming(
