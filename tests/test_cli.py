@@ -231,7 +231,7 @@ def test_drive_over_ros_uses_the_keyboard_mux_input(
     backend, read_key, kw = calls["drive"]
     assert backend["cmd_vel_topic"] == KEYBOARD_CMD_VEL_TOPIC
     assert read_key is fake_terminal
-    assert kw == {"linear": 0.1, "angular": 0.5}
+    assert kw == {"linear": 0.3, "angular": 0.5}
     out = capsys.readouterr().out
     assert "N wall nearby" in out
     assert "L release" in out
@@ -251,3 +251,34 @@ def test_over_ros_without_ros_installed_explains(monkeypatch, capsys):
     monkeypatch.delattr(talos_servo.ros, "cli_commands", raising=False)
     assert cli.main(["spin", "--ros"]) == 1
     assert "pixi run -e ros talos-servo spin --ros" in capsys.readouterr().err
+
+
+def test_calibrate_bend_goes_through_ros_without_a_port(
+    over_ros, fake_terminal
+):
+    calls, _config = over_ros
+    over_ros_stub = sys.modules["talos_servo.ros.cli_commands"]
+    over_ros_stub.calibrate_bend_over_ros = lambda backend, read_key, joint: (
+        calls.update(calibrate=(read_key, joint)) or True
+    )
+    args = ["calibrate-bend", "--config", str(ROBOT_CONFIG)]
+    assert cli.main(args) == 0
+    assert calls["calibrate"] == (fake_terminal, "bend")
+
+
+def test_calibrate_bend_needs_an_enabled_hinge(over_ros, fake_terminal, capsys):
+    _calls, config = over_ros  # no model section
+    assert cli.main(["calibrate-bend", "--config", config]) == 1
+    assert "no enabled hinge" in capsys.readouterr().err
+
+
+def test_calibrate_bend_without_ros_installed_explains(
+    monkeypatch, capsys, fake_terminal
+):
+    import talos_servo.ros
+
+    monkeypatch.setitem(sys.modules, "talos_servo.ros.cli_commands", None)
+    monkeypatch.delattr(talos_servo.ros, "cli_commands", raising=False)
+    assert cli.main(["calibrate-bend"]) == 1
+    err = capsys.readouterr().err
+    assert "pixi run -e ros talos-servo calibrate-bend`" in err

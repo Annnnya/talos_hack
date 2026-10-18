@@ -468,3 +468,31 @@ def test_web_command_ros_without_ros_installed_explains(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "talos_servo.ros.web_backend", None)
     assert cli.main(["web", "--ros"]) == 1
     assert "pixi run -e ros" in capsys.readouterr().err
+
+
+# --- hinge
+# ------------------------------------------------------------------------
+
+
+class HingeRecorder(DriveRecorder):
+    def move_hinge(self, rate: float) -> None:
+        self.calls.append(((rate,), {}))
+
+
+def test_hinge_rate_reaches_the_backend():
+    backend = HingeRecorder("free")
+    server._dispatch(backend, {"type": "hinge", "rate": 0.2}, ros=True)()
+    assert backend.calls == [((0.2,), {})]
+
+
+def test_hinge_is_refused_while_climbing_but_stops():
+    backend = HingeRecorder("climbing")
+    with pytest.raises(CommandError, match="hinge"):
+        server._dispatch(backend, {"type": "hinge", "rate": 0.2}, ros=True)
+    server._dispatch(backend, {"type": "hinge", "rate": 0}, ros=True)()
+    assert backend.calls == [((0.0,), {})]
+
+
+def test_hinge_needs_ros():
+    with pytest.raises(CommandError, match="--ros"):
+        server._dispatch(HingeRecorder(), {"type": "hinge", "rate": 0.1})

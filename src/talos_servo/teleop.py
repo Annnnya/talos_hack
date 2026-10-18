@@ -231,10 +231,10 @@ def terminal_keys() -> Iterator[ReadKey]:
         import tty
     except ImportError:
         raise RuntimeError(
-            "talos-servo drive needs a Linux or macOS terminal"
+            "keyboard control needs a Linux or macOS terminal"
         ) from None
     if not sys.stdin.isatty():
-        raise RuntimeError("talos-servo drive needs an interactive terminal")
+        raise RuntimeError("keyboard control needs an interactive terminal")
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
 

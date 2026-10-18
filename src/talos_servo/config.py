@@ -12,6 +12,13 @@ from types import MappingProxyType
 
 import yaml
 
+from talos_servo.bend_calibration import (
+    BendCalibration,
+    CalibrationError,
+    apply_calibration,
+    calibration_path,
+    load_calibration,
+)
 from talos_servo.bus import (
     MAX_POSITION,
     MAX_SERVO_ID,
@@ -44,6 +51,8 @@ MODE_NAMES = ("free", "aligning", "clamping", "climbing")
 FLAT_DEG = 180.0
 # Expansion (#76): low on purpose, well below the hinge servo speed.
 DEFAULT_EXPANSION_RATE_RAD_S = 0.15
+# Low on purpose; the wheels top out near 0.15 m/s.
+DEFAULT_CLIMB_SPEED_M_S = 0.05
 DEFAULT_EXPANSION_HZ = 50.0
 DEFAULT_EXPANSION_LEAD_RAD = 0.05
 # Clamping (#78): open slowly, and count a current over these as wall
@@ -171,6 +180,8 @@ class ExpansionConfig:
     """
 
     max_rate_rad_s: float = DEFAULT_EXPANSION_RATE_RAD_S
+    # Wheel surface speed cap (m/s) for climbing.
+    max_climb_speed_m_s: float = DEFAULT_CLIMB_SPEED_M_S
     rate_hz: float = DEFAULT_EXPANSION_HZ
     max_lead_rad: float = DEFAULT_EXPANSION_LEAD_RAD
     command_timeout_s: float = DEFAULT_COMMAND_TIMEOUT_S
@@ -182,12 +193,35 @@ class ExpansionConfig:
 
 
 @dataclass(frozen=True)
+class HingeHoldConfig:
+    """Holding the hinge at a current setpoint (`talos_servo.hinge_hold`).
+
+    `max_current_a` caps the setpoint. `ki` (rad/s per A) and `kp` (rad per
+    A) move the goal lead from the current error, `filter_s` smooths the
+    measured current, `max_offset_rad` caps how far the goal may lead the
+    measured angle and `no_contact_rad` is how far the hinge may open with
+    hardly any current before the hold gives up.
+    """
+
+    max_current_a: float = 1.0
+    ki: float = 0.3
+    kp: float = 0.0
+    filter_s: float = 0.1
+    max_offset_rad: float = 0.25
+    no_contact_rad: float = 0.3
+    # Back the goal off above this servo load (%); the servo cuts its drive
+    # after 2 s above 50 %.
+    max_load_pct: float = 40.0
+
+
+@dataclass(frozen=True)
 class RobotConfig:
     joints: tuple[JointConfig, ...]
     base: BaseConfig | None = None
     modes: ModesConfig | None = None
     model: ModelConfig | None = None
     expansion: ExpansionConfig = field(default_factory=ExpansionConfig)
+    hinge_hold: HingeHoldConfig = field(default_factory=HingeHoldConfig)
     max_speed: int = DEFAULT_MAX_SPEED
     telemetry_hz: float = DEFAULT_TELEMETRY_HZ
     control_hz: float = DEFAULT_CONTROL_HZ
@@ -195,13 +229,20 @@ class RobotConfig:
     # The hinge angle converter, built on load from model.bend_flat_steps;
     # None without one.
     hinge: Hinge | None = field(default=None, compare=False)
+    # The saved bend calibration in use (#84), None when the model values
+    # from robot.yaml apply.
+    bend_calibration: BendCalibration | None = None
 
     @property
     def enabled_joints(self) -> tuple[JointConfig, ...]:
         return tuple(j for j in self.joints if j.enabled)
 
 
-def parse_config(data: dict) -> RobotConfig:
+def parse_config(
+    data: dict, calibration: BendCalibration | None = None
+) -> RobotConfig:
+    """The robot config from parsed YAML. `calibration` overrides the
+    hinge flat position and min angle."""
     raw_joints = data.get("joints") or {}
     if not isinstance(raw_joints, dict) or not raw_joints:
         raise ConfigError("config needs at least one entry under 'joints'")
@@ -240,7 +281,14 @@ def parse_config(data: dict) -> RobotConfig:
                 raw_model, config.base, {j.name: j for j in joints}
             ),
         )
+        if calibration is not None:
+            config = _calibrate(config, calibration)
         config = _clamp_hinge(config)
+    elif calibration is not None:
+        raise ConfigError("a bend calibration needs a model section")
+    raw_hold = data.get("hinge_hold")
+    if raw_hold is not None:
+        config = replace(config, hinge_hold=_parse_hinge_hold(raw_hold))
     raw_expansion = data.get("expansion")
     if raw_expansion is not None:
         config = replace(
@@ -282,12 +330,44 @@ def _clamp_hinge(config: RobotConfig) -> RobotConfig:
     )
 
 
-def load_config(path: str | Path) -> RobotConfig:
+def _calibrate(config: RobotConfig, cal: BendCalibration) -> RobotConfig:
+    model = config.model
+    assert model is not None
+    joint = next(j for j in config.joints if j.name == model.hinge_joint)
+    return replace(
+        config,
+        model=apply_calibration(model, joint, cal),
+        bend_calibration=cal,
+    )
+
+
+def load_config(
+    path: str | Path, calibration: str | Path | None = None
+) -> RobotConfig:
+    """The robot config at `path`, with the bend calibration from
+    `calibration` (default: see `bend_calibration.calibration_path`) if
+    that file exists."""
+    data = read_config_data(path)
+    cal_path = calibration_path(path, calibration)
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        cal = load_calibration(cal_path)
+        return parse_config(data, cal)
+    except CalibrationError as exc:
+        raise ConfigError(
+            f"bend calibration {cal_path}: {exc}. Delete the file to fall "
+            "back to the model values in the robot config, then run "
+            "`talos-servo calibrate-bend` again"
+        ) from exc
+
+
+def read_config_data(path: str | Path) -> dict:
+    """The robot config file as parsed YAML."""
+    try:
+        return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except OSError as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from exc
-    return parse_config(data)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"config {path} is not valid YAML: {exc}") from exc
 
 
 def _parse_joint(name: str, raw: dict) -> JointConfig:
@@ -397,6 +477,9 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
             max_rate_rad_s=_positive(
                 raw, "max_rate_rad_s", DEFAULT_EXPANSION_RATE_RAD_S
             ),
+            max_climb_speed_m_s=_positive(
+                raw, "max_climb_speed_m_s", DEFAULT_CLIMB_SPEED_M_S
+            ),
             rate_hz=_positive(raw, "rate_hz", DEFAULT_EXPANSION_HZ),
             max_lead_rad=_positive(
                 raw, "max_lead_rad", DEFAULT_EXPANSION_LEAD_RAD
@@ -441,6 +524,27 @@ def _parse_expansion(raw: dict, model: ModelConfig | None) -> ExpansionConfig:
                 f"speed {servo:.3f} rad/s, got {expansion.max_rate_rad_s}"
             )
     return expansion
+
+
+def _parse_hinge_hold(raw: dict) -> HingeHoldConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError("hinge_hold must be a mapping")
+    d = HingeHoldConfig()
+    try:
+        kp = float(raw.get("kp", d.kp))
+        if not math.isfinite(kp) or kp < 0:
+            raise ConfigError(f"kp must be 0 or more, got {kp}")
+        return HingeHoldConfig(
+            max_current_a=_positive(raw, "max_current_a", d.max_current_a),
+            ki=_positive(raw, "ki", d.ki),
+            kp=kp,
+            filter_s=_positive(raw, "filter_s", d.filter_s),
+            max_offset_rad=_positive(raw, "max_offset_rad", d.max_offset_rad),
+            no_contact_rad=_positive(raw, "no_contact_rad", d.no_contact_rad),
+            max_load_pct=_positive(raw, "max_load_pct", d.max_load_pct),
+        )
+    except ConfigError as exc:
+        raise ConfigError(f"hinge_hold: {exc}") from exc
 
 
 def _parse_model(

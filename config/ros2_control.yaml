@@ -47,11 +47,11 @@ mecanum_drive_controller:
     # speed limits on this path: the bridge does not cap base wheels.
     linear:
       x:
-        max_velocity: 0.1
-        min_velocity: -0.1
+        max_velocity: 0.3
+        min_velocity: -0.3
       y:
-        max_velocity: 0.1
-        min_velocity: -0.1
+        max_velocity: 0.3
+        min_velocity: -0.3
     angular:
       z:
         max_velocity: 0.5

@@ -24,8 +24,36 @@ NO_WALL_SERVICE = f"{ROBOT_NS}/no_wall"
 # Expansion node (#76) in, and the controllers it feeds
 # (config/ros2_control.yaml) out.
 EXPANSION_RATE_TOPIC = "/expansion/rate"
+# Climb speed in m/s (std_msgs/Float64, + up): front wheels one way, rear
+# wheels the other. Repeat it like the rate.
+CLIMB_TOPIC = "/expansion/climb"
+# Sideways speed on the wall in m/s (std_msgs/Float64, + left), mixed with the
+# climb speed. Repeat it like the climb speed.
+WALL_SIDE_TOPIC = "/expansion/side"
+# Hinge current hold (#142): setpoint in A (std_msgs/Float64, latched), on
+# and off (std_srvs/SetBool), and its state as JSON (std_msgs/String).
+HOLD_SETPOINT_TOPIC = "/hinge_hold/setpoint"
+HOLD_ENABLE_SERVICE = "/hinge_hold/enable"
+HOLD_STATE_TOPIC = "/hinge_hold/state"
 HINGE_COMMANDS_TOPIC = "/bend_position_controller/commands"
 WHEEL_COMMANDS_TOPIC = "/wheel_velocity_controller/commands"
+
+# Hardware bridge: bend calibration (#84), std_srvs/Trigger services at
+# <node>/<hinge joint>/calibrate/<step>; the node runs as `robot`.
+CALIBRATE_START = "start"
+CALIBRATE_OPEN = "open"
+CALIBRATE_FOLD = "fold"
+CALIBRATE_RECORD_FLAT = "record_flat"
+CALIBRATE_RECORD_FOLD = "record_fold"
+CALIBRATE_STATUS = "status"
+CALIBRATE_SAVE = "save"
+CALIBRATE_CANCEL = "cancel"
+
+
+def calibrate_service(joint: str, step: str) -> str:
+    """Full name of a calibration service on the robot node."""
+    return f"{ROBOT_NS}/{joint}/calibrate/{step}"
+
 
 # mux_status node
 ACTIVE_INPUT_TOPIC = f"{ROBOT_NS}/active_input"

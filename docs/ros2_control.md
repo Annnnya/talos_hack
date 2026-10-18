@@ -96,11 +96,12 @@ Checked in the plugin source (0.3.0):
   `talos_servo.model.alpha_per_servo_rad` (1:1 today) and clamps goals to
   `model.bend_min_deg`..`bend_max_deg`. There is no `<transmission>`: the
   plugin ignores them.
-- **Flat position:** `model.bend_flat_steps` in `config/robot.yaml`, the
-  raw servo position when the robot lies flat (4000, a margin before the
-  wrap at 4095). It is fixed by aligning the servo horn to the leg, so the
-  servo's absolute position is the hinge angle and nothing is measured at
-  startup. It is required while
+- **Flat position:** the raw servo position when the robot lies flat,
+  from `config/bend_calibration.yaml` once the hinge is calibrated (see
+  below), else `model.bend_flat_steps` in `config/robot.yaml` (4000, a
+  margin before the wrap at 4095). The servo horn is aligned to the leg, so
+  the servo's absolute position is the hinge angle and nothing is measured
+  at startup. `bend_flat_steps` is required while
   `bend` is enabled, and `joints.bend` `min_pos`/`max_pos` are narrowed on
   load to the `bend_min_deg`..`bend_max_deg` range, so every move is
   clamped to it (robot node, `/debug` and the bridge alike).
@@ -127,6 +128,47 @@ Checked in the plugin source (0.3.0):
 - **Current and load:** `/dynamic_joint_states` shows position, velocity
   and effort only. Effort is the present current (A). Load stays on
   `/hardware_bridge/<joint>/load`.
+
+### Calibration (#84)
+
+`talos-servo calibrate-bend` (or `pixi run -e ros calibrate-bend`) measures
+flat and max fold on the running robot and saves them. No EEPROM is
+written.
+
+1. O opens and F folds the hinge, about 1 deg per press, at 60 steps/s
+   (about 5 deg/s). Hold a key to keep moving. The goal never runs more
+   than 2 deg ahead of the hinge, so it stops close to where the key is
+   released. The jog covers the whole servo turn, not the old hinge range.
+2. Enter records flat (180 deg), then max fold (front and rear wheels
+   touching), each once the hinge has stopped. Enter again saves; X or
+   Ctrl+C cancels.
+
+- **File:** `config/bend_calibration.yaml` next to the robot config,
+  gitignored. It holds the raw `flat_steps` and `fold_steps`. Flat replaces
+  `model.bend_flat_steps`, and the opening angle at the fold point (through
+  `leg_gear_ratio`) replaces `model.bend_min_deg`. Without the file the
+  robot.yaml values stay in use. An invalid file stops every node at
+  startup with a message to delete it. `--calibration` on the bridge and
+  the robot node, or `$TALOS_BEND_CALIBRATION`, points elsewhere.
+- **Checks before saving:** max fold below flat in joint steps (otherwise
+  the points are swapped or `inverted` is wrong), at least 5 deg apart, a
+  min angle inside 0..`bend_max_deg`, and the range inside one servo turn.
+  A rejected save keeps the session open.
+- **Services:** the bridge serves `std_srvs/Trigger` services at
+  `/robot/bend/calibrate/{start,open,fold,record_flat,record_fold,status,
+  save,cancel}`, each answering with a line for the user. The command calls
+  them and polls `status`, which also keeps the session alive. With no call
+  for 10 s the bridge cancels.
+- **While calibrating:** controller goals for `bend` are ignored and its
+  angle reads NaN, so the expansion node holds. The wheels keep following
+  their controllers. A bus fault (#94) refuses the jog like any move.
+- **After save or cancel:** a save applies the new flat, range and clamp in
+  the bridge at once; cancel restores the old ones without moving. Either
+  way the hinge then waits for a new controller goal, so the controller's
+  last goal never moves it. If the hinge was left outside its range it
+  reads NaN and drops goals: the reply says so, jog it back with the
+  command. Relaunch to give the URDF limit and the expansion node the new
+  max fold.
 
 ## The base (#65)
 

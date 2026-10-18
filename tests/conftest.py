@@ -33,6 +33,12 @@ os.environ["ROS_DOMAIN_ID"] = str(
 )
 os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = "LOCALHOST"
 
+# A local config/bend_calibration.yaml must never change test results, so
+# every test that loads the repo config reads this missing file instead.
+# Tests of the calibration lookup pass their own path or unset it.
+NO_CALIBRATION = Path(__file__).parent / "data" / "no_bend_calibration.yaml"
+os.environ["TALOS_BEND_CALIBRATION"] = str(NO_CALIBRATION)
+
 # A position joint and a speed joint, enough for most robot tests.
 SMALL = {
     "max_speed": 500,

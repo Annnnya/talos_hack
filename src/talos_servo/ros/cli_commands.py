@@ -1,5 +1,5 @@
 """`talos-servo spin/monitor/drive --ros`: the same commands, through the robot
-node.
+node. Also `talos-servo calibrate-bend`, which only exists through ROS.
 
 The robot node stays the only program on the serial port, so these can run next
 to the web UI (`talos-servo web --ros`) and other ROS nodes, and the UI shows
@@ -17,6 +17,17 @@ from collections.abc import Callable, Sequence
 from talos_servo import teleop
 from talos_servo.bus import ServoError
 from talos_servo.robot import SOURCE_CLI, CommandError
+from talos_servo.ros.names import (
+    CALIBRATE_CANCEL,
+    CALIBRATE_FOLD,
+    CALIBRATE_OPEN,
+    CALIBRATE_RECORD_FLAT,
+    CALIBRATE_RECORD_FOLD,
+    CALIBRATE_SAVE,
+    CALIBRATE_START,
+    CALIBRATE_STATUS,
+    calibrate_service,
+)
 from talos_servo.ros.web_backend import SERVICE_TIMEOUT, RosBackend
 
 Output = Callable[[str], None]
@@ -24,6 +35,25 @@ LISTENER_POLL_S = 0.05
 # How long stop commands are re-sent before the node goes away. If they are all
 # lost anyway, the robot's command timeout stops the wheel.
 STOP_FLUSH_TIME = 0.2
+# Bend calibration keys. Only this command reads them, so F does not clash
+# with the R/F keys `drive` keeps for #95.
+JOG_OPEN_KEY = "o"
+JOG_FOLD_KEY = "f"
+# How often the calibration asks for the hinge position. Well below the
+# bridge's idle timeout, so it also keeps the session alive.
+CALIBRATION_STATUS_S = 0.5
+CALIBRATION_KEY_S = 0.05
+CALIBRATION_INTRO = (
+    "Calibrating {joint}. It moves slowly, keep hands clear. Controller "
+    "goals for {joint} are ignored until you save or cancel.\n"
+    "O opens, F folds (hold to keep moving), Enter records, X cancels."
+)
+CALIBRATION_PROMPTS = (
+    "Step 1/3: open the hinge until the robot lies flat (180 deg), then "
+    "press Enter.",
+    "Step 2/3: fold until the front and rear wheels touch, then press Enter.",
+    "Step 3/3: press Enter to save and apply, or X to cancel.",
+)
 
 
 def spin_over_ros(
@@ -123,6 +153,86 @@ def drive_over_ros(
     finally:
         calls.close(SERVICE_TIMEOUT)
         backend.release()
+
+
+def calibrate_bend_over_ros(
+    backend: RosBackend,
+    read_key: teleop.ReadKey,
+    joint: str,
+    out: Output = print,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
+    """Walk the user through the bend calibration on the hardware bridge.
+
+    Uses the service replies only: the joint states carry the hinge as an
+    angle, which is unknown while calibrating. Anything but a save cancels
+    the session, including Ctrl+C. True when saved.
+    """
+    backend.open()
+    try:
+
+        def call(step: str) -> str:
+            return backend.trigger(calibrate_service(joint, step))
+
+        out(CALIBRATION_INTRO.format(joint=joint))
+        out(call(CALIBRATE_START))
+        saved = False
+        try:
+            saved = _calibration_loop(call, read_key, out, clock)
+        finally:
+            if not saved:
+                _report(lambda: out(call(CALIBRATE_CANCEL)), out)
+        return saved
+    finally:
+        backend.release()
+
+
+def _calibration_loop(
+    call: Callable[[str], str],
+    read_key: teleop.ReadKey,
+    out: Output,
+    clock: Callable[[], float],
+) -> bool:
+    records = (CALIBRATE_RECORD_FLAT, CALIBRATE_RECORD_FOLD, CALIBRATE_SAVE)
+    stage = 0
+    out(CALIBRATION_PROMPTS[stage])
+    last_status = None
+    next_status = clock()
+    while True:
+        key = read_key(CALIBRATION_KEY_S)
+        if key is not None:
+            lower = key.lower()
+            if lower == teleop.QUIT_KEY:
+                return False
+            if lower in (JOG_OPEN_KEY, JOG_FOLD_KEY):
+                step = (
+                    CALIBRATE_OPEN if lower == JOG_OPEN_KEY else CALIBRATE_FOLD
+                )
+                _report(lambda step=step: call(step), out)
+            elif key in teleop.RELEASE_STOP_KEYS:
+                record = records[stage]
+                message = _report(lambda record=record: call(record), out)
+                if message is not None:
+                    out(message)
+                    if record == CALIBRATE_SAVE:
+                        return True
+                    stage += 1
+                    out(CALIBRATION_PROMPTS[stage])
+        if clock() >= next_status:
+            next_status = clock() + CALIBRATION_STATUS_S
+            status = _report(lambda: call(CALIBRATE_STATUS), out)
+            if status is not None and status != last_status:
+                out(status)
+                last_status = status
+
+
+def _report(action: Callable[[], str | None], out: Output) -> str | None:
+    """Run one service call; print a failure and go on."""
+    try:
+        return action()
+    except (CommandError, ServoError) as exc:
+        out(f"error: {exc}")
+        return None
 
 
 def _wait_for_listener(backend: RosBackend) -> bool:

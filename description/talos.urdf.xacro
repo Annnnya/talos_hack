@@ -15,6 +15,9 @@
 
   <!-- A relative path is relative to this file. -->
   <xacro:arg name="robot_config" default="../config/robot.yaml"/>
+  <!-- Max fold from config/bend_calibration.yaml (#84), passed by the
+       launch files; empty keeps model.bend_min_deg. -->
+  <xacro:arg name="bend_min_deg" default=""/>
   <xacro:property name="cfg" lazy_eval="false"
                   value="${xacro.load_yaml('$(arg robot_config)')}"/>
   <xacro:property name="model" value="${cfg['model']}"/>
@@ -31,7 +34,9 @@
        whole command that names a joint it does not drive. -->
   <xacro:property name="hinge_enabled"
                   value="${cfg['joints'][hinge].get('enabled', True)}"/>
-  <xacro:property name="bend_min" value="${radians(model['bend_min_deg'])}"/>
+  <xacro:property name="bend_min" value="${radians(
+      float(xacro.arg('bend_min_deg')) if xacro.arg('bend_min_deg')
+      else model['bend_min_deg'])}"/>
   <xacro:property name="bend_max" value="${radians(model['bend_max_deg'])}"/>
   <!-- Rough STS3215 figures: 2.9 N m stall, about 4.6 rad/s. -->
   <xacro:property name="bend_effort" value="2.9"/>

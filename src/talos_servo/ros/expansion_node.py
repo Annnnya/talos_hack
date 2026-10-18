@@ -34,6 +34,7 @@ Run with `pixi run -e ros expansion-node`.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import signal
 import sys
@@ -46,7 +47,7 @@ from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.task import Future
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64, Float64MultiArray, String
+from std_msgs.msg import Bool, Float32, Float64, Float64MultiArray, String
 from std_srvs.srv import SetBool, Trigger
 
 from talos_servo.clamp import Clamp, Outcome
@@ -54,19 +55,32 @@ from talos_servo.config import ConfigError, RobotConfig, load_config
 from talos_servo.defaults import (
     DEFAULT_CONFIG,
     QUEUE_DEPTH,
+    ROBOT_NS,
     STOP_LOCK_TIMEOUT_S,
 )
 from talos_servo.expansion import STILL, Expansion, Wheels
-from talos_servo.modes import HINGE_MODES, Mode
+from talos_servo.hinge_hold import HingeHold
+from talos_servo.modes import (
+    CLIMB_MODES,
+    HINGE_MODES,
+    HOLD_MODES,
+    SWAP_MODES,
+    Mode,
+)
 from talos_servo.ros.names import (
+    CLIMB_TOPIC,
     EXPANSION_RATE_TOPIC,
     HINGE_COMMANDS_TOPIC,
     HINGE_MOTION_SERVICE,
+    HOLD_ENABLE_SERVICE,
+    HOLD_SETPOINT_TOPIC,
+    HOLD_STATE_TOPIC,
     LATCHED,
     MODE_TOPIC,
     NO_WALL_SERVICE,
     STOP_LOCK_TOPIC,
     WALL_CONTACT_SERVICE,
+    WALL_SIDE_TOPIC,
     WHEEL_COMMANDS_TOPIC,
 )
 
@@ -76,6 +90,11 @@ JOINT_STATES_TOPIC = "/joint_states"
 # motion, wall contact, no wall).
 GRANT_RETRY_S = 1.0
 LOG_THROTTLE_S = 2.0
+# Publish the hold state every this many ticks (10 Hz at 50 Hz).
+HOLD_STATE_EVERY = 5
+# Raw servo load counts per percent, and when a load reading is too old.
+LOAD_PER_PCT = 10.0
+LOAD_STALE_S = 1.0
 
 
 class ExpansionNode(Node):
@@ -101,6 +120,12 @@ class ExpansionNode(Node):
         self._now = clock
         self._rate = 0.0
         self._rate_stamp: float | None = None
+        self._climb = 0.0
+        self._climb_stamp: float | None = None
+        self._side = 0.0
+        self._side_stamp: float | None = None
+        self.max_climb = self.settings.max_climb_speed_m_s
+        self.wheel_radius_m = config.base.wheel_radius_m
         self._alpha = math.nan
         # Motor currents (A) by joint name, from the joint state effort.
         self._currents: dict[str, float] = {}
@@ -109,6 +134,7 @@ class ExpansionNode(Node):
         self._clamp_told = False
         self._clamp_pending: Future | None = None
         self._clamp_retry_at = 0.0
+        self._current = math.nan
         self._mode: Mode | None = None
         self._stopped = True
         self._stop_stamp: float | None = None
@@ -118,6 +144,16 @@ class ExpansionNode(Node):
         self._retry_at = 0.0
         self._moving = False
         self._held: str | None = None
+        # Hinge current hold (#142); None without a calibrated hinge.
+        self.hold = (
+            HingeHold(
+                config.hinge_hold, config.hinge, self.settings.max_rate_rad_s
+            )
+            if config.hinge is not None
+            else None
+        )
+        self._hold_note: str | None = None
+        self._ticks = 0
 
         self.hinge_pub = self.create_publisher(
             Float64MultiArray, HINGE_COMMANDS_TOPIC, QUEUE_DEPTH
@@ -127,6 +163,12 @@ class ExpansionNode(Node):
         )
         self.create_subscription(
             Float64, EXPANSION_RATE_TOPIC, self.on_rate, QUEUE_DEPTH
+        )
+        self.create_subscription(
+            Float64, CLIMB_TOPIC, self.on_climb, QUEUE_DEPTH
+        )
+        self.create_subscription(
+            Float64, WALL_SIDE_TOPIC, self.on_side, QUEUE_DEPTH
         )
         self.create_subscription(
             JointState, JOINT_STATES_TOPIC, self.on_joint_state, QUEUE_DEPTH
@@ -142,6 +184,23 @@ class ExpansionNode(Node):
             Outcome.CONTACT: self.create_client(Trigger, WALL_CONTACT_SERVICE),
             Outcome.NO_WALL: self.create_client(Trigger, NO_WALL_SERVICE),
         }
+        self.create_subscription(
+            Float64, HOLD_SETPOINT_TOPIC, self.on_hold_setpoint, LATCHED
+        )
+        self.create_service(SetBool, HOLD_ENABLE_SERVICE, self.on_hold_enable)
+        # Hinge load from the bridge readouts (raw, 0.1 % each), for the
+        # hold's load limit.
+        self._load_pct: float | None = None
+        self._load_at: float | None = None
+        self.create_subscription(
+            Float32,
+            f"{ROBOT_NS}/{self.hinge}/load",
+            self.on_hinge_load,
+            QUEUE_DEPTH,
+        )
+        self.hold_state_pub = self.create_publisher(
+            String, HOLD_STATE_TOPIC, QUEUE_DEPTH
+        )
         self.create_timer(self.period_s, self.tick)
 
     @property
@@ -171,12 +230,151 @@ class ExpansionNode(Node):
             self._clamp = None
             self.expansion.stop()
             self.get_logger().info("clamp cancelled: manual hinge motion")
+        if self._rate and self.hold is not None and self.hold.active:
+            # A manual move and the hold would fight over the hinge goal.
+            self._stop_hold("manual hinge move")
+
+    # --- hinge current hold (#142) ---------------------------------------
+    def on_hold_setpoint(self, msg: Float64) -> None:
+        if self.hold is None:
+            return
+        try:
+            self.hold.set_setpoint(float(msg.data))
+        except ValueError as exc:
+            self.get_logger().warning(f"hold setpoint: {exc}")
+
+    def on_hold_enable(
+        self, request: SetBool.Request, response: SetBool.Response
+    ) -> SetBool.Response:
+        error = None
+        if self.hold is None:
+            error = "no calibrated hinge in the config"
+        elif not request.data:
+            self._stop_hold("turned off")
+        elif self._mode not in HOLD_MODES:
+            error = "press wall nearby first"
+        elif not math.isfinite(self._alpha):
+            error = "the hinge angle is unknown"
+        else:
+            if self._clamp is not None:
+                self._clamp = None
+                self.expansion.stop()
+                self.get_logger().info("clamp cancelled: hinge hold on")
+            self.hold.start(self._alpha)
+            self._hold_note = None
+            self.get_logger().info(
+                f"hinge hold on at {self.hold.setpoint_a:.2f} A"
+            )
+        response.success = error is None
+        response.message = error or ("hold on" if request.data else "hold off")
+        return response
+
+    def on_hinge_load(self, msg: Float32) -> None:
+        self._load_pct = abs(float(msg.data)) / LOAD_PER_PCT
+        self._load_at = self._now()
+
+    def hinge_load_pct(self) -> float | None:
+        """Last hinge load in %, None once it is stale."""
+        if self._load_at is None or self._now() - self._load_at > LOAD_STALE_S:
+            return None
+        return self._load_pct
+
+    def _stop_hold(self, why: str) -> None:
+        if self.hold is not None and self.hold.active:
+            self.hold.stop()
+            self.get_logger().info(f"hinge hold off: {why}")
+        self._hold_note = why
+
+    def hold_tick(self) -> None:
+        """Run the hold loop: through STOP too, since letting go of the walls
+        drops the robot. Only the toggle, a manual move or leaving the wall
+        modes ends it."""
+        hold = self.hold
+        if hold is None:
+            return
+        if hold.active and self._mode not in HOLD_MODES:
+            self._stop_hold(f"mode {self._mode.value if self._mode else '?'}")
+        load = self.hinge_load_pct()
+        step = hold.step(self._alpha, self._current, self.period_s, load)
+        if step.stopped:
+            self._stop_hold(step.stopped)
+            self.get_logger().warning(f"hinge hold: {step.stopped}")
+        if step.goal is not None:
+            self.hinge_pub.publish(Float64MultiArray(data=[step.goal]))
+        self._ticks += 1
+        if self._ticks % HOLD_STATE_EVERY == 0:
+            self.hold_state_pub.publish(
+                String(
+                    data=json.dumps(
+                        {
+                            "active": hold.active,
+                            "setpoint_a": hold.setpoint_a,
+                            "measured_a": round(step.measured_a, 4),
+                            "offset_rad": round(step.offset_rad, 4),
+                            "max_current_a": hold.settings.max_current_a,
+                            "note": self._hold_note,
+                            "load_pct": load,
+                            "load_limited": step.load_limited,
+                        }
+                    )
+                )
+            )
+
+    def on_climb(self, msg: Float64) -> None:
+        speed = float(msg.data)
+        if not math.isfinite(speed):
+            speed = 0.0
+        self._climb = max(-self.max_climb, min(self.max_climb, speed))
+        self._climb_stamp = self._now()
+
+    def requested_climb(self) -> float:
+        """The last climb speed, or 0 once it is older than the timeout."""
+        if self._climb_stamp is None:
+            return 0.0
+        if self._now() - self._climb_stamp > self.settings.command_timeout_s:
+            return 0.0
+        return self._climb
+
+    def on_side(self, msg: Float64) -> None:
+        speed = float(msg.data)
+        if not math.isfinite(speed):
+            speed = 0.0
+        self._side = max(-self.max_climb, min(self.max_climb, speed))
+        self._side_stamp = self._now()
+
+    def requested_side(self) -> float:
+        """The last sideways speed, or 0 once it is older than the timeout."""
+        if self._side_stamp is None:
+            return 0.0
+        if self._now() - self._side_stamp > self.settings.command_timeout_s:
+            return 0.0
+        return self._side
+
+    def climb_wheels(self, speed: float, side: float = 0.0) -> Wheels:
+        """Wheel speeds in rad/s on the wall: up is the front pair one way
+        and the rear pair the other; sideways (+ left) is the ground
+        pattern (`mecanum.wheel_speeds`) with the rear pair flipped too.
+        Scaled down together so no wheel passes the climb speed cap."""
+        # The rear pair faces the other wall, so it turns the other way for
+        # sideways too (found live: the ground pattern twists the robot).
+        surface = (
+            speed - side,
+            speed + side,
+            -speed - side,
+            -speed + side,
+        )
+        largest = max(abs(v) for v in surface)
+        scale = min(1.0, self.max_climb / largest) if largest else 1.0
+        fl, fr, rl, rr = (v * scale / self.wheel_radius_m for v in surface)
+        return (fl, fr, rl, rr)
 
     def on_joint_state(self, msg: JointState) -> None:
         names = list(msg.name)
         try:
             index = names.index(self.hinge)
             self._alpha = float(msg.position[index])
+            if index < len(msg.effort):
+                self._current = float(msg.effort[index])
         except (ValueError, IndexError):
             pass
         for joint in (self.hinge, *self.wheels):
@@ -197,6 +395,7 @@ class ExpansionNode(Node):
             self._granted = False
             self._clamp = None
             if mode is Mode.CLAMPING:
+                self._stop_hold("clamping opens to the walls")
                 self._clamp = Clamp(
                     self.expansion, self.settings, self.hinge, self.wheels
                 )
@@ -208,13 +407,14 @@ class ExpansionNode(Node):
         self._stopped = bool(msg.data)
         self._stop_stamp = self._now()
 
-    def blocked(self) -> str | None:
-        """Why the hinge may not move now, or None."""
+    def blocked(self, modes: frozenset[Mode] = HINGE_MODES) -> str | None:
+        """Why the hinge (or with CLIMB_MODES the climb) may not move now, or
+        None."""
         now = self._now()
         if self._mode is None:
             return "no robot mode yet"
-        if self._mode not in HINGE_MODES:
-            return f"the hinge cannot move while {self._mode.value}"
+        if self._mode not in modes:
+            return f"cannot move while {self._mode.value}"
         if (
             self._stop_stamp is None
             or now - self._stop_stamp > STOP_LOCK_TIMEOUT_S
@@ -234,9 +434,16 @@ class ExpansionNode(Node):
 
     def tick(self) -> None:
         if self._clamp is not None:
+            # The clamp owns the hinge goal; the hold is off meanwhile.
             self.tick_clamp(self._clamp)
             return
+        self.hold_tick()
         rate = self.requested_rate()
+        climb = self.requested_climb()
+        side = self.requested_side()
+        if (climb or side) and not rate:
+            self.climb_tick(climb, side)
+            return
         why = self.blocked() if rate else None
         if rate == 0.0 or why is not None:
             self.halt(why)
@@ -311,6 +518,21 @@ class ExpansionNode(Node):
             throttle_duration_sec=LOG_THROTTLE_S,
         )
 
+    def climb_tick(self, speed: float, side: float = 0.0) -> None:
+        """Turn the front and rear pairs opposite ways; the hinge keeps its
+        goal so a clamped robot keeps pressing on the walls."""
+        why = self.blocked(CLIMB_MODES)
+        if why is not None:
+            self.halt(why)
+            return
+        if self._needs_swap() and not self._granted:
+            self._ask(True)
+            self._still("waiting for the wheel controller")
+            return
+        self._send_wheels(self.climb_wheels(speed, side))
+        self._moving = True
+        self._note(None)
+
     def halt(self, why: str | None = None) -> None:
         """Stop the wheels, keep the hinge goal and give the wheels back."""
         self._still(why)
@@ -325,7 +547,7 @@ class ExpansionNode(Node):
         self._note(why)
 
     def _needs_swap(self) -> bool:
-        return self.needs_grant and self._mode is Mode.FREE
+        return self.needs_grant and self._mode in SWAP_MODES
 
     def _send_wheels(self, wheels: Wheels) -> None:
         self.wheel_pub.publish(Float64MultiArray(data=list(wheels)))

@@ -276,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     try:
-        config = load_config(args.config)
+        config = load_config(args.config, args.calibration)
     except ValueError as exc:  # ConfigError is a ValueError
         print(f"talos-robot-ros: {exc}", file=sys.stderr)
         return 2

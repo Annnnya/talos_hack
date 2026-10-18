@@ -11,7 +11,7 @@ from talos_servo.bus import DEFAULT_BAUDRATE
 from talos_servo.defaults import DEFAULT_CONFIG, PORT_ENV_VAR
 
 # Rate of the per-joint readout topics (temperature, voltage, ...).
-DEFAULT_STATUS_HZ = 2.0
+DEFAULT_STATUS_HZ = 5.0
 
 
 def parse_args(
@@ -21,6 +21,14 @@ def parse_args(
     parser = argparse.ArgumentParser(prog=prog)
     parser.add_argument(
         "--config", default=DEFAULT_CONFIG, help="robot config (%(default)s)"
+    )
+    parser.add_argument(
+        "--calibration",
+        default=None,
+        help=(
+            "bend calibration file (default: $TALOS_BEND_CALIBRATION, else "
+            "bend_calibration.yaml next to --config)"
+        ),
     )
     parser.add_argument(
         "--port",

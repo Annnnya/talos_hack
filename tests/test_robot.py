@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 from conftest import BASE, SMALL, FakeClock, config
-from scservo_sdk import COMM_RX_TIMEOUT, SMS_STS_MODE, SMS_STS_TORQUE_ENABLE
+from scservo_sdk import (
+    COMM_RX_TIMEOUT,
+    SMS_STS_MODE,
+    SMS_STS_MOVING,
+    SMS_STS_TORQUE_ENABLE,
+)
 
 from talos_servo.bus import (
     MAX_POSITION,
@@ -458,3 +463,35 @@ def test_open_starts_without_a_fault(sdk, robot):
     robot.close()
     robot.open()
     assert robot.fault is None
+
+
+def test_wider_limits_let_a_position_joint_past_its_config(robot, sdk):
+    robot.set_position_limits("bend", 0, MAX_POSITION)
+    robot.move("bend", 100, 50)
+    assert robot.joints["bend"].target == 100
+    robot.reset_position_limits("bend")
+    robot.move("bend", 100, 50)
+    assert robot.joints["bend"].target == 1000
+
+
+@pytest.mark.parametrize(("low", "high"), [(-1, 10), (10, 5), (0, 4096)])
+def test_bad_limits_are_refused(robot, low, high):
+    with pytest.raises(CommandError):
+        robot.set_position_limits("bend", low, high)
+
+
+def test_speed_joints_have_no_limits(robot):
+    with pytest.raises(CommandError, match="speed joint"):
+        robot.set_position_limits("wheel", 0, 10)
+
+
+def test_read_position_reads_now(robot, sdk):
+    sdk.handler.position = 1234
+    sdk.handler.registers[SMS_STS_MOVING] = 1
+    assert robot.read_position("bend") == (1234, True)
+
+
+def test_read_position_fails_loudly(robot, sdk):
+    sdk.handler.fail[("read_block", 1)] = (COMM_RX_TIMEOUT, 0)
+    with pytest.raises(ServoError):
+        robot.read_position("bend")
