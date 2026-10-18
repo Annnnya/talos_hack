@@ -12,6 +12,7 @@ from conftest import BASE, SMALL, config, wait_for
 from fastapi.testclient import TestClient
 
 from talos_servo import cli
+from talos_servo.modes import RobotStatus
 from talos_servo.robot import CommandError, Robot
 from talos_servo.web import server
 from talos_servo.web.server import create_app
@@ -59,6 +60,12 @@ def test_initial_state_lists_enabled_joints(client):
     assert msg["ros"] is False
     # No twist_mux on the direct bus, so no STOP lock to report.
     assert msg["stopped"] is None
+    # No mode node or twist_mux either.
+    assert (msg["mode"], msg["mode_reason"], msg["active_input"]) == (
+        None,
+        None,
+        None,
+    )
     assert all(s["last_command"] is None for s in msg["servos"])
 
 
@@ -210,11 +217,15 @@ def test_last_client_leaving_stops_only_what_the_web_commanded(
 class DriveRecorder:
     """Just enough backend for `_dispatch` to call `drive` on."""
 
-    def __init__(self) -> None:
+    def __init__(self, mode: str | None = None) -> None:
         self.calls: list[tuple[tuple[float, ...], dict]] = []
+        self.mode = mode
 
     def drive(self, *velocity: float, **who: object) -> None:
         self.calls.append((velocity, who))
+
+    def robot_status(self) -> RobotStatus:
+        return RobotStatus(self.mode, None, None)
 
 
 def drive(**velocity: object) -> dict:
@@ -248,6 +259,26 @@ def test_bad_drive_is_rejected(msg, error):
     assert backend.calls == []
 
 
+def test_rotating_while_climbing_is_rejected():
+    backend = DriveRecorder(mode="climbing")
+    with pytest.raises(CommandError, match="climbing"):
+        server._dispatch(backend, drive(wz=0.3), ros=True)
+    assert backend.calls == []
+
+
+@pytest.mark.parametrize("mode", ["climbing", "free", None])
+def test_straight_drive_is_allowed_in_every_mode(mode):
+    backend = DriveRecorder(mode=mode)
+    server._dispatch(backend, drive(vx=0.1, vy=0.1), ros=True)()
+    assert [velocity for velocity, _ in backend.calls] == [(0.1, 0.1, 0.0)]
+
+
+def test_rotating_in_free_is_allowed():
+    backend = DriveRecorder(mode="free")
+    server._dispatch(backend, drive(wz=0.3), ros=True)()
+    assert [velocity for velocity, _ in backend.calls] == [(0.0, 0.0, 0.3)]
+
+
 def test_drive_without_ros_is_an_error(client, robot):
     # The base is shared through twist_mux, so there is no direct drive path.
     with client.websocket_connect("/ws") as ws:
@@ -273,6 +304,53 @@ def test_release_stop_reaches_the_backend():
 
     server._dispatch(Recorder(), {"type": "release_stop"}, "abc", ros=True)()
     assert calls == [{"source": "web", "client": "abc"}]
+
+
+class ModeRecorder:
+    """Just enough backend for the mode commands."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def wall_nearby(self) -> None:
+        self.calls.append("wall_nearby")
+
+    def release_walls(self) -> None:
+        self.calls.append("release_walls")
+
+
+@pytest.mark.parametrize(
+    ("kind", "method"),
+    [("wall_nearby", "wall_nearby"), ("release", "release_walls")],
+)
+def test_mode_commands_reach_the_backend(kind, method):
+    backend = ModeRecorder()
+    command = server._dispatch(backend, {"type": kind}, "abc", ros=True)
+    assert backend.calls == []
+    command()
+    assert backend.calls == [method]
+
+
+@pytest.mark.parametrize("kind", ["wall_nearby", "release"])
+def test_mode_commands_without_ros_are_an_error(client, kind):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": kind})
+        error = receive_until(ws, lambda m: m["type"] == "error")
+    assert "--ros" in error["message"]
+
+
+def test_state_reports_the_robot_status(robot, monkeypatch):
+    status = RobotStatus("climbing", "wall contact", "keyboard")
+    monkeypatch.setattr(robot, "robot_status", lambda: status)
+    with (
+        TestClient(create_app(robot)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ws.receive_json()
+        msg = ws.receive_json()
+    assert msg["mode"] == "climbing"
+    assert msg["mode_reason"] == "wall contact"
+    assert msg["active_input"] == "keyboard"
 
 
 def test_a_held_bad_drive_reports_its_error_once(client):

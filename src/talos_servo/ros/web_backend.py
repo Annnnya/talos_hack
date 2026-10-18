@@ -26,7 +26,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
@@ -45,6 +45,7 @@ from talos_servo.defaults import (
     ROBOT_NS,
     STOP_LOCK_TIMEOUT_S,
 )
+from talos_servo.modes import RobotStatus
 from talos_servo.robot import (
     SOURCE_WEB,
     CommandError,
@@ -84,14 +85,6 @@ MODE_HINT = "start it with `pixi run -e ros mode-node`"
 # other senders are always applied.
 COMMAND_SETTLE_TIME = 1.0
 EXECUTOR_JOIN_TIMEOUT = 2.0
-
-
-class RobotStatus(NamedTuple):
-    """Shared robot state from the mode node and mux_status."""
-
-    mode: str | None
-    mode_reason: str | None
-    active_input: str | None
 
 
 class RosBackend:
