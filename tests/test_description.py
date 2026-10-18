@@ -1,0 +1,97 @@
+"""The URDF model agrees with config/robot.yaml and the wheelbase helper."""
+
+from __future__ import annotations
+
+import math
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import pytest
+
+from talos_servo.config import POSITION, SPEED, load_config
+from talos_servo.model import wheelbase_m
+
+xacro = pytest.importorskip("xacro")
+
+ROOT = Path(__file__).resolve().parent.parent
+XACRO = ROOT / "description" / "talos.urdf.xacro"
+CONFIG = load_config(ROOT / "config" / "robot.yaml")
+COMMAND_INTERFACE = {SPEED: "velocity", POSITION: "position"}
+HINGE = "bend"
+LEGS = ("front_leg_joint", "rear_leg_joint")
+
+
+@pytest.fixture(scope="module")
+def robot() -> ET.Element:
+    return ET.fromstring(xacro.process_file(str(XACRO)).toxml())
+
+
+def joints(robot: ET.Element) -> dict[str, ET.Element]:
+    return {j.get("name"): j for j in robot.findall("joint")}
+
+
+def test_every_configured_joint_is_in_the_model(robot):
+    names = joints(robot)
+    for joint in CONFIG.joints:
+        assert joint.name in names
+
+
+def test_bend_limits_match_the_config(robot):
+    limit = joints(robot)[HINGE].find("limit")
+    assert float(limit.get("lower")) == pytest.approx(CONFIG.model.bend_min_rad)
+    assert float(limit.get("upper")) == pytest.approx(CONFIG.model.bend_max_rad)
+
+
+def test_legs_mimic_the_hinge(robot):
+    for leg in LEGS:
+        assert joints(robot)[leg].find("mimic").get("joint") == HINGE
+
+
+def test_command_interfaces_match_the_joint_control(robot):
+    hardware = robot.find("ros2_control")
+    controls = {j.name: j.control for j in CONFIG.joints}
+    for joint in hardware.findall("joint"):
+        commands = [c.get("name") for c in joint.findall("command_interface")]
+        assert commands == [COMMAND_INTERFACE[controls[joint.get("name")]]]
+
+
+def _leg_angle(joint: ET.Element, alpha: float) -> float:
+    mimic = joint.find("mimic")
+    return float(mimic.get("multiplier")) * alpha + float(mimic.get("offset"))
+
+
+def _wheel_xz(robot: ET.Element, wheel: str, alpha: float) -> tuple:
+    """Wheel axle in base_link. Every hinge and leg axis is +y."""
+    all_joints = joints(robot)
+    wheel_joint = all_joints[wheel]
+    leg = wheel_joint.find("parent").get("link")
+    leg_joint = next(
+        j for j in all_joints.values() if j.find("child").get("link") == leg
+    )
+    x = float(wheel_joint.find("origin").get("xyz").split()[0])
+    theta = _leg_angle(leg_joint, alpha)
+    return x * math.cos(theta), -x * math.sin(theta)
+
+
+@pytest.mark.parametrize("alpha_deg", [180, 135, 90])
+def test_model_wheelbase_matches_the_helper(robot, alpha_deg):
+    alpha = math.radians(alpha_deg)
+    fl, _, rl, _ = CONFIG.base.wheels
+    front_x, front_z = _wheel_xz(robot, fl, alpha)
+    rear_x, rear_z = _wheel_xz(robot, rl, alpha)
+    assert front_x - rear_x == pytest.approx(
+        wheelbase_m(alpha, CONFIG.model.leg_length_m)
+    )
+    # Both axles at the same height: the platform stays level.
+    assert front_z == pytest.approx(rear_z)
+    # Folding lifts the hinge: the axles sit below it.
+    assert front_z <= 0
+
+
+def test_transmission_follows_the_gear_ratio(robot):
+    reduction = robot.find(
+        "ros2_control/transmission/joint/mechanical_reduction"
+    )
+    assert float(reduction.text) == pytest.approx(
+        1 / (2 * CONFIG.model.leg_gear_ratio)
+    )
