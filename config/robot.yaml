@@ -71,11 +71,9 @@ model:
   # Max fold. The bend min_pos/max_pos clamp is narrowed to this range on
   # load. Measured from the web hinge panel: fully closed reads raw 1813
   # (35.1 deg), fully open raw 164 (flat); the limits sit about 1 deg inside
-  # both hard stops. These live-measured values (with bend_flat_steps and
-  # inverted) are the canonical calibration. Only a deliberate
-  # `talos-servo calibrate-bend` run, which writes
-  # config/bend_calibration.yaml (#84, gitignored), replaces them; delete
-  # that file to go back to these.
+  # both hard stops. The canonical calibration is the committed
+  # config/bend_calibration.yaml (#84), which overrides bend_min_deg and
+  # bend_flat_steps; these hold the same values as a fallback.
   bend_min_deg: 36
   bend_max_deg: 179
   # Raw bend servo position (0-4095, as `talos-servo monitor` shows it) when

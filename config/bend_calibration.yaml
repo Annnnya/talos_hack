@@ -1,0 +1,16 @@
+# Bend hinge calibration of the Talos robot, measured live on 2026-10-18
+# from the web hinge panel (raw servo steps, as `talos-servo monitor` shows
+# them). This is the canonical calibration; `talos-servo calibrate-bend`
+# rewrites it, so a new measurement shows up as a diff.
+#
+# flat_steps: fully open (flat, 180 deg) reads raw 164.
+# fold_steps: fully closed hits the hard stop at raw 1813 (35.1 deg); this
+#   records a point about 1 deg inside it (36.0 deg), so the hinge never
+#   stalls the servo into its overload cut at the stop.
+# Bend hinge calibration, written by `talos-servo calibrate-bend`
+# (#84). Raw servo positions (0-4095, as `talos-servo monitor`
+# shows them). Overrides model.bend_flat_steps and bend_min_deg in
+# robot.yaml; delete this file to fall back to them.
+# Max fold is 36.0 deg.
+flat_steps: 164
+fold_steps: 1802
