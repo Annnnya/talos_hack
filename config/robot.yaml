@@ -81,6 +81,11 @@ model:
   # Required while bend is enabled. The range down to max fold must fit in
   # one servo turn from here. Fully open (flat) reads 164.
   bend_flat_steps: 164
+  # false removes every software end stop of the hinge: goals, R/F, the
+  # clamp and the hold may use the whole servo turn, and only the hard stops
+  # of the mechanism limit it. Careful: driving into a hard stop stalls the
+  # servo into its overload cut. true keeps bend_min_deg..bend_max_deg.
+  hinge_limits: false
 
 # Where the MPU6050 sits on the central platform (#91), from base_link: xyz
 # in m, rpy in rad. The URDF imu_joint and the platform tilt on the web page
