@@ -1,10 +1,66 @@
-# talos_hack
+# Talos
 
-Software for the Talos robot from the physical AI hackathon: a mecanum base
-driven by Feetech STS/SMS serial bus servos on one bus, plus an MPU6050 IMU.
+**A mecanum robot that folds its body to climb between walls, built at a
+physical AI hackathon.**
 
-Contributing (humans and AI agents): read [AGENTS.md](AGENTS.md). Everything
-goes through PRs.
+![Talos: two mecanum legs joined by a geared hinge, with a Raspberry Pi 5 and a camera on top](docs/media/talos-render.jpg)
+
+Talos is an inverted V: two legs on mecanum wheels, joined at the top by a
+geared hinge that carries a Raspberry Pi 5 and a camera. On the floor it
+drives in any direction. Near a wall it aligns, opens the hinge until its
+wheels press against the walls, and climbs. Everything runs on the Pi and is
+driven from a phone.
+
+## What it does
+
+- **Drives in any direction**: four mecanum wheels, sideways and on the spot,
+  with odometry from the wheel kinematics
+- **Climbs between walls**: a mode node walks the robot from Free through
+  Aligning and Clamping to Climbing, and back on release
+- **Folds its body**: the geared `bend` hinge sets the wheelbase and keeps the
+  platform level while the legs open and close
+- **Runs from a phone**: a web joystick with the live camera, plus a
+  per-motor page for bench tests
+- **Knows its attitude**: an MPU6050 IMU fused by an EKF, with the platform
+  tilt shown on the page
+- **Built on ROS 2 Jazzy**: ros2_control with a mecanum controller, twist_mux
+  and a URDF model, over a plain Python core that is tested without hardware
+
+## Hardware
+
+| Part | Role |
+| --- | --- |
+| Raspberry Pi 5 | runs ROS 2, the robot node and the web UI |
+| Feetech STS/SMS serial bus servos, one bus | four wheels (ids 6, 5, 4, 3) and the hinge (id 1) |
+| MPU6050 | IMU for attitude, fused by an EKF |
+| Raspberry Pi Camera Module 3 | live view on the web page |
+| Printed frame | SolidWorks parts, STL files and renders in [CAD](CAD/) |
+
+## Team
+
+Built at a physical AI hackathon in October 2026 by
+[Leonardo Achá Boiano](https://github.com/leonardoAB1),
+[Annnnya](https://github.com/Annnnya) and
+[Aarrav](https://github.com/Aarrav).
+
+<!-- Roles: add who did what, e.g. software, mechanics, electronics. -->
+
+## Contributing
+
+Humans and AI agents: read [AGENTS.md](AGENTS.md). Everything goes through
+PRs.
+
+## Contents
+
+The rest of this page is the technical guide:
+[start the robot](#start-the-robot), [architecture](#architecture),
+[quick start](#quick-start), [run the robot](#run-the-robot),
+[commands](#commands), [config](#config-configrobotyaml),
+[ROS topics](#ros-topics), [web UI](#web-ui),
+[IMU and pose estimate](#imu-and-pose-estimate), [camera](#camera),
+[deploy on the Pi](#deploy-on-the-pi) and [development](#development).
+More in [docs](docs/): [ros2_control](docs/ros2_control.md) and
+[hinge kinematics](docs/hinge_kinematics.md).
 
 ## Start the robot
 
