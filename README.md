@@ -42,10 +42,13 @@ driven from a phone.
 
 ## Team
 
-Built at a physical AI hackathon in October 2026 by
+Built at the ERH Physical AI Hackathon in October 2026 by
 [Leonardo Achá Boiano](https://github.com/leonardoAB1),
-[Annnnya](https://github.com/Annnnya) and
-[Aarrav](https://github.com/Aarrav).
+[Anna Polova](https://github.com/Annnnya),
+[Aarrav Anil](https://github.com/Aarrav) and
+[Heorhii Zolotarevskyi](https://ch.linkedin.com/in/heorhii-zolotarevskyi-806900441).
+
+The team won the hackathon ([announcement](https://www.linkedin.com/feed/update/urn:li:activity:7521900692014288898/)).
 
 <!-- Roles: add who did what, e.g. software, mechanics, electronics. -->
 
