@@ -3,7 +3,9 @@
 **A mecanum robot that folds its body to climb between walls, built at a
 physical AI hackathon.**
 
-![Talos at the hackathon, hinge open and wheels pressed against two walls, climbing between them](docs/media/talos-climbing.jpg)
+[![Talos at the hackathon, hinge open and wheels pressed against two walls, climbing between them](docs/media/talos-climbing.jpg)](https://www.linkedin.com/feed/update/urn:li:activity:7521900692014288898/)
+
+*Talos climbing between two walls at the hackathon. Photo from [this LinkedIn post](https://www.linkedin.com/feed/update/urn:li:activity:7521900692014288898/).*
 
 Talos is an inverted V: two legs on mecanum wheels, joined at the top by a
 geared hinge that carries a Raspberry Pi 5 and a camera. On the floor it
